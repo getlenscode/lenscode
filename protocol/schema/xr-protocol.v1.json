@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aura XR Protocol",
+  "protocolVersion": 1,
+  "schemas": {
+    "request": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "hello"
+            },
+            "protocolVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "deviceId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "deviceCertFingerprint": {
+              "type": "string"
+            },
+            "clientInfo": {
+              "type": "object",
+              "properties": {
+                "app": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "platform": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "app",
+                "version",
+                "platform"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "protocolVersion",
+            "deviceId",
+            "clientInfo"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "pair.begin"
+            },
+            "deviceId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "deviceName": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "deviceId",
+            "deviceName"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "pair.complete"
+            },
+            "deviceId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pairingCode": {
+              "type": "string",
+              "minLength": 6,
+              "maxLength": 10
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "deviceId",
+            "pairingCode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "snapshot.request"
+            }
+          },
+          "required": [
+            "id",
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "events.subscribe"
+            },
+            "topics": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "herdr",
+                  "git",
+                  "files",
+                  "machines"
+                ]
+              }
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "topics"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "file.open"
+            },
+            "machineId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "machineId",
+            "workspaceId",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "dir.list"
+            },
+            "machineId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "machineId",
+            "workspaceId",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "search.files"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limit": {
+              "default": 20,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "context": {
+              "type": "object",
+              "properties": {
+                "gazeTarget": {
+                  "type": "string"
+                },
+                "activePanel": {
+                  "type": "string"
+                },
+                "recentFiles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "workspaceId",
+            "query",
+            "limit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "git.branch.switch"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "onDirty": {
+              "type": "string",
+              "enum": [
+                "stash",
+                "worktree",
+                "abort"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "workspaceId",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "git.status"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "workspaceId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "herdr.request"
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "method",
+                "params"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "request"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "serverMessage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "result": {},
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "unauthorized",
+                    "pairing_required",
+                    "invalid_request",
+                    "not_found",
+                    "herdr_unavailable",
+                    "herdr_error",
+                    "conflict",
+                    "dangerous_op_unconfirmed",
+                    "internal"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "topic": {
+              "type": "string",
+              "enum": [
+                "herdr",
+                "git",
+                "files",
+                "machines",
+                "connection"
+              ]
+            },
+            "event": {
+              "type": "string",
+              "minLength": 1
+            },
+            "data": {},
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "topic",
+            "event",
+            "data",
+            "seq"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

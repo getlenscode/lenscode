@@ -1,0 +1,22 @@
+{
+  "name": "@aura/protocol",
+  "version": "0.1.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "build": "tsc -p .",
+    "schema": "node --experimental-strip-types scripts/emit-schema.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
