@@ -57,6 +57,8 @@
 }
 
 .status-line {
+    /* No base color here: inline <color> tags in the status text must win,
+       and USS color would otherwise override rich-text color spans entirely. */
     font-size: 14px;
     -unity-text-align: middle-center;
     white-space: normal;

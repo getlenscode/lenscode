@@ -15,12 +15,24 @@ namespace Aura.UI
         [SerializeField] private AuraClient client;
         [SerializeField] private UIDocument uiDocument;
 
-        private Label _statusText;
+        // UI Toolkit's rich-text <color> tags do not actually recolor spans in
+        // this runtime — Label.resolvedStyle.color wins regardless of markup —
+        // so headline/detail are separate Labels colored directly instead.
+        private static readonly Color TextColor = new Color(0.933f, 0.969f, 1f);
+        private static readonly Color MutedColor = new Color(0.6f, 0.671f, 0.753f);
+        private static readonly Color GoodColor = new Color(0.349f, 0.898f, 0.549f);
+        private static readonly Color WarnColor = new Color(1f, 0.820f, 0.4f);
+        private static readonly Color BadColor = new Color(1f, 0.498f, 0.584f);
+
+        private Label _headline;
+        private Label _detail;
 
         private void Awake()
         {
             if (uiDocument == null) uiDocument = GetComponentInChildren<UIDocument>();
-            _statusText = uiDocument.rootVisualElement.Q<Label>("StatusText");
+            var root = uiDocument.rootVisualElement;
+            _headline = root.Q<Label>("StatusHeadline");
+            _detail = root.Q<Label>("StatusDetail");
         }
 
         private void OnEnable()
@@ -39,9 +51,11 @@ namespace Aura.UI
 
         private void OnConnectionState(bool connected)
         {
-            if (!connected)
-                _statusText.text = "<color=#ffd166>Connection lost.</color>\n" +
-                                  "Agents and terminals may still be running.\nReconnecting…";
+            if (connected) return;
+            _headline.text = "Connection lost.";
+            _headline.style.color = WarnColor;
+            _detail.text = "Agents and terminals may still be running.\nReconnecting…";
+            _detail.style.color = MutedColor;
         }
 
         private void OnSnapshot(JObject snapshot) => Render();
@@ -63,12 +77,15 @@ namespace Aura.UI
             var panes = (herdr?["panes"] as JArray)?.Count ?? 0;
             var agents = (herdr?["agents"] as JArray)?.Count ?? 0;
 
-            _statusText.text =
-                $"<b>AURA WORKSPACE</b>\n" +
-                $"bridge <color=#59e58c>● connected</color>   " +
-                $"herdr {(client.HerdrConnected ? "<color=#59e58c>● connected</color>" : "<color=#ff7f95>○ offline</color>")}\n" +
+            _headline.text = "AURA WORKSPACE";
+            _headline.style.color = TextColor;
+            _headline.style.unityFontStyleAndWeight = FontStyle.Bold;
+
+            _detail.text =
+                $"bridge ● connected   herdr {(client.HerdrConnected ? "● connected" : "○ offline")}\n" +
                 $"workspaces {workspaces} · panes {panes} · agents {agents}\n" +
-                $"<size=70%>last event: {_lastEvent}</size>";
+                $"last event: {_lastEvent}";
+            _detail.style.color = client.HerdrConnected ? GoodColor : BadColor;
         }
     }
 }
