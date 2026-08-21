@@ -6,6 +6,8 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.xr.compose.platform.requestFullSpace
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -57,6 +59,12 @@ class MainActivity : ComponentActivity() {
         bridge.connect()
 
         setContent { AuraWorkspace(bridge) }
+
+        // The manifest's FULL_SPACE_MANAGED start mode only sets the default
+        // launch mode — actually entering full space (so SpatialPanel content
+        // attaches to a real scene node instead of the system Home
+        // environment staying HOME_VISIBLE) requires this explicit call.
+        lifecycleScope.launch { requestFullSpace() }
     }
 
     override fun onDestroy() {
