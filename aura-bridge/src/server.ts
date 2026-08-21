@@ -12,6 +12,7 @@ import {
 import type { BridgeConfig } from "./config.ts";
 import { HerdrClient } from "./herdr.ts";
 import { PairingRegistry } from "./pairing.ts";
+import { WorkspaceFiles } from "./files.ts";
 import { isHerdrMethodAllowed } from "./allowlist.ts";
 import { log } from "./log.ts";
 
@@ -34,6 +35,8 @@ export class BridgeServer {
   private cfg: BridgeConfig;
   private httpServer: ReturnType<typeof createHttpServer>;
   private pairing: PairingRegistry;
+  /** workspaceId → file service rooted at that workspace's directory. */
+  private workspaces = new Map<string, WorkspaceFiles>();
   /** Sockets that have passed hello with a valid device token (or dev mode). */
   private authed = new WeakSet<WebSocket>();
 
@@ -216,17 +219,77 @@ export class BridgeServer {
         this.send(ws, { id: req.id, result: { response } });
         return;
       }
+      case "dir.list": {
+        const files = await this.filesFor(req.workspaceId);
+        try {
+          this.send(ws, { id: req.id, result: { entries: await files.listDir(req.path) } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("not_found", "That folder could not be read.", false, String(e)),
+          });
+        }
+        return;
+      }
+      case "file.open": {
+        const files = await this.filesFor(req.workspaceId);
+        try {
+          this.send(ws, { id: req.id, result: await files.openFile(req.path) });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("not_found", "That file could not be opened.", false, String(e)),
+          });
+        }
+        return;
+      }
+      case "search.files": {
+        const files = await this.filesFor(req.workspaceId);
+        const started = Date.now();
+        const hits = await files.search(req.query, req.limit);
+        this.send(ws, {
+          id: req.id,
+          result: { hits, tookMs: Date.now() - started },
+        });
+        return;
+      }
       default: {
         this.send(ws, {
           id: req.id,
           error: err(
             "invalid_request",
-            `Not implemented yet: ${req.type}.`,
+            `Not implemented yet: ${(req as { type: string }).type}.`,
             false,
           ),
         });
       }
     }
+  }
+
+  /**
+   * Resolves a workspaceId to a file service. Herdr workspace ids map to that
+   * workspace's first pane cwd; "local" (or unknown ids in dev) map to the
+   * bridge's project root.
+   */
+  private async filesFor(workspaceId: string): Promise<WorkspaceFiles> {
+    const cached = this.workspaces.get(workspaceId);
+    if (cached) return cached;
+
+    let root = process.env.AURA_PROJECT_ROOT ?? process.cwd();
+    if (workspaceId !== "local" && this.herdr.connected) {
+      try {
+        const panes = (await this.herdr.request("pane.list", {})) as {
+          panes?: Array<{ workspace_id: string; cwd?: string }>;
+        };
+        const pane = panes.panes?.find((p) => p.workspace_id === workspaceId && p.cwd);
+        if (pane?.cwd) root = pane.cwd;
+      } catch {
+        /* fall back to project root */
+      }
+    }
+    const files = new WorkspaceFiles(root);
+    this.workspaces.set(workspaceId, files);
+    return files;
   }
 
   private async ensureHerdr(): Promise<void> {
