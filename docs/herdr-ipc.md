@@ -7,6 +7,14 @@ Regenerate after Herdr updates; the schema carries `protocol` (currently **20**)
 ## Transport
 
 - Unix domain socket: `~/.config/herdr/herdr.sock` (path reported by `herdr status`).
+- **Connection model (verified against herdr 0.8.2):**
+  - Regular requests: **one connection per request** — Herdr sends the response and
+    closes the connection. Pipelining a second request on the same connection is ignored.
+  - `events.subscribe`: responds `{"result":{"type":"subscription_started"}}` and then
+    **holds the connection open**, streaming `{event, data}` frames until closed.
+  - `events.subscribe` params: `{"subscriptions":[{"type":"pane.created"}, …]}`.
+    Three types require a `pane_id` (per-pane subscriptions): `pane.output_matched`
+    (also `source`, `match`), `pane.agent_status_changed`, `pane.scroll_changed`.
 - JSON message envelopes:
   - Request: `{ "id": "<string>", "method": "<name>", "params": { … } }`
   - Success: `{ "id": "<string>", "result": { … } }`
