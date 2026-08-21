@@ -1,5 +1,6 @@
 package dev.aura.xr
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -34,6 +35,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // The Activity's own 2D window is separate from Subspace content and
+        // is opaque black by default — without this it renders as a solid
+        // black panel with the launcher icon behind the spatial panels.
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(AndroidColor.TRANSPARENT))
 
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
             ?: "android-xr-dev"

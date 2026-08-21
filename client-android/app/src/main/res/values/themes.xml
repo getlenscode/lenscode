@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Transparent window background so the Activity's own 2D panel doesn't
+      render as an opaque black rectangle behind Subspace's spatial content
+      (Compose for XR keeps the 2D window and the spatial hierarchy separate).
+    -->
+    <style name="Theme.AuraXr" parent="android:Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+    </style>
+</resources>
