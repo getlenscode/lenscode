@@ -28,6 +28,28 @@ using XR protocol v1 (`../protocol`).
 `Assets/Scripts/Protocol/Generated/` is produced by `../protocol/scripts/gen-csharp.sh`.
 Do not edit by hand; regenerate after protocol changes.
 
+## M3 — spatial shell & interaction (scripts ready, scene wiring is manual)
+
+`Assets/Scripts/Interaction/PinchGesture.cs` and `Assets/Scripts/Panels/`,
+`Assets/Scripts/UI/` implement the interaction hierarchy from spec §9
+(gaze → hover, pinch → select, pinch+hold → context menu, drag → move) on top
+of the real XR Interaction Toolkit `XRBaseInteractable` events — verified
+against the installed package source, not guessed. These need Editor-GUI scene
+wiring that can't be scripted headlessly:
+
+1. Add an `XRSimpleInteractable` + `PinchGesture` to each panel's grab handle,
+   and an `AuraPanel` on the panel root (assign a unique `panelId`).
+2. Add one `WorkspaceLayoutController` to the scene, referencing all `AuraPanel`s
+   (or leave the array empty — it falls back to `FindObjectsByType`).
+3. Build the agent strip: one `AgentStatusItem` (+ `XRSimpleInteractable` +
+   `PinchGesture`) per slot, referenced by an `AgentStripController`.
+4. Build the quick dock: one `DockButton` per view (`code`, `terminal`, `diff`,
+   `git`, `agents`, `remote` — matching the mockup), referenced by a
+   `DockController`.
+5. XR rig: use the XR Interaction Toolkit's Android XR / hand-tracking sample
+   rig so interactors come from real hand pinch (via `XR_EXT_hand_interaction`)
+   in both the XR Device Simulator (editor) and on-device.
+
 ## Android XR emulator
 
 Install via Android Studio (SDK Manager → Android XR system image + emulator).
