@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dev-only: allow cleartext WS to the host loopback the Android emulator maps
+  to the developer machine (10.0.2.2). android:usesCleartextTraffic in the
+  manifest is not sufficient on newer API levels/some OkHttp paths without an
+  explicit network security config permitting cleartext for the target host.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
