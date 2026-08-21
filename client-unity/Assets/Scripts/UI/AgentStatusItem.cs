@@ -1,24 +1,38 @@
 using Aura.Interaction;
-using TMPro;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Aura.UI
 {
     /// <summary>
     /// One entry in the persistent agent strip (spec §10): "Claude ● Working".
-    /// Selectable via pinch to reveal the detail card.
+    /// Selectable via pinch to reveal the detail card. Renders through a UI
+    /// Toolkit World Space UIDocument (AgentChip.uxml).
     /// </summary>
     [RequireComponent(typeof(PinchGesture))]
     public sealed class AgentStatusItem : MonoBehaviour
     {
-        [SerializeField] private TMP_Text label;
+        [SerializeField] private UIDocument uiDocument;
+
+        private Label _nameLabel;
+        private Label _stateLabel;
+        private VisualElement _stateDot;
 
         public string AgentId { get; private set; }
         public event System.Action<string> Selected;
 
         private PinchGesture _gesture;
 
-        private void Awake() => _gesture = GetComponent<PinchGesture>();
+        private void Awake()
+        {
+            _gesture = GetComponent<PinchGesture>();
+            if (uiDocument == null) uiDocument = GetComponentInChildren<UIDocument>();
+            var root = uiDocument.rootVisualElement;
+            _nameLabel = root.Q<Label>("AgentName");
+            _stateLabel = root.Q<Label>("AgentState");
+            _stateDot = root.Q<VisualElement>("StateDot");
+        }
+
         private void OnEnable() => _gesture.OnSelect += HandleSelect;
         private void OnDisable() => _gesture.OnSelect -= HandleSelect;
 
@@ -27,10 +41,12 @@ namespace Aura.UI
         public void SetAgent(AgentSummary agent)
         {
             AgentId = agent.AgentId;
-            var glyph = AgentStateGlyphs.Glyph(agent.State);
-            var color = AgentStateGlyphs.ColorHex(agent.State);
-            var stateLabel = agent.State.ToString();
-            label.text = $"<b>{agent.Provider}</b>\n<color={color}>{glyph}</color> {stateLabel}";
+            _nameLabel.text = agent.Provider;
+            _stateLabel.text = $"{AgentStateGlyphs.Glyph(agent.State)} {agent.State}";
+
+            foreach (AgentState s in System.Enum.GetValues(typeof(AgentState)))
+                _stateDot.RemoveFromClassList($"dot--{s.ToString().ToLowerInvariant()}");
+            _stateDot.AddToClassList($"dot--{agent.State.ToString().ToLowerInvariant()}");
         }
     }
 }

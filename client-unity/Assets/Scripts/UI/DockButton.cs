@@ -1,23 +1,33 @@
 using Aura.Interaction;
-using TMPro;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Aura.UI
 {
-    /// <summary>One quick-dock button (spec §71: Code/Terminal/Diff/Git/Agents/Remote).</summary>
+    /// <summary>
+    /// One quick-dock button (spec §71: Code/Terminal/Diff/Git/Agents/Remote).
+    /// Renders through a UI Toolkit World Space UIDocument (DockButton.uxml).
+    /// </summary>
     [RequireComponent(typeof(PinchGesture))]
     public sealed class DockButton : MonoBehaviour
     {
         [SerializeField] private string viewId;
-        [SerializeField] private TMP_Text label;
-        [SerializeField] private GameObject activeHighlight;
+        [SerializeField] private UIDocument uiDocument;
+
+        private Label _label;
 
         public string ViewId => viewId;
         public event System.Action<string> Selected;
 
         private PinchGesture _gesture;
 
-        private void Awake() => _gesture = GetComponent<PinchGesture>();
+        private void Awake()
+        {
+            _gesture = GetComponent<PinchGesture>();
+            if (uiDocument == null) uiDocument = GetComponentInChildren<UIDocument>();
+            _label = uiDocument.rootVisualElement.Q<Label>("DockLabel");
+        }
+
         private void OnEnable() => _gesture.OnSelect += HandleSelect;
         private void OnDisable() => _gesture.OnSelect -= HandleSelect;
 
@@ -25,12 +35,7 @@ namespace Aura.UI
 
         public void SetHighlighted(bool active)
         {
-            if (activeHighlight != null) activeHighlight.SetActive(active);
-        }
-
-        private void Reset()
-        {
-            if (label == null) label = GetComponentInChildren<TMP_Text>();
+            _label.EnableInClassList("dock-label--active", active);
         }
     }
 }

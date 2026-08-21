@@ -1,19 +1,27 @@
 using Aura.Net;
 using Newtonsoft.Json.Linq;
-using TMPro;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Aura.UI
 {
     /// <summary>
-    /// M1 placeholder world-space panel: shows bridge/Herdr connection state and a
-    /// live count of workspaces, panes, and agents from the authoritative snapshot.
-    /// Replaced by the real panel system in M3.
+    /// World-space glass panel showing bridge/Herdr connection state and a live
+    /// count of workspaces, panes, and agents from the authoritative snapshot.
+    /// Renders through a UI Toolkit World Space UIDocument (PrimaryPanel.uxml).
     /// </summary>
     public sealed class StatusPanel : MonoBehaviour
     {
         [SerializeField] private AuraClient client;
-        [SerializeField] private TMP_Text statusText;
+        [SerializeField] private UIDocument uiDocument;
+
+        private Label _statusText;
+
+        private void Awake()
+        {
+            if (uiDocument == null) uiDocument = GetComponentInChildren<UIDocument>();
+            _statusText = uiDocument.rootVisualElement.Q<Label>("StatusText");
+        }
 
         private void OnEnable()
         {
@@ -32,7 +40,7 @@ namespace Aura.UI
         private void OnConnectionState(bool connected)
         {
             if (!connected)
-                statusText.text = "<color=#ffd166>Connection lost.</color>\n" +
+                _statusText.text = "<color=#ffd166>Connection lost.</color>\n" +
                                   "Agents and terminals may still be running.\nReconnecting…";
         }
 
@@ -55,7 +63,7 @@ namespace Aura.UI
             var panes = (herdr?["panes"] as JArray)?.Count ?? 0;
             var agents = (herdr?["agents"] as JArray)?.Count ?? 0;
 
-            statusText.text =
+            _statusText.text =
                 $"<b>AURA WORKSPACE</b>\n" +
                 $"bridge <color=#59e58c>● connected</color>   " +
                 $"herdr {(client.HerdrConnected ? "<color=#59e58c>● connected</color>" : "<color=#ff7f95>○ offline</color>")}\n" +

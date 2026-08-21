@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" editor-extension-mode="False">
+    <Style src="AuraGlass.uss" />
+    <ui:VisualElement name="Root" class="glass-panel" style="width: 320px; height: 160px; min-height: 160px; max-height: 160px;">
+        <ui:VisualElement class="row-centered">
+            <ui:VisualElement name="StateDot" class="state-dot dot--idle" />
+            <ui:Label name="AgentName" text="Agent" class="agent-name" />
+        </ui:VisualElement>
+        <ui:Label name="AgentState" text="Idle" class="agent-state" />
+    </ui:VisualElement>
+</ui:UXML>

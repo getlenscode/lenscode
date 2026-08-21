@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" editor-extension-mode="False">
+    <Style src="AuraGlass.uss" />
+    <ui:VisualElement name="Root" class="glass-panel glass-panel--dock" style="width: 280px; height: 120px; min-height: 120px; max-height: 120px;">
+        <ui:Label name="DockLabel" text="Code" class="dock-label" />
+    </ui:VisualElement>
+</ui:UXML>

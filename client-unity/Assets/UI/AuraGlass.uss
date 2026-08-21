@@ -1,0 +1,113 @@
+/*
+ * Aura Workspace glass theme — ported from MR App Ideas for Productivity.html
+ * (CSS custom properties --bg/--panel/--line/--text/--muted/--blue/--green/
+ * --red/--amber/--purple, border-radius 20px). USS has no backdrop-filter or
+ * box-shadow, so the "glass" look here is a dark semi-transparent fill + a
+ * light hairline border + bright accent text, not a literal blur.
+ */
+
+.glass-panel {
+    background-color: rgba(12, 23, 35, 0.86);
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-color: rgba(181, 211, 244, 0.35);
+    border-right-color: rgba(181, 211, 244, 0.35);
+    border-top-color: rgba(225, 239, 255, 0.45);
+    border-bottom-color: rgba(181, 211, 244, 0.35);
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    border-bottom-left-radius: 24px;
+    border-bottom-right-radius: 24px;
+    padding: 12px;
+    align-items: center;
+    justify-content: center;
+}
+
+.glass-panel--dock {
+    background-color: rgba(20, 36, 53, 0.9);
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+    border-bottom-left-radius: 16px;
+    border-bottom-right-radius: 16px;
+}
+
+.eyebrow {
+    color: rgb(109, 139, 173);
+    font-size: 11px;
+    -unity-font-style: bold;
+    letter-spacing: 1px;
+    -unity-text-align: middle-center;
+}
+
+.title {
+    color: rgb(238, 247, 255);
+    font-size: 22px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.body-text {
+    color: rgb(153, 171, 192);
+    font-size: 14px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.status-line {
+    font-size: 14px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.status-line--ok { color: rgb(89, 229, 140); }
+.status-line--warn { color: rgb(255, 209, 102); }
+.status-line--error { color: rgb(255, 127, 149); }
+
+.agent-name {
+    color: rgb(238, 247, 255);
+    font-size: 16px;
+    -unity-font-style: bold;
+    -unity-text-align: upper-center;
+}
+
+.agent-state {
+    font-size: 12px;
+    -unity-text-align: lower-center;
+}
+
+.state-dot {
+    width: 8px;
+    height: 8px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border-bottom-left-radius: 4px;
+    border-bottom-right-radius: 4px;
+    margin-right: 4px;
+}
+
+.dot--working { background-color: rgb(89, 229, 140); }
+.dot--idle { background-color: rgb(100, 116, 139); }
+.dot--completed { background-color: rgb(89, 229, 140); }
+.dot--attention { background-color: rgb(255, 209, 102); }
+.dot--failed { background-color: rgb(255, 127, 149); }
+.dot--stopped { background-color: rgb(153, 171, 192); }
+
+.dock-label {
+    color: rgb(129, 145, 164);
+    font-size: 11px;
+    -unity-text-align: middle-center;
+}
+
+.dock-label--active {
+    color: rgb(143, 198, 255);
+    -unity-font-style: bold;
+}
+
+.row-centered {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+}

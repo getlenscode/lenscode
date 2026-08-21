@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" editor-extension-mode="False">
+    <Style src="AuraGlass.uss" />
+    <ui:VisualElement name="Root" class="glass-panel" style="width: 900px; height: 500px; min-height: 500px; max-height: 500px;">
+        <ui:Label name="Eyebrow" text="AURA WORKSPACE" class="eyebrow" />
+        <ui:Label name="StatusText" text="Connecting..." class="status-line" style="margin-top: 8px; flex-grow: 1;" />
+    </ui:VisualElement>
+</ui:UXML>
