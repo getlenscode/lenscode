@@ -32,6 +32,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     // Jetpack XR SDK
     implementation("androidx.xr.compose:compose:1.0.0-alpha17")

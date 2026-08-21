@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -34,6 +35,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var bridge: BridgeClient
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // All UI lives inside Subspace, which SceneCore renders through its own
+        // spatial compositor rather than the Activity's normal window content
+        // view — so the system's default splash icon never gets a "first
+        // frame drawn" signal to dismiss itself, and sits on screen forever.
+        // Dismiss it immediately; there is no real loading gate to wait on.
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { false }
+
         super.onCreate(savedInstanceState)
 
         // The Activity's own 2D window is separate from Subspace content and
@@ -100,17 +109,26 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 PrimaryPanelContent(state)
             }
 
-            // ── Quick dock ─────────────────────────────────────────────────
+            // ── Quick dock (icons match the mockup's dock glyphs) ───────────
             SpatialRow {
-                for (view in listOf("Code", "Terminal", "Diff", "Git", "Agents", "Remote")) {
-                    val id = view.lowercase()
+                for (
+                dock in listOf(
+                    Triple("▣", "Code", "code"),
+                    Triple("▤", "Terminal", "terminal"),
+                    Triple("±", "Diff", "diff"),
+                    Triple("⑂", "Git", "git"),
+                    Triple("◎", "Agents", "agents"),
+                    Triple("▥", "Remote", "remote"),
+                )
+                ) {
+                    val (icon, label, id) = dock
                     SpatialPanel(
                         SubspaceModifier
                             .width(150.dp)
                             .height(70.dp)
                             .padding(6.dp),
                     ) {
-                        DockButtonContent(view, active = activeView == id) { activeView = id }
+                        DockButtonContent(icon, label, active = activeView == id) { activeView = id }
                     }
                 }
             }
