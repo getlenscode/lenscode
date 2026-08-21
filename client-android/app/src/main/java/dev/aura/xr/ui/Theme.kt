@@ -20,11 +20,16 @@ object AuraColors {
     val Idle = Color(0xFF64748B)
     val ActiveDock = Color(0xFF8FC6FF)
 
-    // .panel background: linear-gradient(180deg, rgba(32,49,69,.48), rgba(8,18,28,.30))
-    val PanelGradTop = Color(0x7B203145)
-    val PanelGradBottom = Color(0x4D08121C)
+    // .panel background: linear-gradient(180deg, rgba(32,49,69,.48), rgba(8,18,28,.30)).
+    // The CSS pairs this with backdrop-filter: blur(26px), which is what actually
+    // makes a ~40% fill read as solid dark glass — Compose can't sample/blur
+    // whatever is behind a spatial panel, so the same alpha here just blends
+    // straight through into a bright passthrough/Home background. Raised well
+    // above the literal CSS values to compensate for the missing blur.
+    val PanelGradTop = Color(0xE8203145)
+    val PanelGradBottom = Color(0xD608121C)
     // .panel radial-gradient(circle at 15% 0%, rgba(110,170,255,.06), transparent 34%)
-    val PanelGlow = Color(0x0F6EAAFF)
+    val PanelGlow = Color(0x1A6EAAFF)
     // .panel border / border-top-color
     val PanelBorder = Color(0x2EA5D3F4)
     val PanelBorderTop = Color(0x3DE1EFFF)
@@ -32,17 +37,19 @@ object AuraColors {
     val SheenWhite = Color(0x0BFFFFFF)
     val SheenBlue = Color(0x096EA0FF)
 
-    // .node (floating card style used for agent chips): border #2a3d50, bg rgba(7,17,27,.32)
+    // .node (floating card style used for agent chips): border #2a3d50, bg
+    // rgba(7,17,27,.32) — same no-blur-to-compensate-for issue as .panel above.
     val CardBorder = Color(0xFF2A3D50)
-    val CardBg = Color(0x520B1119)
+    val CardBg = Color(0xD2070F17)
 
     // .dock button: default color #8191a4; active bg linear-gradient(180deg,
-    // rgba(50,127,220,.25), rgba(37,90,155,.14)), border rgba(100,170,250,.18)
+    // rgba(50,127,220,.25), rgba(37,90,155,.14)), border rgba(100,170,250,.18) —
+    // opacity raised for the same reason.
     val DockIdle = Color(0xFF8191A4)
-    val DockActiveGradTop = Color(0x40327FDC)
-    val DockActiveGradBottom = Color(0x24255A9B)
+    val DockActiveGradTop = Color(0x8C327FDC)
+    val DockActiveGradBottom = Color(0x66255A9B)
     val DockActiveBorder = Color(0x2E64AAFA)
-    val DockBg = Color(0x33141E2A) // dock button resting fill (subtle, mostly transparent)
+    val DockBg = Color(0xB0141E2A) // dock button resting fill
 
     // .logo circular badge: bg #0b1119, border #2c3b4a
     val LogoBg = Color(0xFF0B1119)
