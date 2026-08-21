@@ -22,9 +22,7 @@ import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialRow
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
-import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.padding
-import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.width
 import dev.aura.xr.net.BridgeClient
 import dev.aura.xr.ui.AgentChipContent
@@ -106,13 +104,13 @@ fun AuraWorkspace(bridge: BridgeClient) {
             }
 
             // ── Primary panel ──────────────────────────────────────────────
+            // Fixed like every other panel in the layout — no movable()/
+            // resizable() so the whole workspace stays locked together.
             SpatialPanel(
                 SubspaceModifier
                     .width(900.dp)
                     .height(520.dp)
-                    .padding(12.dp)
-                    .movable()
-                    .resizable(),
+                    .padding(12.dp),
             ) {
                 PrimaryPanelContent(state)
             }
