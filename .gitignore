@@ -15,6 +15,7 @@ client-unity/[Uu]serSettings/
 client-unity/*.csproj
 client-unity/*.sln
 client-unity/.vsconfig
+client-unity/Assets/Screenshots/
 
 # OS
 .DS_Store
