@@ -1,0 +1,22 @@
+{
+  "dependencies": {
+    "com.unity.xr.androidxr-openxr": "1.1.0",
+    "com.unity.xr.openxr": "1.14.3",
+    "com.unity.xr.interaction.toolkit": "3.0.8",
+    "com.unity.xr.hands": "1.5.0",
+    "com.unity.xr.arfoundation": "6.1.0",
+    "com.unity.xr.management": "4.5.0",
+    "com.unity.render-pipelines.universal": "17.0.3",
+    "com.unity.inputsystem": "1.11.2",
+    "com.unity.textmeshpro": "3.2.0-pre.10",
+    "com.unity.nuget.newtonsoft-json": "3.2.1",
+    "com.unity.modules.androidjni": "1.0.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0",
+    "com.unity.modules.physics": "1.0.0",
+    "com.unity.modules.ui": "1.0.0",
+    "com.unity.modules.uielements": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.xr": "1.0.0"
+  }
+}
