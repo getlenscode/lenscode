@@ -10,6 +10,10 @@ export interface BridgeConfig {
   tlsKeyPath?: string;
   tlsCertPath?: string;
   herdrSocketPath: string;
+  /** Persistent store for paired devices. */
+  pairingStorePath: string;
+  /** Test-only: prod pairing enforcement without TLS (AURA_INSECURE_PROD=1). */
+  insecureProd?: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
@@ -21,10 +25,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     tlsCertPath: env.AURA_TLS_CERT,
     herdrSocketPath:
       env.AURA_HERDR_SOCKET ?? join(homedir(), ".config", "herdr", "herdr.sock"),
+    pairingStorePath:
+      env.AURA_PAIRING_STORE ?? join(homedir(), ".config", "aura-bridge", "devices.json"),
   };
   if (cfg.mode === "prod" && (!cfg.tlsKeyPath || !cfg.tlsCertPath)) {
     // Spec §56: production must never silently downgrade to plaintext.
-    throw new Error("prod mode requires AURA_TLS_KEY and AURA_TLS_CERT");
+    // AURA_INSECURE_PROD is an explicit, loudly-logged test-only escape hatch.
+    if (env.AURA_INSECURE_PROD !== "1") {
+      throw new Error("prod mode requires AURA_TLS_KEY and AURA_TLS_CERT");
+    }
+    cfg.insecureProd = true;
   }
   return cfg;
 }

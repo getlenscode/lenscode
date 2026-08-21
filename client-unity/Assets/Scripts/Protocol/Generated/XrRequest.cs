@@ -12,12 +12,12 @@ namespace Aura.Protocol
         [JsonProperty("clientInfo", NullValueHandling = NullValueHandling.Ignore)]
         public ClientInfo? ClientInfo { get; set; }
 
-        [JsonProperty("deviceCertFingerprint", NullValueHandling = NullValueHandling.Ignore)]
-        public string? DeviceCertFingerprint { get; set; }
-
         [JsonProperty("deviceId", NullValueHandling = NullValueHandling.Ignore)]
         [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]
         public string? DeviceId { get; set; }
+
+        [JsonProperty("deviceToken", NullValueHandling = NullValueHandling.Ignore)]
+        public string? DeviceToken { get; set; }
 
         [JsonProperty("id")]
         [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]

@@ -46,8 +46,8 @@ export const HelloRequest = z.object({
   type: z.literal("hello"),
   protocolVersion: z.literal(PROTOCOL_VERSION),
   deviceId: z.string().min(1),
-  /** Device certificate fingerprint issued at pairing; absent → pairing flow. */
-  deviceCertFingerprint: z.string().optional(),
+  /** Bearer secret issued at pairing (spec §55); absent → pairing flow (prod refuses). */
+  deviceToken: z.string().optional(),
   clientInfo: z.object({
     app: z.string(),
     version: z.string(),

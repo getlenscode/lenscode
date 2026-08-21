@@ -137,12 +137,18 @@ test("herdr events fan out to XR clients", async (t) => {
     return t.skip("herdr not running");
   }
 
-  const gotEvent = new Promise<any>((resolve) => {
-    ws.on("message", (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === "event" && msg.topic === "herdr" && msg.event === "workspace_created")
-        resolve(msg);
-    });
+  // Subscribers may receive catch-up events for pre-existing workspaces, so
+  // match on the id of the workspace this test creates.
+  const events: any[] = [];
+  let matchId: string | null = null;
+  let resolveMatch: (msg: any) => void;
+  const gotEvent = new Promise<any>((resolve) => (resolveMatch = resolve));
+  ws.on("message", (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === "event" && msg.topic === "herdr" && msg.event === "workspace_created") {
+      events.push(msg);
+      if (matchId && msg.data.workspace.workspace_id === matchId) resolveMatch(msg);
+    }
   });
 
   const created = await rpc(ws, {
@@ -152,8 +158,9 @@ test("herdr events fan out to XR clients", async (t) => {
   });
   assert.ok(created.result.response.result, "workspace.create succeeded");
   const wsId = created.result.response.result.workspace.workspace_id;
-
-  const ev = await gotEvent;
+  matchId = wsId;
+  const already = events.find((e) => e.data.workspace.workspace_id === wsId);
+  const ev = already ?? (await gotEvent);
   assert.equal(typeof ev.seq, "number");
   assert.equal(ev.data.workspace.workspace_id, wsId);
 

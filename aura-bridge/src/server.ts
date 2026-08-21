@@ -11,6 +11,7 @@ import {
 } from "@aura/protocol";
 import type { BridgeConfig } from "./config.ts";
 import { HerdrClient } from "./herdr.ts";
+import { PairingRegistry } from "./pairing.ts";
 import { isHerdrMethodAllowed } from "./allowlist.ts";
 import { log } from "./log.ts";
 
@@ -32,12 +33,19 @@ export class BridgeServer {
   private eventSeq = 0;
   private cfg: BridgeConfig;
   private httpServer: ReturnType<typeof createHttpServer>;
+  private pairing: PairingRegistry;
+  /** Sockets that have passed hello with a valid device token (or dev mode). */
+  private authed = new WeakSet<WebSocket>();
 
   constructor(cfg: BridgeConfig) {
     this.cfg = cfg;
+    this.pairing = new PairingRegistry(cfg.pairingStorePath);
     this.herdr = new HerdrClient(cfg.herdrSocketPath);
+    if (cfg.insecureProd) {
+      log("warn", "INSECURE: prod pairing enforcement without TLS — tests only");
+    }
     const httpServer =
-      cfg.mode === "prod"
+      cfg.mode === "prod" && !cfg.insecureProd
         ? createHttpsServer({
             key: readFileSync(cfg.tlsKeyPath!),
             cert: readFileSync(cfg.tlsCertPath!),
@@ -104,20 +112,50 @@ export class BridgeServer {
   }
 
   private async dispatch(ws: WebSocket, req: XrRequest): Promise<void> {
+    // Pairing handshake messages are the only ones allowed pre-auth (spec §55).
+    const preAuth = req.type === "hello" || req.type === "pair.begin" || req.type === "pair.complete";
+    if (!preAuth && this.cfg.mode === "prod" && !this.authed.has(ws)) {
+      this.send(ws, {
+        id: req.id,
+        error: err("unauthorized", "This device is not paired with aura-bridge."),
+      });
+      return;
+    }
+
     switch (req.type) {
       case "hello": {
+        const authenticated =
+          this.cfg.mode === "dev" ||
+          this.pairing.isAuthorized(req.deviceId, req.deviceToken);
+        if (authenticated) this.authed.add(ws);
         await this.ensureHerdr();
         this.send(ws, {
           id: req.id,
           result: {
             protocolVersion: PROTOCOL_VERSION,
             serverVersion: BRIDGE_VERSION,
-            // Pairing lands in M2; dev mode trusts every device (config.ts).
-            authenticated: this.cfg.mode === "dev",
+            authenticated,
             herdrProtocol: this.herdr.protocol,
             herdrConnected: this.herdr.connected,
           },
         });
+        return;
+      }
+      case "pair.begin": {
+        this.send(ws, { id: req.id, result: this.pairing.begin(req.deviceId, req.deviceName) });
+        return;
+      }
+      case "pair.complete": {
+        const outcome = this.pairing.complete(req.deviceId, req.pairingCode);
+        if ("error" in outcome) {
+          this.send(ws, {
+            id: req.id,
+            error: err("pairing_required", outcome.error, true),
+          });
+          return;
+        }
+        this.authed.add(ws);
+        this.send(ws, { id: req.id, result: { deviceToken: outcome.deviceSecret } });
         return;
       }
       case "snapshot.request": {
@@ -216,6 +254,11 @@ export class BridgeServer {
 
   private send(ws: WebSocket, msg: unknown): void {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  /** Test/CLI access to the pairing registry (codes are read locally only). */
+  get pairingRegistry(): PairingRegistry {
+    return this.pairing;
   }
 
   close(): void {
