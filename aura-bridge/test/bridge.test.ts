@@ -121,3 +121,48 @@ test("herdr proxy forwards agent.list verbatim", async (t) => {
   assert.ok("result" in res.result.response || "error" in res.result.response);
   ws.close();
 });
+
+test("herdr events fan out to XR clients", async (t) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
+  await once(ws, "open");
+  const hello = await rpc(ws, {
+    id: "t6a",
+    type: "hello",
+    protocolVersion: 1,
+    deviceId: "test-device",
+    clientInfo: { app: "test", version: "0", platform: "node" },
+  });
+  if (!hello.result.herdrConnected) {
+    ws.close();
+    return t.skip("herdr not running");
+  }
+
+  const gotEvent = new Promise<any>((resolve) => {
+    ws.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === "event" && msg.topic === "herdr" && msg.event === "workspace_created")
+        resolve(msg);
+    });
+  });
+
+  const created = await rpc(ws, {
+    id: "t6",
+    type: "herdr.request",
+    request: { id: "c1", method: "workspace.create", params: {} },
+  });
+  assert.ok(created.result.response.result, "workspace.create succeeded");
+  const wsId = created.result.response.result.workspace.workspace_id;
+
+  const ev = await gotEvent;
+  assert.equal(typeof ev.seq, "number");
+  assert.equal(ev.data.workspace.workspace_id, wsId);
+
+  // Clean up the workspace we created in the live Herdr session.
+  const closed = await rpc(ws, {
+    id: "t7",
+    type: "herdr.request",
+    request: { id: "c2", method: "workspace.close", params: { workspace_id: wsId } },
+  });
+  assert.ok(closed.result.response.result, "workspace.close succeeded");
+  ws.close();
+});
