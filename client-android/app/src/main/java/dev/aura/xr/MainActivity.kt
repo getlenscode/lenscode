@@ -22,7 +22,9 @@ import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialRow
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
+import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.padding
+import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.width
 import dev.aura.xr.net.BridgeClient
 import dev.aura.xr.ui.AgentChipContent
@@ -96,7 +98,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         SubspaceModifier
                             .width(220.dp)
                             .height(110.dp)
-                            .padding(8.dp),
+                            .padding(8.dp)
+                            .movable()
+                            .resizable(),
                     ) {
                         AgentChipContent(agent.first, agent.second, agent.third)
                     }
@@ -104,13 +108,13 @@ fun AuraWorkspace(bridge: BridgeClient) {
             }
 
             // ── Primary panel ──────────────────────────────────────────────
-            // Fixed like every other panel in the layout — no movable()/
-            // resizable() so the whole workspace stays locked together.
             SpatialPanel(
                 SubspaceModifier
                     .width(900.dp)
                     .height(520.dp)
-                    .padding(12.dp),
+                    .padding(12.dp)
+                    .movable()
+                    .resizable(),
             ) {
                 PrimaryPanelContent(state)
             }
@@ -132,7 +136,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         SubspaceModifier
                             .width(150.dp)
                             .height(70.dp)
-                            .padding(6.dp),
+                            .padding(6.dp)
+                            .movable()
+                            .resizable(),
                     ) {
                         DockButtonContent(icon, label, active = activeView == id) { activeView = id }
                     }
