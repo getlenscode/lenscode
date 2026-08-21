@@ -27,7 +27,7 @@ namespace Aura.Protocol
         public double? ProtocolVersion { get; set; }
 
         [JsonProperty("type")]
-        public TypeEnum Type { get; set; }
+        public XrRequestType Type { get; set; }
 
         [JsonProperty("deviceName", NullValueHandling = NullValueHandling.Ignore)]
         [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]
@@ -38,7 +38,7 @@ namespace Aura.Protocol
         public string? PairingCode { get; set; }
 
         [JsonProperty("topics", NullValueHandling = NullValueHandling.Ignore)]
-        public Topic[]? Topics { get; set; }
+        public TopicElement[]? Topics { get; set; }
 
         [JsonProperty("machineId", NullValueHandling = NullValueHandling.Ignore)]
         public string? MachineId { get; set; }
@@ -134,15 +134,64 @@ namespace Aura.Protocol
         public Dictionary<string, object> Params { get; set; }
     }
 
+    public partial class XrServerMessage
+    {
+        [JsonProperty("error", NullValueHandling = NullValueHandling.Ignore)]
+        public Error? Error { get; set; }
+
+        [JsonProperty("id", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Id { get; set; }
+
+        [JsonProperty("result")]
+        public object? Result { get; set; }
+
+        [JsonProperty("data")]
+        public object? Data { get; set; }
+
+        [JsonProperty("event", NullValueHandling = NullValueHandling.Ignore)]
+        [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]
+        public string? Event { get; set; }
+
+        [JsonProperty("seq", NullValueHandling = NullValueHandling.Ignore)]
+        public long? Seq { get; set; }
+
+        [JsonProperty("topic", NullValueHandling = NullValueHandling.Ignore)]
+        public XrServerMessageTopic? Topic { get; set; }
+
+        [JsonProperty("type", NullValueHandling = NullValueHandling.Ignore)]
+        public XrServerMessageType? Type { get; set; }
+    }
+
+    public partial class Error
+    {
+        [JsonProperty("code")]
+        public Code Code { get; set; }
+
+        [JsonProperty("detail", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Detail { get; set; }
+
+        [JsonProperty("message")]
+        public string Message { get; set; }
+
+        [JsonProperty("retryable")]
+        public bool Retryable { get; set; }
+    }
+
     public enum Format { Ansi, Text };
 
     public enum OnDirty { Abort, Stash, Worktree };
 
     public enum Source { Recent, RecentUnwrapped, Visible };
 
-    public enum Topic { Files, Git, Herdr, Machines };
+    public enum TopicElement { Files, Git, Herdr, Machines };
 
-    public enum TypeEnum { DirList, EventsSubscribe, FileOpen, GitBranchSwitch, GitStatus, Hello, HerdrRequest, PairBegin, PairComplete, SearchFiles, SnapshotRequest, TerminalClose, TerminalCreate, TerminalFocus, TerminalInput, TerminalInterrupt, TerminalList, TerminalProcessInfo, TerminalRead, TerminalRename };
+    public enum XrRequestType { DirList, EventsSubscribe, FileOpen, GitBranchSwitch, GitStatus, Hello, HerdrRequest, PairBegin, PairComplete, SearchFiles, SnapshotRequest, TerminalClose, TerminalCreate, TerminalFocus, TerminalInput, TerminalInterrupt, TerminalList, TerminalProcessInfo, TerminalRead, TerminalRename };
+
+    public enum Code { Conflict, DangerousOpUnconfirmed, HerdrError, HerdrUnavailable, Internal, InvalidRequest, NotFound, PairingRequired, Unauthorized };
+
+    public enum XrServerMessageTopic { Connection, Files, Git, Herdr, Machines };
+
+    public enum XrServerMessageType { Event };
 
     internal static class Converter
     {
@@ -155,8 +204,11 @@ namespace Aura.Protocol
                 FormatConverter.Singleton,
                 OnDirtyConverter.Singleton,
                 SourceConverter.Singleton,
-                TopicConverter.Singleton,
-                TypeEnumConverter.Singleton,
+                TopicElementConverter.Singleton,
+                XrRequestTypeConverter.Singleton,
+                CodeConverter.Singleton,
+                XrServerMessageTopicConverter.Singleton,
+                XrServerMessageTypeConverter.Singleton,
                 new IsoDateTimeConverter { DateTimeStyles = DateTimeStyles.AssumeUniversal }
             },
         };
@@ -351,9 +403,9 @@ namespace Aura.Protocol
         public static readonly SourceConverter Singleton = new SourceConverter();
     }
 
-    internal class TopicConverter : JsonConverter
+    internal class TopicElementConverter : JsonConverter
     {
-        public override bool CanConvert(Type t) => t == typeof(Topic) || t == typeof(Topic?);
+        public override bool CanConvert(Type t) => t == typeof(TopicElement) || t == typeof(TopicElement?);
 
         public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
         {
@@ -362,15 +414,15 @@ namespace Aura.Protocol
             switch (value)
             {
                 case "files":
-                    return Topic.Files;
+                    return TopicElement.Files;
                 case "git":
-                    return Topic.Git;
+                    return TopicElement.Git;
                 case "herdr":
-                    return Topic.Herdr;
+                    return TopicElement.Herdr;
                 case "machines":
-                    return Topic.Machines;
+                    return TopicElement.Machines;
             }
-            throw new Exception("Cannot unmarshal type Topic");
+            throw new Exception("Cannot unmarshal type TopicElement");
         }
 
         public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
@@ -380,31 +432,31 @@ namespace Aura.Protocol
                 serializer.Serialize(writer, null);
                 return;
             }
-            var value = (Topic)untypedValue;
+            var value = (TopicElement)untypedValue;
             switch (value)
             {
-                case Topic.Files:
+                case TopicElement.Files:
                     serializer.Serialize(writer, "files");
                     return;
-                case Topic.Git:
+                case TopicElement.Git:
                     serializer.Serialize(writer, "git");
                     return;
-                case Topic.Herdr:
+                case TopicElement.Herdr:
                     serializer.Serialize(writer, "herdr");
                     return;
-                case Topic.Machines:
+                case TopicElement.Machines:
                     serializer.Serialize(writer, "machines");
                     return;
             }
-            throw new Exception("Cannot marshal type Topic");
+            throw new Exception("Cannot marshal type TopicElement");
         }
 
-        public static readonly TopicConverter Singleton = new TopicConverter();
+        public static readonly TopicElementConverter Singleton = new TopicElementConverter();
     }
 
-    internal class TypeEnumConverter : JsonConverter
+    internal class XrRequestTypeConverter : JsonConverter
     {
-        public override bool CanConvert(Type t) => t == typeof(TypeEnum) || t == typeof(TypeEnum?);
+        public override bool CanConvert(Type t) => t == typeof(XrRequestType) || t == typeof(XrRequestType?);
 
         public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
         {
@@ -413,47 +465,47 @@ namespace Aura.Protocol
             switch (value)
             {
                 case "dir.list":
-                    return TypeEnum.DirList;
+                    return XrRequestType.DirList;
                 case "events.subscribe":
-                    return TypeEnum.EventsSubscribe;
+                    return XrRequestType.EventsSubscribe;
                 case "file.open":
-                    return TypeEnum.FileOpen;
+                    return XrRequestType.FileOpen;
                 case "git.branch.switch":
-                    return TypeEnum.GitBranchSwitch;
+                    return XrRequestType.GitBranchSwitch;
                 case "git.status":
-                    return TypeEnum.GitStatus;
+                    return XrRequestType.GitStatus;
                 case "hello":
-                    return TypeEnum.Hello;
+                    return XrRequestType.Hello;
                 case "herdr.request":
-                    return TypeEnum.HerdrRequest;
+                    return XrRequestType.HerdrRequest;
                 case "pair.begin":
-                    return TypeEnum.PairBegin;
+                    return XrRequestType.PairBegin;
                 case "pair.complete":
-                    return TypeEnum.PairComplete;
+                    return XrRequestType.PairComplete;
                 case "search.files":
-                    return TypeEnum.SearchFiles;
+                    return XrRequestType.SearchFiles;
                 case "snapshot.request":
-                    return TypeEnum.SnapshotRequest;
+                    return XrRequestType.SnapshotRequest;
                 case "terminal.close":
-                    return TypeEnum.TerminalClose;
+                    return XrRequestType.TerminalClose;
                 case "terminal.create":
-                    return TypeEnum.TerminalCreate;
+                    return XrRequestType.TerminalCreate;
                 case "terminal.focus":
-                    return TypeEnum.TerminalFocus;
+                    return XrRequestType.TerminalFocus;
                 case "terminal.input":
-                    return TypeEnum.TerminalInput;
+                    return XrRequestType.TerminalInput;
                 case "terminal.interrupt":
-                    return TypeEnum.TerminalInterrupt;
+                    return XrRequestType.TerminalInterrupt;
                 case "terminal.list":
-                    return TypeEnum.TerminalList;
+                    return XrRequestType.TerminalList;
                 case "terminal.process_info":
-                    return TypeEnum.TerminalProcessInfo;
+                    return XrRequestType.TerminalProcessInfo;
                 case "terminal.read":
-                    return TypeEnum.TerminalRead;
+                    return XrRequestType.TerminalRead;
                 case "terminal.rename":
-                    return TypeEnum.TerminalRename;
+                    return XrRequestType.TerminalRename;
             }
-            throw new Exception("Cannot unmarshal type TypeEnum");
+            throw new Exception("Cannot unmarshal type XrRequestType");
         }
 
         public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
@@ -463,73 +515,239 @@ namespace Aura.Protocol
                 serializer.Serialize(writer, null);
                 return;
             }
-            var value = (TypeEnum)untypedValue;
+            var value = (XrRequestType)untypedValue;
             switch (value)
             {
-                case TypeEnum.DirList:
+                case XrRequestType.DirList:
                     serializer.Serialize(writer, "dir.list");
                     return;
-                case TypeEnum.EventsSubscribe:
+                case XrRequestType.EventsSubscribe:
                     serializer.Serialize(writer, "events.subscribe");
                     return;
-                case TypeEnum.FileOpen:
+                case XrRequestType.FileOpen:
                     serializer.Serialize(writer, "file.open");
                     return;
-                case TypeEnum.GitBranchSwitch:
+                case XrRequestType.GitBranchSwitch:
                     serializer.Serialize(writer, "git.branch.switch");
                     return;
-                case TypeEnum.GitStatus:
+                case XrRequestType.GitStatus:
                     serializer.Serialize(writer, "git.status");
                     return;
-                case TypeEnum.Hello:
+                case XrRequestType.Hello:
                     serializer.Serialize(writer, "hello");
                     return;
-                case TypeEnum.HerdrRequest:
+                case XrRequestType.HerdrRequest:
                     serializer.Serialize(writer, "herdr.request");
                     return;
-                case TypeEnum.PairBegin:
+                case XrRequestType.PairBegin:
                     serializer.Serialize(writer, "pair.begin");
                     return;
-                case TypeEnum.PairComplete:
+                case XrRequestType.PairComplete:
                     serializer.Serialize(writer, "pair.complete");
                     return;
-                case TypeEnum.SearchFiles:
+                case XrRequestType.SearchFiles:
                     serializer.Serialize(writer, "search.files");
                     return;
-                case TypeEnum.SnapshotRequest:
+                case XrRequestType.SnapshotRequest:
                     serializer.Serialize(writer, "snapshot.request");
                     return;
-                case TypeEnum.TerminalClose:
+                case XrRequestType.TerminalClose:
                     serializer.Serialize(writer, "terminal.close");
                     return;
-                case TypeEnum.TerminalCreate:
+                case XrRequestType.TerminalCreate:
                     serializer.Serialize(writer, "terminal.create");
                     return;
-                case TypeEnum.TerminalFocus:
+                case XrRequestType.TerminalFocus:
                     serializer.Serialize(writer, "terminal.focus");
                     return;
-                case TypeEnum.TerminalInput:
+                case XrRequestType.TerminalInput:
                     serializer.Serialize(writer, "terminal.input");
                     return;
-                case TypeEnum.TerminalInterrupt:
+                case XrRequestType.TerminalInterrupt:
                     serializer.Serialize(writer, "terminal.interrupt");
                     return;
-                case TypeEnum.TerminalList:
+                case XrRequestType.TerminalList:
                     serializer.Serialize(writer, "terminal.list");
                     return;
-                case TypeEnum.TerminalProcessInfo:
+                case XrRequestType.TerminalProcessInfo:
                     serializer.Serialize(writer, "terminal.process_info");
                     return;
-                case TypeEnum.TerminalRead:
+                case XrRequestType.TerminalRead:
                     serializer.Serialize(writer, "terminal.read");
                     return;
-                case TypeEnum.TerminalRename:
+                case XrRequestType.TerminalRename:
                     serializer.Serialize(writer, "terminal.rename");
                     return;
             }
-            throw new Exception("Cannot marshal type TypeEnum");
+            throw new Exception("Cannot marshal type XrRequestType");
         }
 
-        public static readonly TypeEnumConverter Singleton = new TypeEnumConverter();
+        public static readonly XrRequestTypeConverter Singleton = new XrRequestTypeConverter();
+    }
+
+    internal class CodeConverter : JsonConverter
+    {
+        public override bool CanConvert(Type t) => t == typeof(Code) || t == typeof(Code?);
+
+        public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null) return null;
+            var value = serializer.Deserialize<string>(reader);
+            switch (value)
+            {
+                case "conflict":
+                    return Code.Conflict;
+                case "dangerous_op_unconfirmed":
+                    return Code.DangerousOpUnconfirmed;
+                case "herdr_error":
+                    return Code.HerdrError;
+                case "herdr_unavailable":
+                    return Code.HerdrUnavailable;
+                case "internal":
+                    return Code.Internal;
+                case "invalid_request":
+                    return Code.InvalidRequest;
+                case "not_found":
+                    return Code.NotFound;
+                case "pairing_required":
+                    return Code.PairingRequired;
+                case "unauthorized":
+                    return Code.Unauthorized;
+            }
+            throw new Exception("Cannot unmarshal type Code");
+        }
+
+        public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
+        {
+            if (untypedValue == null)
+            {
+                serializer.Serialize(writer, null);
+                return;
+            }
+            var value = (Code)untypedValue;
+            switch (value)
+            {
+                case Code.Conflict:
+                    serializer.Serialize(writer, "conflict");
+                    return;
+                case Code.DangerousOpUnconfirmed:
+                    serializer.Serialize(writer, "dangerous_op_unconfirmed");
+                    return;
+                case Code.HerdrError:
+                    serializer.Serialize(writer, "herdr_error");
+                    return;
+                case Code.HerdrUnavailable:
+                    serializer.Serialize(writer, "herdr_unavailable");
+                    return;
+                case Code.Internal:
+                    serializer.Serialize(writer, "internal");
+                    return;
+                case Code.InvalidRequest:
+                    serializer.Serialize(writer, "invalid_request");
+                    return;
+                case Code.NotFound:
+                    serializer.Serialize(writer, "not_found");
+                    return;
+                case Code.PairingRequired:
+                    serializer.Serialize(writer, "pairing_required");
+                    return;
+                case Code.Unauthorized:
+                    serializer.Serialize(writer, "unauthorized");
+                    return;
+            }
+            throw new Exception("Cannot marshal type Code");
+        }
+
+        public static readonly CodeConverter Singleton = new CodeConverter();
+    }
+
+    internal class XrServerMessageTopicConverter : JsonConverter
+    {
+        public override bool CanConvert(Type t) => t == typeof(XrServerMessageTopic) || t == typeof(XrServerMessageTopic?);
+
+        public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null) return null;
+            var value = serializer.Deserialize<string>(reader);
+            switch (value)
+            {
+                case "connection":
+                    return XrServerMessageTopic.Connection;
+                case "files":
+                    return XrServerMessageTopic.Files;
+                case "git":
+                    return XrServerMessageTopic.Git;
+                case "herdr":
+                    return XrServerMessageTopic.Herdr;
+                case "machines":
+                    return XrServerMessageTopic.Machines;
+            }
+            throw new Exception("Cannot unmarshal type XrServerMessageTopic");
+        }
+
+        public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
+        {
+            if (untypedValue == null)
+            {
+                serializer.Serialize(writer, null);
+                return;
+            }
+            var value = (XrServerMessageTopic)untypedValue;
+            switch (value)
+            {
+                case XrServerMessageTopic.Connection:
+                    serializer.Serialize(writer, "connection");
+                    return;
+                case XrServerMessageTopic.Files:
+                    serializer.Serialize(writer, "files");
+                    return;
+                case XrServerMessageTopic.Git:
+                    serializer.Serialize(writer, "git");
+                    return;
+                case XrServerMessageTopic.Herdr:
+                    serializer.Serialize(writer, "herdr");
+                    return;
+                case XrServerMessageTopic.Machines:
+                    serializer.Serialize(writer, "machines");
+                    return;
+            }
+            throw new Exception("Cannot marshal type XrServerMessageTopic");
+        }
+
+        public static readonly XrServerMessageTopicConverter Singleton = new XrServerMessageTopicConverter();
+    }
+
+    internal class XrServerMessageTypeConverter : JsonConverter
+    {
+        public override bool CanConvert(Type t) => t == typeof(XrServerMessageType) || t == typeof(XrServerMessageType?);
+
+        public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null) return null;
+            var value = serializer.Deserialize<string>(reader);
+            if (value == "event")
+            {
+                return XrServerMessageType.Event;
+            }
+            throw new Exception("Cannot unmarshal type XrServerMessageType");
+        }
+
+        public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
+        {
+            if (untypedValue == null)
+            {
+                serializer.Serialize(writer, null);
+                return;
+            }
+            var value = (XrServerMessageType)untypedValue;
+            if (value == XrServerMessageType.Event)
+            {
+                serializer.Serialize(writer, "event");
+                return;
+            }
+            throw new Exception("Cannot marshal type XrServerMessageType");
+        }
+
+        public static readonly XrServerMessageTypeConverter Singleton = new XrServerMessageTypeConverter();
     }
 }

@@ -38,10 +38,29 @@ export interface SearchHit {
   line?: number;
 }
 
+/**
+ * Voice search resolution (spec §13): a single confident hit opens directly,
+ * otherwise the caller MUST present candidates rather than silently guessing.
+ */
+export interface VoiceResolution {
+  confident: boolean;
+  /** Present when confident is true. */
+  resolvedPath?: string;
+  candidates: SearchHit[];
+}
+
+const RECENCY_WINDOW_MS = 10 * 60 * 1000;
+const RECENCY_MAX_BONUS = 80;
+/** Gap and floor a top hit needs over the runner-up to auto-open (spec §63). */
+const CONFIDENCE_GAP = 150;
+const CONFIDENCE_FLOOR = 400;
+
 export class WorkspaceFiles {
   private root: string;
   /** Cached flat file list for filename search; rebuilt lazily. */
   private fileListCache: { files: string[]; builtAt: number } | null = null;
+  /** path → last-opened timestamp, for recency ranking (spec §13, §14). */
+  private recentlyOpened = new Map<string, number>();
 
   constructor(root: string) {
     this.root = resolve(root);
@@ -94,6 +113,7 @@ export class WorkspaceFiles {
     if (!info.isFile()) throw new Error("Not a file.");
     const truncated = info.size > MAX_FILE_BYTES;
     const buf = await readFile(abs);
+    this.recentlyOpened.set(path, Date.now());
     return {
       path,
       language: LANGUAGES[extname(abs)] ?? null,
