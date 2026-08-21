@@ -260,6 +260,16 @@ export class BridgeServer {
         }
         return;
       }
+      case "voice.search": {
+        const files = await this.filesFor(req.workspaceId);
+        const started = Date.now();
+        const resolution = await files.resolveVoiceQuery(req.query);
+        this.send(ws, {
+          id: req.id,
+          result: { ...resolution, tookMs: Date.now() - started },
+        });
+        return;
+      }
       case "terminal.list":
       case "terminal.create":
       case "terminal.close":
@@ -357,7 +367,7 @@ export class BridgeServer {
     const cached = this.workspaces.get(workspaceId);
     if (cached) return cached;
 
-    let root = process.env.AURA_PROJECT_ROOT ?? process.cwd();
+    let root = this.cfg.projectRoot;
     if (workspaceId !== "local" && this.herdr.connected) {
       try {
         const panes = (await this.herdr.request("pane.list", {})) as {

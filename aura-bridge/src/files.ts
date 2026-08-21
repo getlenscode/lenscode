@@ -129,9 +129,13 @@ export class WorkspaceFiles {
       this.searchFilenames(query, limit),
       this.searchText(query, limit),
     ]);
+    const withRecency = [...nameHits, ...textHits].map((hit) => ({
+      ...hit,
+      score: hit.score + this.recencyBonus(hit.path),
+    }));
     const seen = new Set<string>();
     const merged: SearchHit[] = [];
-    for (const hit of [...nameHits, ...textHits].sort((a, b) => b.score - a.score)) {
+    for (const hit of withRecency.sort((a, b) => b.score - a.score)) {
       const key = `${hit.kind}:${hit.path}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -139,6 +143,35 @@ export class WorkspaceFiles {
       if (merged.length >= limit) break;
     }
     return merged;
+  }
+
+  /**
+   * Voice search entry point (spec §13, §63): normalizes spoken punctuation,
+   * ranks candidates, and refuses to guess when the result is ambiguous.
+   */
+  async resolveVoiceQuery(rawQuery: string, limit = 5): Promise<VoiceResolution> {
+    const query = normalizeSpokenQuery(rawQuery);
+    const hits = await this.search(query, Math.max(limit, 5));
+    if (hits.length === 0) return { confident: false, candidates: [] };
+
+    const [top, second] = hits;
+    // Base fuzzyScore for an exact basename match is 1000; recency alone
+    // (max +80) can never lift a non-exact hit into that range.
+    const isExact = top.kind === "filename" && top.score >= 1000;
+    const gapOk = !second || top.score - second.score >= CONFIDENCE_GAP;
+    const confident = isExact || (top.score >= CONFIDENCE_FLOOR && gapOk);
+
+    return confident
+      ? { confident: true, resolvedPath: top.path, candidates: hits.slice(0, limit) }
+      : { confident: false, candidates: hits.slice(0, limit) };
+  }
+
+  private recencyBonus(path: string): number {
+    const openedAt = this.recentlyOpened.get(path);
+    if (!openedAt) return 0;
+    const age = Date.now() - openedAt;
+    if (age >= RECENCY_WINDOW_MS) return 0;
+    return RECENCY_MAX_BONUS * (1 - age / RECENCY_WINDOW_MS);
   }
 
   private async fileList(): Promise<string[]> {
@@ -225,12 +258,39 @@ export class WorkspaceFiles {
 function fuzzyScore(q: string, path: string, base: string): number {
   if (!q) return 0;
   const baseNoExt = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
-  if (base === q || baseNoExt === q) return 1000;
+  // Spoken queries drop whitespace but rarely reproduce internal dots in
+  // multi-part names ("auth service" for "auth.service.ts"): compare with
+  // dots stripped too so those still count as exact matches.
+  if (base === q || baseNoExt === q || baseNoExt.replace(/\./g, "") === q) return 1000;
   if (base.startsWith(q)) return 500 + q.length / base.length;
   if (isSubsequence(q, base)) return 100 + q.length / base.length;
   if (path.includes(q)) return 50;
   if (isSubsequence(q, path)) return 20;
   return 0;
+}
+
+/**
+ * Resolves spoken punctuation to literal characters (spec §47 Literal Mode,
+ * §49): "feature slash auth" -> "feature/auth", "dot py" -> ".py". Applied
+ * before ranking so voice and typed queries share one search path.
+ */
+const SPOKEN_TOKENS: Array<[RegExp, string]> = [
+  [/\bslash\b/gi, "/"],
+  [/\bdot\b/gi, "."],
+  [/\bunderscore\b/gi, "_"],
+  [/\bdash\b/gi, "-"],
+  [/\bhyphen\b/gi, "-"],
+];
+
+export function normalizeSpokenQuery(raw: string): string {
+  let q = raw.trim();
+  for (const [pattern, replacement] of SPOKEN_TOKENS) {
+    q = q.replace(pattern, replacement);
+  }
+  // Collapse the whitespace spoken punctuation leaves behind, e.g.
+  // "feature / auth" -> "feature/auth", but keep inter-word spaces elsewhere.
+  q = q.replace(/\s*([/._-])\s*/g, "$1");
+  return q;
 }
 
 function isSubsequence(needle: string, haystack: string): boolean {

@@ -121,6 +121,25 @@ export const SearchFilesRequest = z.object({
     .optional(),
 });
 
+/**
+ * Voice file search (spec §13, P0). Distinct from search.files: this endpoint
+ * always resolves to either a single confident path or a candidate list —
+ * never a silent low-confidence guess.
+ */
+export const VoiceSearchRequest = z.object({
+  ...requestBase,
+  type: z.literal("voice.search"),
+  workspaceId: z.string(),
+  /** Raw transcribed speech; spoken punctuation is normalized server-side. */
+  query: z.string().min(1),
+  context: z
+    .object({
+      gazeTarget: z.string().optional(),
+      activePanel: z.string().optional(),
+    })
+    .optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Terminals (spec §18–21) — ergonomic wrappers over Herdr pane operations
 // ---------------------------------------------------------------------------
@@ -239,6 +258,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   FileOpenRequest,
   DirListRequest,
   SearchFilesRequest,
+  VoiceSearchRequest,
   TerminalListRequest,
   TerminalCreateRequest,
   TerminalCloseRequest,

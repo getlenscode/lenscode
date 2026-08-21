@@ -287,6 +287,45 @@
             },
             "type": {
               "type": "string",
+              "const": "voice.search"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1
+            },
+            "context": {
+              "type": "object",
+              "properties": {
+                "gazeTarget": {
+                  "type": "string"
+                },
+                "activePanel": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "workspaceId",
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
               "const": "terminal.list"
             }
           },

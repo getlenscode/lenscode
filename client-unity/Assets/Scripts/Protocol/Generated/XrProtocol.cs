@@ -185,7 +185,7 @@ namespace Aura.Protocol
 
     public enum TopicElement { Files, Git, Herdr, Machines };
 
-    public enum XrRequestType { DirList, EventsSubscribe, FileOpen, GitBranchSwitch, GitStatus, Hello, HerdrRequest, PairBegin, PairComplete, SearchFiles, SnapshotRequest, TerminalClose, TerminalCreate, TerminalFocus, TerminalInput, TerminalInterrupt, TerminalList, TerminalProcessInfo, TerminalRead, TerminalRename };
+    public enum XrRequestType { DirList, EventsSubscribe, FileOpen, GitBranchSwitch, GitStatus, Hello, HerdrRequest, PairBegin, PairComplete, SearchFiles, SnapshotRequest, TerminalClose, TerminalCreate, TerminalFocus, TerminalInput, TerminalInterrupt, TerminalList, TerminalProcessInfo, TerminalRead, TerminalRename, VoiceSearch };
 
     public enum Code { Conflict, DangerousOpUnconfirmed, HerdrError, HerdrUnavailable, Internal, InvalidRequest, NotFound, PairingRequired, Unauthorized };
 
@@ -504,6 +504,8 @@ namespace Aura.Protocol
                     return XrRequestType.TerminalRead;
                 case "terminal.rename":
                     return XrRequestType.TerminalRename;
+                case "voice.search":
+                    return XrRequestType.VoiceSearch;
             }
             throw new Exception("Cannot unmarshal type XrRequestType");
         }
@@ -577,6 +579,9 @@ namespace Aura.Protocol
                     return;
                 case XrRequestType.TerminalRename:
                     serializer.Serialize(writer, "terminal.rename");
+                    return;
+                case XrRequestType.VoiceSearch:
+                    serializer.Serialize(writer, "voice.search");
                     return;
             }
             throw new Exception("Cannot marshal type XrRequestType");

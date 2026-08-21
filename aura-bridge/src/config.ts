@@ -14,6 +14,8 @@ export interface BridgeConfig {
   pairingStorePath: string;
   /** Test-only: prod pairing enforcement without TLS (AURA_INSECURE_PROD=1). */
   insecureProd?: boolean;
+  /** Filesystem root for the "local" workspace's file service. */
+  projectRoot: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
@@ -27,6 +29,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
       env.AURA_HERDR_SOCKET ?? join(homedir(), ".config", "herdr", "herdr.sock"),
     pairingStorePath:
       env.AURA_PAIRING_STORE ?? join(homedir(), ".config", "aura-bridge", "devices.json"),
+    projectRoot: env.AURA_PROJECT_ROOT ?? process.cwd(),
   };
   if (cfg.mode === "prod" && (!cfg.tlsKeyPath || !cfg.tlsCertPath)) {
     // Spec §56: production must never silently downgrade to plaintext.
