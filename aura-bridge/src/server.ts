@@ -13,6 +13,7 @@ import type { BridgeConfig } from "./config.ts";
 import { HerdrClient } from "./herdr.ts";
 import { PairingRegistry } from "./pairing.ts";
 import { WorkspaceFiles } from "./files.ts";
+import { Terminals } from "./terminals.ts";
 import { isHerdrMethodAllowed } from "./allowlist.ts";
 import { log } from "./log.ts";
 
@@ -27,6 +28,20 @@ function err(
   return { code, message, retryable, ...(detail ? { detail } : {}) };
 }
 
+/** User-facing failure text per terminal operation (spec §68). */
+function terminalErrorMessage(type: string): string {
+  switch (type) {
+    case "terminal.interrupt":
+      return "Could not stop the process in that terminal.";
+    case "terminal.create":
+      return "Could not create a new terminal.";
+    case "terminal.read":
+      return "Could not read that terminal's output.";
+    default:
+      return "That terminal operation failed.";
+  }
+}
+
 export class BridgeServer {
   private wss: WebSocketServer;
   private herdr: HerdrClient;
@@ -37,6 +52,7 @@ export class BridgeServer {
   private pairing: PairingRegistry;
   /** workspaceId → file service rooted at that workspace's directory. */
   private workspaces = new Map<string, WorkspaceFiles>();
+  private terminals: Terminals;
   /** Sockets that have passed hello with a valid device token (or dev mode). */
   private authed = new WeakSet<WebSocket>();
 
@@ -44,6 +60,7 @@ export class BridgeServer {
     this.cfg = cfg;
     this.pairing = new PairingRegistry(cfg.pairingStorePath);
     this.herdr = new HerdrClient(cfg.herdrSocketPath);
+    this.terminals = new Terminals(this.herdr);
     if (cfg.insecureProd) {
       log("warn", "INSECURE: prod pairing enforcement without TLS — tests only");
     }
@@ -243,6 +260,33 @@ export class BridgeServer {
         }
         return;
       }
+      case "terminal.list":
+      case "terminal.create":
+      case "terminal.close":
+      case "terminal.focus":
+      case "terminal.rename":
+      case "terminal.read":
+      case "terminal.input":
+      case "terminal.interrupt":
+      case "terminal.process_info": {
+        await this.ensureHerdr();
+        if (!this.herdr.connected) {
+          this.send(ws, {
+            id: req.id,
+            error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
+          });
+          return;
+        }
+        try {
+          this.send(ws, { id: req.id, result: await this.dispatchTerminal(req) });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("herdr_error", terminalErrorMessage(req.type), true, String(e)),
+          });
+        }
+        return;
+      }
       case "search.files": {
         const files = await this.filesFor(req.workspaceId);
         const started = Date.now();
@@ -263,6 +307,44 @@ export class BridgeServer {
           ),
         });
       }
+    }
+  }
+
+  private async dispatchTerminal(req: XrRequest): Promise<unknown> {
+    switch (req.type) {
+      case "terminal.list":
+        return { terminals: await this.terminals.list() };
+      case "terminal.create":
+        return {
+          terminal: await this.terminals.create({
+            workspaceId: req.workspaceId,
+            name: req.name,
+            cwd: req.cwd,
+          }),
+        };
+      case "terminal.close":
+        await this.terminals.close(req.paneId);
+        return { closed: req.paneId };
+      case "terminal.focus":
+        await this.terminals.focus(req.paneId);
+        return { focused: req.paneId };
+      case "terminal.rename":
+        await this.terminals.rename(req.paneId, req.name);
+        return { renamed: req.paneId, name: req.name };
+      case "terminal.read":
+        return this.terminals.read(req.paneId, req.source, req.format, req.lines);
+      case "terminal.input":
+        await this.terminals.sendText(req.paneId, req.text);
+        return { sent: true };
+      case "terminal.interrupt":
+        // The protocol requires confirmed:true, so reaching here means the XR
+        // confirmation card was shown (spec §20, §57).
+        await this.terminals.interrupt(req.paneId);
+        return { interrupted: req.paneId };
+      case "terminal.process_info":
+        return { process: await this.terminals.processInfo(req.paneId) };
+      default:
+        throw new Error(`unhandled terminal request ${(req as { type: string }).type}`);
     }
   }
 

@@ -60,6 +60,32 @@ namespace Aura.Protocol
         [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]
         public string? Query { get; set; }
 
+        [JsonProperty("cwd", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Cwd { get; set; }
+
+        [JsonProperty("name", NullValueHandling = NullValueHandling.Ignore)]
+        [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]
+        public string? Name { get; set; }
+
+        [JsonProperty("paneId", NullValueHandling = NullValueHandling.Ignore)]
+        [JsonConverter(typeof(PurpleMinMaxLengthCheckConverter))]
+        public string? PaneId { get; set; }
+
+        [JsonProperty("format", NullValueHandling = NullValueHandling.Ignore)]
+        public Format? Format { get; set; }
+
+        [JsonProperty("lines", NullValueHandling = NullValueHandling.Ignore)]
+        public long? Lines { get; set; }
+
+        [JsonProperty("source", NullValueHandling = NullValueHandling.Ignore)]
+        public Source? Source { get; set; }
+
+        [JsonProperty("text", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Text { get; set; }
+
+        [JsonProperty("confirmed", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? Confirmed { get; set; }
+
         [JsonProperty("onDirty", NullValueHandling = NullValueHandling.Ignore)]
         public OnDirty? OnDirty { get; set; }
 
@@ -108,11 +134,15 @@ namespace Aura.Protocol
         public Dictionary<string, object> Params { get; set; }
     }
 
+    public enum Format { Ansi, Text };
+
     public enum OnDirty { Abort, Stash, Worktree };
+
+    public enum Source { Recent, RecentUnwrapped, Visible };
 
     public enum Topic { Files, Git, Herdr, Machines };
 
-    public enum TypeEnum { DirList, EventsSubscribe, FileOpen, GitBranchSwitch, GitStatus, Hello, HerdrRequest, PairBegin, PairComplete, SearchFiles, SnapshotRequest };
+    public enum TypeEnum { DirList, EventsSubscribe, FileOpen, GitBranchSwitch, GitStatus, Hello, HerdrRequest, PairBegin, PairComplete, SearchFiles, SnapshotRequest, TerminalClose, TerminalCreate, TerminalFocus, TerminalInput, TerminalInterrupt, TerminalList, TerminalProcessInfo, TerminalRead, TerminalRename };
 
     internal static class Converter
     {
@@ -122,7 +152,9 @@ namespace Aura.Protocol
             DateParseHandling = DateParseHandling.None,
             Converters =
             {
+                FormatConverter.Singleton,
                 OnDirtyConverter.Singleton,
+                SourceConverter.Singleton,
                 TopicConverter.Singleton,
                 TypeEnumConverter.Singleton,
                 new IsoDateTimeConverter { DateTimeStyles = DateTimeStyles.AssumeUniversal }
@@ -156,6 +188,47 @@ namespace Aura.Protocol
         }
 
         public static readonly PurpleMinMaxLengthCheckConverter Singleton = new PurpleMinMaxLengthCheckConverter();
+    }
+
+    internal class FormatConverter : JsonConverter
+    {
+        public override bool CanConvert(Type t) => t == typeof(Format) || t == typeof(Format?);
+
+        public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null) return null;
+            var value = serializer.Deserialize<string>(reader);
+            switch (value)
+            {
+                case "ansi":
+                    return Format.Ansi;
+                case "text":
+                    return Format.Text;
+            }
+            throw new Exception("Cannot unmarshal type Format");
+        }
+
+        public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
+        {
+            if (untypedValue == null)
+            {
+                serializer.Serialize(writer, null);
+                return;
+            }
+            var value = (Format)untypedValue;
+            switch (value)
+            {
+                case Format.Ansi:
+                    serializer.Serialize(writer, "ansi");
+                    return;
+                case Format.Text:
+                    serializer.Serialize(writer, "text");
+                    return;
+            }
+            throw new Exception("Cannot marshal type Format");
+        }
+
+        public static readonly FormatConverter Singleton = new FormatConverter();
     }
 
     internal class OnDirtyConverter : JsonConverter
@@ -230,6 +303,52 @@ namespace Aura.Protocol
         }
 
         public static readonly FluffyMinMaxLengthCheckConverter Singleton = new FluffyMinMaxLengthCheckConverter();
+    }
+
+    internal class SourceConverter : JsonConverter
+    {
+        public override bool CanConvert(Type t) => t == typeof(Source) || t == typeof(Source?);
+
+        public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null) return null;
+            var value = serializer.Deserialize<string>(reader);
+            switch (value)
+            {
+                case "recent":
+                    return Source.Recent;
+                case "recent_unwrapped":
+                    return Source.RecentUnwrapped;
+                case "visible":
+                    return Source.Visible;
+            }
+            throw new Exception("Cannot unmarshal type Source");
+        }
+
+        public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
+        {
+            if (untypedValue == null)
+            {
+                serializer.Serialize(writer, null);
+                return;
+            }
+            var value = (Source)untypedValue;
+            switch (value)
+            {
+                case Source.Recent:
+                    serializer.Serialize(writer, "recent");
+                    return;
+                case Source.RecentUnwrapped:
+                    serializer.Serialize(writer, "recent_unwrapped");
+                    return;
+                case Source.Visible:
+                    serializer.Serialize(writer, "visible");
+                    return;
+            }
+            throw new Exception("Cannot marshal type Source");
+        }
+
+        public static readonly SourceConverter Singleton = new SourceConverter();
     }
 
     internal class TopicConverter : JsonConverter
@@ -315,6 +434,24 @@ namespace Aura.Protocol
                     return TypeEnum.SearchFiles;
                 case "snapshot.request":
                     return TypeEnum.SnapshotRequest;
+                case "terminal.close":
+                    return TypeEnum.TerminalClose;
+                case "terminal.create":
+                    return TypeEnum.TerminalCreate;
+                case "terminal.focus":
+                    return TypeEnum.TerminalFocus;
+                case "terminal.input":
+                    return TypeEnum.TerminalInput;
+                case "terminal.interrupt":
+                    return TypeEnum.TerminalInterrupt;
+                case "terminal.list":
+                    return TypeEnum.TerminalList;
+                case "terminal.process_info":
+                    return TypeEnum.TerminalProcessInfo;
+                case "terminal.read":
+                    return TypeEnum.TerminalRead;
+                case "terminal.rename":
+                    return TypeEnum.TerminalRename;
             }
             throw new Exception("Cannot unmarshal type TypeEnum");
         }
@@ -361,6 +498,33 @@ namespace Aura.Protocol
                     return;
                 case TypeEnum.SnapshotRequest:
                     serializer.Serialize(writer, "snapshot.request");
+                    return;
+                case TypeEnum.TerminalClose:
+                    serializer.Serialize(writer, "terminal.close");
+                    return;
+                case TypeEnum.TerminalCreate:
+                    serializer.Serialize(writer, "terminal.create");
+                    return;
+                case TypeEnum.TerminalFocus:
+                    serializer.Serialize(writer, "terminal.focus");
+                    return;
+                case TypeEnum.TerminalInput:
+                    serializer.Serialize(writer, "terminal.input");
+                    return;
+                case TypeEnum.TerminalInterrupt:
+                    serializer.Serialize(writer, "terminal.interrupt");
+                    return;
+                case TypeEnum.TerminalList:
+                    serializer.Serialize(writer, "terminal.list");
+                    return;
+                case TypeEnum.TerminalProcessInfo:
+                    serializer.Serialize(writer, "terminal.process_info");
+                    return;
+                case TypeEnum.TerminalRead:
+                    serializer.Serialize(writer, "terminal.read");
+                    return;
+                case TypeEnum.TerminalRename:
+                    serializer.Serialize(writer, "terminal.rename");
                     return;
             }
             throw new Exception("Cannot marshal type TypeEnum");

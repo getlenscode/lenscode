@@ -122,6 +122,77 @@ export const SearchFilesRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Terminals (spec §18–21) — ergonomic wrappers over Herdr pane operations
+// ---------------------------------------------------------------------------
+
+export const TerminalListRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.list"),
+});
+
+export const TerminalCreateRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.create"),
+  /** Omit to create a tab in the focused workspace. */
+  workspaceId: z.string().optional(),
+  name: z.string().optional(),
+  cwd: z.string().optional(),
+});
+
+export const TerminalCloseRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.close"),
+  paneId: z.string().min(1),
+});
+
+export const TerminalFocusRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.focus"),
+  paneId: z.string().min(1),
+});
+
+export const TerminalRenameRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.rename"),
+  /** Herdr names tabs, not panes; the bridge resolves the pane's tab. */
+  paneId: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const TerminalReadRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.read"),
+  paneId: z.string().min(1),
+  source: z.enum(["visible", "recent", "recent_unwrapped"]).default("visible"),
+  lines: z.number().int().positive().max(50_000).optional(),
+  /** ANSI is kept for the XR renderer's color pass; strip for plain preview. */
+  format: z.enum(["text", "ansi"]).default("ansi"),
+});
+
+export const TerminalInputRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.input"),
+  paneId: z.string().min(1),
+  text: z.string(),
+});
+
+/** Ctrl+C / SIGINT to the foreground process (spec §20). */
+export const TerminalInterruptRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.interrupt"),
+  paneId: z.string().min(1),
+  /** Must be true — the XR confirmation card is mandatory before interrupting. */
+  confirmed: z.literal(true),
+});
+
+/** Powers the "Stop process?" card: what is actually running right now. */
+export const TerminalProcessInfoRequest = z.object({
+  ...requestBase,
+  type: z.literal("terminal.process_info"),
+  paneId: z.string().min(1),
+});
+
+// ---------------------------------------------------------------------------
 // Git (spec §23–27, §70)
 // ---------------------------------------------------------------------------
 
@@ -168,6 +239,15 @@ export const XrRequest = z.discriminatedUnion("type", [
   FileOpenRequest,
   DirListRequest,
   SearchFilesRequest,
+  TerminalListRequest,
+  TerminalCreateRequest,
+  TerminalCloseRequest,
+  TerminalFocusRequest,
+  TerminalRenameRequest,
+  TerminalReadRequest,
+  TerminalInputRequest,
+  TerminalInterruptRequest,
+  TerminalProcessInfoRequest,
   GitBranchSwitchRequest,
   GitStatusRequest,
   HerdrProxyRequest,
