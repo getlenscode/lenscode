@@ -152,23 +152,37 @@ fun AuraWorkspace(bridge: BridgeClient) {
         agentDetail = null
     }
 
-    // ── Voice file search (spec §13, §63) ───────────────────────────────
+    // ── Voice input (spec §13, §63) — shared recognizer, two destinations:
+    // file search (global overlay) and, once an agent card is open, filling
+    // its prompt box directly instead. Never auto-submits what it hears —
+    // file search still goes through candidates/confidence, and a voice
+    // agent-prompt lands in the text field for you to review and hit Send,
+    // never fires straight into agent.prompt on its own.
     val context = LocalContext.current
     val voiceRecognizer = remember { VoiceRecognizer(context) }
     var isListening by remember { mutableStateOf(false) }
     var voicePartial by remember { mutableStateOf("") }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    var voiceMode by remember { mutableStateOf("fileSearch") }
+    var pendingVoiceMode by remember { mutableStateOf("fileSearch") }
 
-    fun startListening() {
+    fun startListening(mode: String) {
+        voiceMode = mode
         voiceError = null
         voicePartial = ""
         isListening = true
-        bridge.clearVoiceResult()
+        if (mode == "fileSearch") bridge.clearVoiceResult()
         voiceRecognizer.listen(
-            onPartial = { voicePartial = it },
+            onPartial = { text ->
+                voicePartial = text
+                if (mode == "agentPrompt") agentPromptText = text // live feedback right in the field being filled
+            },
             onResult = { text ->
                 isListening = false
-                bridge.voiceSearch(text)
+                when (mode) {
+                    "fileSearch" -> bridge.voiceSearch(text)
+                    "agentPrompt" -> agentPromptText = text
+                }
             },
             onError = { message ->
                 isListening = false
@@ -178,15 +192,18 @@ fun AuraWorkspace(bridge: BridgeClient) {
     }
 
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening() else voiceError = "Microphone permission is required for voice search."
+        if (granted) startListening(pendingVoiceMode) else voiceError = "Microphone permission is required for voice input."
     }
 
-    fun requestVoiceSearch() {
+    fun requestVoice(mode: String) {
         if (isListening) return // already listening — a second tap shouldn't restart the session mid-capture
+        pendingVoiceMode = mode
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
-        if (granted) startListening() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        if (granted) startListening(mode) else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
+
+    fun requestVoiceSearch() = requestVoice("fileSearch")
 
     // A confident hit opens straight away; anything else surfaces candidates
     // (or "no match") through the overlay instead of ever guessing (spec §13).
@@ -406,9 +423,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 // below), so its overlay lives here rather than inside one
                 // specific view's content.
                 VoiceOverlay(
-                    isListening = isListening,
+                    isListening = isListening && voiceMode == "fileSearch",
                     partial = voicePartial,
-                    error = voiceError,
+                    error = if (voiceMode == "fileSearch") voiceError else null,
                     result = voiceResult,
                     onSelectCandidate = { path ->
                         bridge.openFile(path)
@@ -427,6 +444,8 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     state = agentDetail,
                     promptText = agentPromptText,
                     onPromptChange = { agentPromptText = it },
+                    isListeningForPrompt = isListening && voiceMode == "agentPrompt",
+                    onVoiceInput = { requestVoice("agentPrompt") },
                     onSendPrompt = {
                         val target = agentDetail?.agent
                         if (target != null && agentPromptText.isNotBlank()) {

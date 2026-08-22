@@ -1172,6 +1172,8 @@ fun AgentDetailOverlay(
     onInterrupt: () -> Unit,
     onOpenTerminal: () -> Unit,
     onDismiss: () -> Unit,
+    isListeningForPrompt: Boolean = false,
+    onVoiceInput: () -> Unit = {},
 ) {
     if (state == null) return
     val agent = state.agent
@@ -1240,7 +1242,7 @@ fun AgentDetailOverlay(
                                 .background(VsCodeColors.EditorBg)
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                         ) {
-                            if (promptText.isEmpty()) {
+                            if (promptText.isEmpty() && !isListeningForPrompt) {
                                 Text("Send a message…", color = AuraColors.Muted, fontSize = 13.sp)
                             }
                             BasicTextField(
@@ -1255,6 +1257,19 @@ fun AgentDetailOverlay(
                             )
                         }
                         Spacer(Modifier.width(8.dp))
+                        // Voice fills the field above rather than sending on its
+                        // own — always something to review before Send actually
+                        // reaches the agent.
+                        if (isListeningForPrompt) {
+                            StatusDot(AuraColors.Red, size = 8.dp)
+                        } else {
+                            Text(
+                                "🎤",
+                                fontSize = 15.sp,
+                                modifier = Modifier.clickable(onClick = onVoiceInput).padding(8.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             "Send",
                             color = AuraColors.Blue,
