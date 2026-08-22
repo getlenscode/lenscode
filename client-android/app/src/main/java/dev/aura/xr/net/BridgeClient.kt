@@ -880,6 +880,26 @@ class BridgeClient(
         }
     }
 
+    /**
+     * Per-hunk accept/reject (spec §31). `action` is "stage" (adds only this
+     * hunk to the index) or "discard" — discard is destructive (spec §57) and
+     * the caller must only invoke it after its own confirmation card, same as
+     * deleteBranch/removeWorktree below.
+     */
+    fun applyHunk(path: String, patch: String, action: String, onDone: () -> Unit, onError: (String) -> Unit) {
+        send(
+            "git.hunk.apply",
+            JSONObject()
+                .put("machineId", filesMachineId)
+                .put("workspaceId", filesWorkspaceId)
+                .put("path", path)
+                .put("patch", patch)
+                .put("action", action),
+            onResult = { onDone() },
+            onError = { error -> onError(error.optString("message", "Could not $action that hunk.")) },
+        )
+    }
+
     /** Destructive (spec §57) — only ever called after the caller's own confirmation card. */
     fun deleteBranch(branch: String, force: Boolean = false, onDone: () -> Unit, onError: (String) -> Unit) {
         send(

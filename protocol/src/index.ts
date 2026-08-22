@@ -275,6 +275,25 @@ export const GitDiffRequest = z.object({
   ...machineScope,
 });
 
+/**
+ * Per-hunk accept/reject (spec §31). `patch` is exactly one hunk's own text —
+ * the file header lines plus one `@@ … @@` block — as the client re-derives
+ * it from the `git.diff` text it already displayed; the bridge pipes it
+ * straight to `git apply`, never re-parsing it.
+ * "stage" adds only that hunk to the index; "discard" is destructive (spec
+ * §57) — reverses that hunk out of the working tree — and the client only
+ * ever sends it after its own confirmation card.
+ */
+export const GitHunkApplyRequest = z.object({
+  ...requestBase,
+  type: z.literal("git.hunk.apply"),
+  workspaceId: z.string(),
+  path: z.string().min(1),
+  patch: z.string().min(1),
+  action: z.enum(["stage", "discard"]),
+  ...machineScope,
+});
+
 // ---------------------------------------------------------------------------
 // Herdr transparent proxy (spec §70, docs/herdr-ipc.md)
 // ---------------------------------------------------------------------------
@@ -341,6 +360,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   GitBranchDeleteRequest,
   GitStatusRequest,
   GitDiffRequest,
+  GitHunkApplyRequest,
   GitBranchesRequest,
   MachineListRequest,
   MachineConnectRequest,

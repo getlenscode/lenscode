@@ -396,6 +396,26 @@ export class BridgeServer {
         }
         return;
       }
+      case "git.hunk.apply": {
+        try {
+          const git = await this.gitFor(req.workspaceId, req.machineId);
+          await git.applyHunk(req.path, req.patch, req.action);
+          this.send(ws, { id: req.id, result: { path: req.path, action: req.action } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err(
+              "internal",
+              req.action === "stage"
+                ? `Could not stage that hunk in ${req.path}.`
+                : `Could not discard that hunk in ${req.path}.`,
+              true,
+              String(e),
+            ),
+          });
+        }
+        return;
+      }
       case "git.branches": {
         try {
           const git = await this.gitFor(req.workspaceId, req.machineId);

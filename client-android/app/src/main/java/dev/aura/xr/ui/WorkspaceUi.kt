@@ -1059,10 +1059,43 @@ private fun gitStatusLabel(status: String): String = when (status) {
     else -> "M"
 }
 
+/** One `@@ … @@` block (its header line + every line until the next hunk/EOF). */
+data class DiffHunk(val lines: List<String>)
+
+/**
+ * Splits a unified diff for one file into its file-header lines (`diff --git`,
+ * `index`, `---`, `+++`) and its hunks — used both for display and to
+ * reconstruct a single-hunk patch for `git.hunk.apply` (spec §31): a valid
+ * patch is just the file header followed by exactly one `@@` block.
+ */
+fun parseDiffHunks(diffText: String): Pair<List<String>, List<DiffHunk>> {
+    val lines = diffText.split("\n")
+    val firstHunkIdx = lines.indexOfFirst { it.startsWith("@@") }
+    if (firstHunkIdx == -1) return lines to emptyList()
+    val header = lines.subList(0, firstHunkIdx)
+    val hunks = mutableListOf<DiffHunk>()
+    var start = firstHunkIdx
+    for (i in (firstHunkIdx + 1)..lines.size) {
+        if (i == lines.size || lines[i].startsWith("@@")) {
+            hunks.add(DiffHunk(lines.subList(start, i)))
+            start = i
+        }
+    }
+    return header to hunks
+}
+
+/** One hunk's patch text, ready to pipe to `git apply` (spec §31). */
+fun hunkPatch(header: List<String>, hunk: DiffHunk): String =
+    (header + hunk.lines).joinToString("\n") + "\n"
+
 /**
  * Diff view: real `git status` on the left (scoped to whatever the Code view
  * is currently rooted at), a colored unified diff for the selected file on
  * the right — VS Code-style +/- line tinting, no external diff library.
+ * Each hunk carries its own Stage/Discard row (spec §31) — "stage" adds just
+ * that hunk to the index via `git apply --cached`; "discard" is destructive
+ * (spec §57) and reverses it out of the working tree, gated on the same
+ * confirmation-card pattern used for branch/worktree deletion.
  */
 @Composable
 fun DiffPanelContent(
@@ -1070,7 +1103,12 @@ fun DiffPanelContent(
     diffPath: String?,
     diffText: String?,
     onSelectFile: (String) -> Unit,
+    onStageHunk: (path: String, patch: String) -> Unit = { _, _ -> },
+    onDiscardHunk: (path: String, patch: String) -> Unit = { _, _ -> },
+    discardConfirm: DeleteConfirmState? = null,
+    stagedHunks: Set<Int> = emptySet(),
 ) {
+    Box(Modifier.fillMaxSize()) {
     GlassSurface {
         Row(Modifier.fillMaxSize().padding(20.dp)) {
             Column(Modifier.width(240.dp).fillMaxSize()) {
@@ -1125,28 +1163,116 @@ fun DiffPanelContent(
                     diffPath == null -> Text("Select a changed file.", color = AuraColors.Muted, fontSize = 13.sp)
                     diffText == null -> Text("Loading diff…", color = AuraColors.Muted, fontSize = 13.sp)
                     diffText.isBlank() -> Text("No textual diff to show.", color = AuraColors.Muted, fontSize = 13.sp)
-                    else -> LazyColumn(Modifier.fillMaxSize()) {
-                        items(diffText.split("\n")) { line ->
-                            val (color, bg) = when {
-                                line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ") ->
-                                    VsCodeColors.Breadcrumb to Color.Transparent
-                                line.startsWith("@@") -> AuraColors.Purple to Color.Transparent
-                                line.startsWith("+") -> Color(0xFFB8E6B0) to Color(0x2A3FB950)
-                                line.startsWith("-") -> Color(0xFFF2B8B5) to Color(0x2AF85149)
-                                else -> VsCodeColors.Plain to Color.Transparent
+                    else -> {
+                        val (header, hunks) = remember(diffText) { parseDiffHunks(diffText) }
+                        fun lineStyle(line: String): Pair<Color, Color> = when {
+                            line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ") ->
+                                VsCodeColors.Breadcrumb to Color.Transparent
+                            line.startsWith("@@") -> AuraColors.Purple to Color.Transparent
+                            line.startsWith("+") -> Color(0xFFB8E6B0) to Color(0x2A3FB950)
+                            line.startsWith("-") -> Color(0xFFF2B8B5) to Color(0x2AF85149)
+                            else -> VsCodeColors.Plain to Color.Transparent
+                        }
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            items(header) { line ->
+                                val (color, bg) = lineStyle(line)
+                                Text(
+                                    line,
+                                    color = color,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.fillMaxWidth().background(bg),
+                                )
                             }
-                            Text(
-                                line,
-                                color = color,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.fillMaxWidth().background(bg),
-                            )
+                            itemsIndexed(hunks) { index, hunk ->
+                                Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                                    for (line in hunk.lines) {
+                                        val (color, bg) = lineStyle(line)
+                                        Text(
+                                            line,
+                                            color = color,
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.fillMaxWidth().background(bg),
+                                        )
+                                    }
+                                    val staged = hunkPatch(header, hunk).hashCode() in stagedHunks
+                                    Row(
+                                        Modifier.padding(top = 2.dp, start = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (staged) {
+                                            Text("✓ staged", color = AuraColors.Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        } else {
+                                            Text(
+                                                "✓ Stage",
+                                                color = AuraColors.Blue,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.clickable {
+                                                    onStageHunk(diffPath, hunkPatch(header, hunk))
+                                                },
+                                            )
+                                        }
+                                        Spacer(Modifier.width(14.dp))
+                                        Text(
+                                            "✕ Discard",
+                                            color = AuraColors.Red,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable {
+                                                onDiscardHunk(diffPath, hunkPatch(header, hunk))
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+    // Discard reverses a hunk out of the working tree — destructive (spec §57).
+    if (discardConfirm != null) {
+        Box(
+            Modifier.fillMaxSize().background(Color(0xAA000000)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .width(380.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(AuraColors.PanelGradTop)
+                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .padding(20.dp),
+            ) {
+                Column {
+                    Text(discardConfirm.title, color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(discardConfirm.message, color = AuraColors.Muted, fontSize = 13.sp)
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Cancel",
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = discardConfirm.onCancel).padding(8.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "Discard",
+                            color = AuraColors.Red,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = discardConfirm.onConfirm).padding(8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
     }
 }
 

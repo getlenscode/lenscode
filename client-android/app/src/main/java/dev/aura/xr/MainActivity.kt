@@ -234,6 +234,8 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var stopConfirm by remember { mutableStateOf<dev.aura.xr.ui.StopConfirmState?>(null) }
     var branchConflict by remember { mutableStateOf<dev.aura.xr.ui.BranchConflictState?>(null) }
     var deleteConfirm by remember { mutableStateOf<dev.aura.xr.ui.DeleteConfirmState?>(null) }
+    var diffDiscardConfirm by remember { mutableStateOf<dev.aura.xr.ui.DeleteConfirmState?>(null) }
+    var stagedHunks by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
 
@@ -428,7 +430,34 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         status = gitStatus,
                         diffPath = gitDiffPath,
                         diffText = gitDiffText,
-                        onSelectFile = { path -> bridge.loadGitDiff(path) },
+                        onSelectFile = { path ->
+                            stagedHunks = emptySet()
+                            bridge.loadGitDiff(path)
+                        },
+                        onStageHunk = { path, patch ->
+                            bridge.applyHunk(path, patch, "stage", onDone = {
+                                // The Diff view always shows working-tree-vs-HEAD
+                                // regardless of index state (see git.ts), so a
+                                // successful stage genuinely doesn't change what's
+                                // rendered — only this local badge reflects it.
+                                stagedHunks = stagedHunks + patch.hashCode()
+                            }, onError = {})
+                        },
+                        onDiscardHunk = { path, patch ->
+                            diffDiscardConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                                title = "Discard this hunk?",
+                                message = "This reverts those lines in $path back to HEAD. Uncommitted changes in this hunk are lost.",
+                                onConfirm = {
+                                    bridge.applyHunk(path, patch, "discard", onDone = {
+                                        diffDiscardConfirm = null
+                                        bridge.loadGitDiff(path) // the hunk should be gone now
+                                    }, onError = { diffDiscardConfirm = null })
+                                },
+                                onCancel = { diffDiscardConfirm = null },
+                            )
+                        },
+                        discardConfirm = diffDiscardConfirm,
+                        stagedHunks = stagedHunks,
                     )
                     "git" -> GitPanelContent(
                         worktrees = worktrees,

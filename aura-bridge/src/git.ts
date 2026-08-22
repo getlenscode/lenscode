@@ -128,6 +128,47 @@ export class GitService {
     }
   }
 
+  /** Same contract as `run()`, but pipes `stdin` to the process — needed for `git apply -`. */
+  private runStdin(args: string[], stdin: string, cwd: string = this.root): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = this.machineId
+        ? spawn("ssh", [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=8",
+            this.machineId,
+            `git -C ${shQuote(cwd)} ${args.map(shQuote).join(" ")}`,
+          ])
+        : spawn("git", ["-C", cwd, ...args]);
+      let out = "";
+      let errOut = "";
+      proc.stdout.on("data", (d) => (out += d));
+      proc.stderr.on("data", (d) => (errOut += d));
+      proc.on("error", reject);
+      proc.on("close", (code) => {
+        if (code === 0) resolve(out);
+        else reject(new Error(errOut.trim() || `git ${args.join(" ")} exited ${code}`));
+      });
+      proc.stdin.write(stdin);
+      proc.stdin.end();
+    });
+  }
+
+  /**
+   * Per-hunk accept/reject (spec §31 diff review): `patch` is one hunk's own
+   * text exactly as the client re-derives it from the diff it already has
+   * (file header lines + one `@@ … @@` block) — the bridge never re-parses
+   * or reconstructs it, just pipes it straight to `git apply`.
+   * "stage" adds only that hunk to the index (`git add -p`'s own mechanism);
+   * "discard" is destructive — reverses that hunk out of the working tree —
+   * and the client only ever sends it after its own confirmation card (spec §57).
+   */
+  async applyHunk(path: string, patch: string, action: "stage" | "discard"): Promise<void> {
+    const repoRoot = await this.repoRoot();
+    const args = action === "stage" ? ["apply", "--cached", "-"] : ["apply", "--reverse", "-"];
+    const body = patch.endsWith("\n") ? patch : `${patch}\n`;
+    await this.runStdin(args, body, repoRoot);
+  }
+
   /** Local branch names for the quick switcher (spec §26), current branch first. */
   async listBranches(): Promise<{ current: string | null; branches: string[] }> {
     const [currentOut, allOut] = await Promise.all([
