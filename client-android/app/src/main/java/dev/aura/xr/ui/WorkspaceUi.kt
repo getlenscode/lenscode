@@ -137,7 +137,7 @@ fun StatusDot(color: Color, size: Dp = 8.dp) {
 }
 
 @Composable
-fun PrimaryPanelContent(state: BridgeClient.UiState) {
+fun PrimaryPanelContent(state: BridgeClient.UiState, onResetLayout: () -> Unit = {}) {
     GlassSurface {
         Column(
             Modifier.fillMaxSize().padding(28.dp),
@@ -176,6 +176,16 @@ fun PrimaryPanelContent(state: BridgeClient.UiState) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text("last event: ${state.lastEvent}", color = AuraColors.Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(20.dp))
+                // Every panel's position/size persists across restarts (spec §52) —
+                // this is the escape hatch back to the default layout.
+                Text(
+                    "⟲ Reset Layout",
+                    color = AuraColors.Eyebrow,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(onClick = onResetLayout),
+                )
             }
         }
     }

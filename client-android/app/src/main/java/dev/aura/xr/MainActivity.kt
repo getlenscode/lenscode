@@ -34,6 +34,7 @@ import androidx.xr.compose.subspace.SpatialRow
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.movable
+import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.padding
 import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.width
@@ -95,6 +96,45 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
+ * Builds the width/height/offset/movable/resizable chain for one panel,
+ * loading its saved position/size (if any) and persisting on every move/
+ * resize end (spec §52) — shared by every panel so "move it, it stays moved"
+ * isn't just the primary panel's behavior.
+ */
+@Composable
+private fun rememberPanelModifier(
+    layoutStore: dev.aura.xr.layout.LayoutStore,
+    id: String,
+    defaultWidth: Float,
+    defaultHeight: Float,
+    padding: androidx.compose.ui.unit.Dp,
+    /** Bumped by "Reset Layout" to force every panel to re-read (now-cleared) saved state. */
+    generation: Int = 0,
+): SubspaceModifier {
+    var offset by remember(id, generation) {
+        mutableStateOf(layoutStore.loadOffset(id) ?: dev.aura.xr.layout.SavedOffset(0f, 0f, 0f))
+    }
+    var size by remember(id, generation) {
+        mutableStateOf(layoutStore.loadSize(id) ?: dev.aura.xr.layout.SavedSize(defaultWidth, defaultHeight))
+    }
+    return SubspaceModifier
+        .width(size.width.dp)
+        .height(size.height.dp)
+        .padding(padding)
+        .offset(offset.x.dp, offset.y.dp, offset.z.dp)
+        .movable(onMoveEnd = { event ->
+            val t = event.pose.translation
+            offset = dev.aura.xr.layout.SavedOffset(t.x, t.y, t.z)
+            layoutStore.saveOffset(id, offset)
+        })
+        .resizable(onResizeEnd = { newSize ->
+            size = dev.aura.xr.layout.SavedSize(newSize.width.toFloat(), newSize.height.toFloat())
+            layoutStore.saveSize(id, size)
+            true
+        })
+}
+
+/**
  * Spatial layout mirroring the mockup (spec §71): agent strip on top, one
  * dominant primary panel, quick dock underneath.
  */
@@ -114,6 +154,14 @@ fun AuraWorkspace(bridge: BridgeClient) {
     val machineConnectError by bridge.machineConnectError.collectAsState()
     val terminalsMachineId by bridge.terminalsMachineId.collectAsState()
     val remoteBrowse by bridge.remoteBrowse.collectAsState()
+
+    // ── Panel layout persistence (spec §52) ─────────────────────────────
+    val layoutStore = dev.aura.xr.layout.rememberLayoutStore()
+    var layoutGeneration by remember { mutableStateOf(0) }
+    fun resetLayout() {
+        layoutStore.resetAll()
+        layoutGeneration++ // forces every rememberPanelModifier call to re-read (now default) state
+    }
     val gitStatus by bridge.gitStatus.collectAsState()
     val gitDiffPath by bridge.gitDiffPath.collectAsState()
     val gitDiffText by bridge.gitDiffText.collectAsState()
@@ -240,23 +288,18 @@ fun AuraWorkspace(bridge: BridgeClient) {
             // ── Agent strip — real herdr agent.list, honestly empty if none ──
             SpatialRow {
                 if (agents.isEmpty()) {
-                    SpatialPanel(
-                        SubspaceModifier.width(460.dp).height(90.dp).padding(8.dp).movable().resizable(),
-                    ) {
+                    SpatialPanel(rememberPanelModifier(layoutStore, "agents.empty", 460f, 90f, 8.dp, layoutGeneration)) {
                         AgentChipContent("—", "No agents running", AuraColors.Idle)
                     }
                 } else {
                     for (agent in agents) {
-                        SpatialPanel(
-                            SubspaceModifier
-                                .width(220.dp)
-                                .height(110.dp)
-                                .padding(8.dp)
-                                .movable()
-                                .resizable(),
-                        ) {
-                            Box(Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
-                                AgentChipContent(agent.label, agent.status, AuraColors.agentStatusColor(agent.status), agent.kind)
+                        androidx.compose.runtime.key(agent.paneId) {
+                            SpatialPanel(
+                                rememberPanelModifier(layoutStore, "agent.${agent.paneId}", 220f, 110f, 8.dp, layoutGeneration),
+                            ) {
+                                Box(Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
+                                    AgentChipContent(agent.label, agent.status, AuraColors.agentStatusColor(agent.status), agent.kind)
+                                }
                             }
                         }
                     }
@@ -265,12 +308,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
 
             // ── Primary panel ──────────────────────────────────────────────
             SpatialPanel(
-                SubspaceModifier
-                    .width(900.dp)
-                    .height(520.dp)
-                    .padding(12.dp)
-                    .movable()
-                    .resizable(),
+                rememberPanelModifier(layoutStore, "primary", 900f, 520f, 12.dp, layoutGeneration),
             ) {
                 Box(Modifier.fillMaxSize()) {
                 when (activeView) {
@@ -417,7 +455,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                             bridge.startRemoteBrowse(machineId, label, "/")
                         },
                     )
-                    else -> PrimaryPanelContent(state)
+                    else -> PrimaryPanelContent(state, onResetLayout = { resetLayout() })
                 }
                 // Voice search is reachable from any view (dock mic button
                 // below), so its overlay lives here rather than inside one
@@ -518,16 +556,11 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 )
                 ) {
                     val (icon, label, id) = dock
-                    SpatialPanel(
-                        SubspaceModifier
-                            .width(150.dp)
-                            .height(70.dp)
-                            .padding(6.dp)
-                            .movable()
-                            .resizable(),
-                    ) {
-                        DockButtonContent(icon, label, active = activeView == id) {
-                            if (id == "voice") requestVoiceSearch() else activeView = id
+                    androidx.compose.runtime.key(id) {
+                        SpatialPanel(rememberPanelModifier(layoutStore, "dock.$id", 150f, 70f, 6.dp, layoutGeneration)) {
+                            DockButtonContent(icon, label, active = activeView == id) {
+                                if (id == "voice") requestVoiceSearch() else activeView = id
+                            }
                         }
                     }
                 }
