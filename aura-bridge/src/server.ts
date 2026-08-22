@@ -337,7 +337,7 @@ export class BridgeServer {
       }
       case "git.status": {
         try {
-          const git = await this.gitFor(req.workspaceId);
+          const git = await this.gitFor(req.workspaceId, req.machineId);
           this.send(ws, { id: req.id, result: await git.status() });
         } catch (e) {
           this.send(ws, {
@@ -349,7 +349,7 @@ export class BridgeServer {
       }
       case "git.diff": {
         try {
-          const git = await this.gitFor(req.workspaceId);
+          const git = await this.gitFor(req.workspaceId, req.machineId);
           this.send(ws, { id: req.id, result: { path: req.path, diff: await git.diff(req.path) } });
         } catch (e) {
           this.send(ws, {
@@ -361,7 +361,7 @@ export class BridgeServer {
       }
       case "git.branches": {
         try {
-          const git = await this.gitFor(req.workspaceId);
+          const git = await this.gitFor(req.workspaceId, req.machineId);
           this.send(ws, { id: req.id, result: await git.listBranches() });
         } catch (e) {
           this.send(ws, {
@@ -373,7 +373,7 @@ export class BridgeServer {
       }
       case "git.branch.switch": {
         try {
-          const git = await this.gitFor(req.workspaceId);
+          const git = await this.gitFor(req.workspaceId, req.machineId);
           const { files } = await git.status();
           const dirty = files.length > 0;
 
@@ -399,7 +399,25 @@ export class BridgeServer {
             return;
           }
 
-          const cwd = await this.resolveWorkspaceRoot(req.workspaceId);
+          // For a remote machine, workspaceId IS the absolute root already
+          // (see resolveFiles/gitFor) — resolveWorkspaceRoot only knows how
+          // to resolve the bridge's own local Herdr workspace ids.
+          const isRemote = Boolean(req.machineId) && req.machineId !== "local";
+          const cwd = isRemote ? req.workspaceId : await this.resolveWorkspaceRoot(req.workspaceId);
+
+          if (dirty && req.onDirty === "worktree" && isRemote) {
+            // Herdr worktrees aren't wired up for remote machines yet — this
+            // resolution only ever runs against the bridge's own local Herdr.
+            this.send(ws, {
+              id: req.id,
+              error: err(
+                "invalid_request",
+                "Opening a new worktree isn't supported on a remote machine yet — try stash instead.",
+                false,
+              ),
+            });
+            return;
+          }
 
           if (dirty && req.onDirty === "worktree") {
             // Never touches the dirty tree at all: the target branch opens
@@ -616,8 +634,24 @@ export class BridgeServer {
     return files;
   }
 
-  /** Git service for the same workspace root "Code" browses (spec §23 — diff must match what's on screen). */
-  private async gitFor(workspaceId: string): Promise<GitService> {
+  /**
+   * Git service for the same workspace root "Code" browses (spec §23 — diff
+   * must match what's on screen). Routes to a remote machine the same way
+   * [resolveFiles] does: for a remote, `workspaceId` is the literal absolute
+   * root, not a Herdr workspace id to resolve.
+   */
+  private async gitFor(workspaceId: string, machineId?: string): Promise<GitService> {
+    if (machineId && machineId !== "local") {
+      const key = `${machineId}:${workspaceId}`;
+      const cached = this.gitServices.get(key);
+      if (cached) return cached;
+      if (!this.remote.isConnected(machineId)) {
+        throw new Error(`Not connected to ${machineId} — connect to it first.`);
+      }
+      const git = new GitService(workspaceId, machineId);
+      this.gitServices.set(key, git);
+      return git;
+    }
     const cached = this.gitServices.get(workspaceId);
     if (cached) return cached;
     const git = new GitService(await this.resolveWorkspaceRoot(workspaceId));

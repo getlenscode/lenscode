@@ -376,7 +376,7 @@ class BridgeClient(
     fun refreshGitStatus() {
         send(
             "git.status",
-            JSONObject().put("workspaceId", filesWorkspaceId),
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId),
             onResult = { result ->
                 val arr = result.optJSONArray("files") ?: JSONArray()
                 val files = (0 until arr.length()).map { i ->
@@ -408,7 +408,7 @@ class BridgeClient(
     fun refreshBranches() {
         send(
             "git.branches",
-            JSONObject().put("workspaceId", filesWorkspaceId),
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId),
             onResult = { result ->
                 val arr = result.optJSONArray("branches") ?: JSONArray()
                 _branches.value = (0 until arr.length()).map { arr.getString(it) }
@@ -431,7 +431,10 @@ class BridgeClient(
         onConflict: () -> Unit,
         onWorktreeCreated: (String?) -> Unit,
     ) {
-        val fields = JSONObject().put("workspaceId", filesWorkspaceId).put("target", target)
+        val fields = JSONObject()
+            .put("machineId", filesMachineId)
+            .put("workspaceId", filesWorkspaceId)
+            .put("target", target)
         if (onDirty != null) fields.put("onDirty", onDirty)
         send(
             "git.branch.switch",
@@ -461,7 +464,7 @@ class BridgeClient(
         _gitDiffText.value = null
         send(
             "git.diff",
-            JSONObject().put("workspaceId", filesWorkspaceId).put("path", path),
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("path", path),
             onResult = { result ->
                 if (_gitDiffPath.value == path) _gitDiffText.value = result.optString("diff", "")
             },

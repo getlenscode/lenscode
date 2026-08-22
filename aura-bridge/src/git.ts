@@ -1,9 +1,17 @@
 /**
  * Git status + diff (spec §23–26, §70). Shells out to the system `git` —
  * scoped to one workspace root, same root a WorkspaceFiles instance uses, so
- * "Diff" always reflects the same tree "Code" is browsing.
+ * "Diff" always reflects the same tree "Code" is browsing. When [machineId]
+ * is set (spec §37), the exact same `git` invocations run over SSH against
+ * that machine instead of locally — same commands, same parsing, just a
+ * different place they execute.
  */
 import { spawn } from "node:child_process";
+
+/** Single-quotes an argument for a POSIX remote shell, escaping embedded quotes. */
+function shQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
 
 export interface GitFileStatus {
   path: string;
@@ -19,12 +27,15 @@ export interface GitStatusResult {
 
 export class GitService {
   private root: string;
+  /** Set for a connected remote machine (spec §37); undefined runs `git` locally. */
+  private machineId?: string;
   /** Repo top-level, lazily resolved — `status()` reports paths relative to
    * this, not to `root`, whenever `root` is a subdirectory of the repo. */
   private repoRootPromise: Promise<string> | null = null;
 
-  constructor(root: string) {
+  constructor(root: string, machineId?: string) {
     this.root = root;
+    this.machineId = machineId;
   }
 
   private repoRoot(): Promise<string> {
@@ -43,7 +54,14 @@ export class GitService {
    */
   private run(args: string[], okExitCodes: number[] = [0], cwd: string = this.root): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn("git", ["-C", cwd, ...args]);
+      const proc = this.machineId
+        ? spawn("ssh", [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=8",
+            this.machineId,
+            `git -C ${shQuote(cwd)} ${args.map(shQuote).join(" ")}`,
+          ])
+        : spawn("git", ["-C", cwd, ...args]);
       let out = "";
       let errOut = "";
       proc.stdout.on("data", (d) => (out += d));

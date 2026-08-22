@@ -234,12 +234,14 @@ export const GitBranchSwitchRequest = z.object({
   target: z.string().min(1),
   /** Safety resolution when dirty (spec §27); absent → bridge refuses if unsafe. */
   onDirty: z.enum(["stash", "worktree", "abort"]).optional(),
+  ...machineScope,
 });
 
 export const GitStatusRequest = z.object({
   ...requestBase,
   type: z.literal("git.status"),
   workspaceId: z.string(),
+  ...machineScope,
 });
 
 /** Local branch names for the quick switcher (spec §26). */
@@ -247,6 +249,7 @@ export const GitBranchesRequest = z.object({
   ...requestBase,
   type: z.literal("git.branches"),
   workspaceId: z.string(),
+  ...machineScope,
 });
 
 /** Unified diff for one file, relative to HEAD (untracked files diff against empty). */
@@ -255,6 +258,7 @@ export const GitDiffRequest = z.object({
   type: z.literal("git.diff"),
   workspaceId: z.string(),
   path: z.string().min(1),
+  ...machineScope,
 });
 
 // ---------------------------------------------------------------------------
