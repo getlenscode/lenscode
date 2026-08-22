@@ -255,7 +255,7 @@ export class WorkspaceFiles {
  * basename subsequence ≫ path subsequence. Good enough for M5; the semantic
  * index replaces it in M6.
  */
-function fuzzyScore(q: string, path: string, base: string): number {
+export function fuzzyScore(q: string, path: string, base: string): number {
   if (!q) return 0;
   const baseNoExt = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
   // Spoken queries drop whitespace but rarely reproduce internal dots in
@@ -293,7 +293,7 @@ export function normalizeSpokenQuery(raw: string): string {
   return q;
 }
 
-function isSubsequence(needle: string, haystack: string): boolean {
+export function isSubsequence(needle: string, haystack: string): boolean {
   let i = 0;
   for (const ch of haystack) {
     if (ch === needle[i]) i++;

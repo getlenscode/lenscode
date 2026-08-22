@@ -287,7 +287,7 @@ export class BridgeServer {
         return;
       }
       case "voice.search": {
-        const files = await this.filesFor(req.workspaceId);
+        const files = await this.resolveFiles(req.machineId, req.workspaceId);
         const started = Date.now();
         const resolution = await files.resolveVoiceQuery(req.query);
         this.send(ws, {
@@ -341,7 +341,7 @@ export class BridgeServer {
         return;
       }
       case "search.files": {
-        const files = await this.filesFor(req.workspaceId);
+        const files = await this.resolveFiles(req.machineId, req.workspaceId);
         const started = Date.now();
         const hits = await files.search(req.query, req.limit);
         this.send(ws, {

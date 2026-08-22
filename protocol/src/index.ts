@@ -36,6 +36,8 @@ export const StructuredError = z.object({
 export type StructuredError = z.infer<typeof StructuredError>;
 
 const requestBase = { id: z.string().min(1) };
+/** "local" (default) or a connected remote machine id (spec §37). */
+const machineScope = { machineId: z.string().optional() };
 
 // ---------------------------------------------------------------------------
 // Handshake
@@ -119,6 +121,7 @@ export const SearchFilesRequest = z.object({
       recentFiles: z.array(z.string()).optional(),
     })
     .optional(),
+  ...machineScope,
 });
 
 /**
@@ -138,14 +141,14 @@ export const VoiceSearchRequest = z.object({
       activePanel: z.string().optional(),
     })
     .optional(),
+  ...machineScope,
 });
 
 // ---------------------------------------------------------------------------
 // Terminals (spec §18–21) — ergonomic wrappers over Herdr pane operations
 // ---------------------------------------------------------------------------
 
-/** Every terminal.* request carries this — "local" (the default) or a connected remote machine id (spec §37). */
-const machineScope = { machineId: z.string().optional() };
+// Every terminal.* request below carries machineScope too.
 
 export const TerminalListRequest = z.object({
   ...requestBase,

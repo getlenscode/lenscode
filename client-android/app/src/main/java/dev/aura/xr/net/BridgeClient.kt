@@ -345,7 +345,7 @@ class BridgeClient(
         _voiceResult.value = null
         send(
             "voice.search",
-            JSONObject().put("workspaceId", filesWorkspaceId).put("query", query),
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("query", query),
             onResult = { result ->
                 val arr = result.optJSONArray("candidates") ?: JSONArray()
                 val candidates = (0 until arr.length()).map { i ->
