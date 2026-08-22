@@ -130,9 +130,31 @@ export class GitService {
     await this.run(["checkout", target]);
   }
 
-  /** Stashes local changes (including untracked) before switching (spec §27's "stash" resolution). */
+  /**
+   * Stashes local changes (including untracked) before switching (spec §27's
+   * "stash" resolution). If the checkout itself then fails — most commonly
+   * because the target branch is already checked out in one of this repo's
+   * other worktrees, which `git checkout` refuses outright — the stash is
+   * popped back immediately rather than left behind. A failed switch must
+   * never look like "my uncommitted changes just vanished".
+   */
   async stashAndCheckout(target: string): Promise<void> {
     await this.run(["stash", "push", "-u", "-m", `aura-xr: before switching to ${target}`]);
-    await this.run(["checkout", target]);
+    try {
+      await this.run(["checkout", target]);
+    } catch (e) {
+      await this.run(["stash", "pop"]).catch(() => {
+        // Extremely unlikely (nothing should have touched the tree between
+        // the two calls above), but surfacing the original checkout error is
+        // more useful than a rollback failure either way.
+      });
+      throw e;
+    }
   }
+}
+
+/** Extracts the worktree path from git's "already used by worktree" refusal, if that's what failed. */
+export function worktreeConflictPath(errorMessage: string): string | null {
+  const match = errorMessage.match(/is already used by worktree at '(.+)'/);
+  return match?.[1] ?? null;
 }

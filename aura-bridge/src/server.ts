@@ -14,7 +14,7 @@ import { HerdrClient } from "./herdr.ts";
 import { PairingRegistry } from "./pairing.ts";
 import { WorkspaceFiles } from "./files.ts";
 import { Terminals } from "./terminals.ts";
-import { GitService } from "./git.ts";
+import { GitService, worktreeConflictPath } from "./git.ts";
 import { listMachines } from "./machines.ts";
 import { RemoteManager } from "./remote.ts";
 import { RemoteFiles } from "./remoteFiles.ts";
@@ -399,33 +399,58 @@ export class BridgeServer {
             return;
           }
 
+          const cwd = await this.resolveWorkspaceRoot(req.workspaceId);
+
           if (dirty && req.onDirty === "worktree") {
             // Never touches the dirty tree at all: the target branch opens
             // in a brand-new worktree instead, so nothing here is at risk.
             // Herdr needs to be told which repo via cwd — it has no notion
             // of the bridge's own "local" workspace id.
             await this.ensureHerdr();
-            const cwd = await this.resolveWorkspaceRoot(req.workspaceId);
-            const created = (await this.herdr.request("worktree.create", {
-              branch: req.target,
-              cwd,
-              focus: false,
-            })) as { workspace?: { workspace_id?: string } };
-            this.send(ws, {
-              id: req.id,
-              result: { switched: false, worktreeCreated: true, workspaceId: created.workspace?.workspace_id ?? null },
-            });
+            try {
+              const created = (await this.herdr.request("worktree.create", {
+                branch: req.target,
+                cwd,
+                focus: false,
+              })) as { workspace?: { workspace_id?: string } };
+              this.send(ws, {
+                id: req.id,
+                result: { switched: false, worktreeCreated: true, workspaceId: created.workspace?.workspace_id ?? null },
+              });
+            } catch (e) {
+              // A worktree for this branch already exists (spec §28's model —
+              // branches created via this UI each get their own persistent
+              // worktree) — open the existing one instead of failing to make
+              // a duplicate.
+              const existing = await this.findExistingWorktreeWorkspace(cwd, req.target);
+              if (existing) {
+                this.send(ws, { id: req.id, result: { switched: false, worktreeCreated: true, workspaceId: existing } });
+              } else {
+                this.send(ws, {
+                  id: req.id,
+                  error: err("internal", `Could not open a worktree for ${req.target}.`, true, String(e)),
+                });
+              }
+            }
             return;
           }
 
           if (dirty && req.onDirty === "stash") {
-            await git.stashAndCheckout(req.target);
-            this.send(ws, { id: req.id, result: { switched: true, stashed: true, branch: req.target } });
+            try {
+              await git.stashAndCheckout(req.target);
+              this.send(ws, { id: req.id, result: { switched: true, stashed: true, branch: req.target } });
+            } catch (e) {
+              await this.redirectToExistingWorktreeOrFail(ws, req.id, cwd, req.target, e);
+            }
             return;
           }
 
-          await git.checkout(req.target);
-          this.send(ws, { id: req.id, result: { switched: true, branch: req.target } });
+          try {
+            await git.checkout(req.target);
+            this.send(ws, { id: req.id, result: { switched: true, branch: req.target } });
+          } catch (e) {
+            await this.redirectToExistingWorktreeOrFail(ws, req.id, cwd, req.target, e);
+          }
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -614,6 +639,46 @@ export class BridgeServer {
       }
     }
     return root;
+  }
+
+  /** Looks up the live workspace_id for a branch that already has a Herdr worktree checked out. */
+  private async findExistingWorktreeWorkspace(cwd: string, branch: string): Promise<string | null> {
+    try {
+      const result = (await this.herdr.request("worktree.list", { cwd })) as {
+        worktrees?: Array<{ branch?: string | null; open_workspace_id?: string | null }>;
+      };
+      const match = result.worktrees?.find((w) => w.branch === branch && w.open_workspace_id);
+      return match?.open_workspace_id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `git checkout` refuses outright if the target branch is already checked
+   * out in one of this repo's other worktrees — every branch created through
+   * this UI's worktree flow is in exactly that state. Rather than surface
+   * that as a dead-end error, redirect to the worktree that's already there.
+   */
+  private async redirectToExistingWorktreeOrFail(
+    ws: WebSocket,
+    id: string,
+    cwd: string,
+    target: string,
+    error: unknown,
+  ): Promise<void> {
+    const message = String(error);
+    if (worktreeConflictPath(message)) {
+      const existing = await this.findExistingWorktreeWorkspace(cwd, target);
+      if (existing) {
+        this.send(ws, {
+          id,
+          result: { switched: false, worktreeCreated: true, workspaceId: existing, alreadyOpenElsewhere: true },
+        });
+        return;
+      }
+    }
+    this.send(ws, { id, error: err("internal", `Could not switch to ${target}.`, true, message) });
   }
 
   private async ensureHerdr(): Promise<void> {
