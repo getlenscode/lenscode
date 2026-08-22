@@ -50,6 +50,7 @@ import dev.aura.xr.net.BridgeClient
 import dev.aura.xr.net.DirEntry
 import dev.aura.xr.net.FileContent
 import dev.aura.xr.net.PaneInfo
+import dev.aura.xr.net.PairingState
 import dev.aura.xr.net.VoiceResolution
 
 /**
@@ -144,6 +145,14 @@ fun PrimaryPanelContent(
     onTogglePin: () -> Unit = {},
     onBringCloser: () -> Unit = {},
     onPushFarther: () -> Unit = {},
+    pairingState: PairingState = PairingState.Authenticated,
+    deviceName: String = "",
+    onDeviceNameChange: (String) -> Unit = {},
+    onBeginPairing: () -> Unit = {},
+    pairingCode: String = "",
+    onPairingCodeChange: (String) -> Unit = {},
+    onSubmitPairingCode: () -> Unit = {},
+    onRetryPairing: () -> Unit = {},
 ) {
     GlassSurface {
         Column(
@@ -153,7 +162,18 @@ fun PrimaryPanelContent(
         ) {
             Eyebrow("AURA WORKSPACE")
             Spacer(Modifier.height(18.dp))
-            if (!state.bridgeConnected) {
+            if (state.bridgeConnected && pairingState != PairingState.Authenticated) {
+                PairingFlowContent(
+                    pairingState,
+                    deviceName,
+                    onDeviceNameChange,
+                    onBeginPairing,
+                    pairingCode,
+                    onPairingCodeChange,
+                    onSubmitPairingCode,
+                    onRetryPairing,
+                )
+            } else if (!state.bridgeConnected) {
                 Text("Connection lost.", color = AuraColors.Amber, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -222,6 +242,125 @@ fun PrimaryPanelContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * Device pairing flow (spec §55). Only ever shown when the bridge is running
+ * in prod mode and this device hasn't paired yet — dev mode auto-authenticates
+ * and never surfaces this. The 6-digit code itself is intentionally never
+ * shown here: it's displayed on the bridge's own console/desktop, and the
+ * human reads it across and types (or speaks) it in here — the code is never
+ * sent to an unauthenticated device over the network.
+ */
+@Composable
+private fun PairingFlowContent(
+    pairingState: PairingState,
+    deviceName: String,
+    onDeviceNameChange: (String) -> Unit,
+    onBeginPairing: () -> Unit,
+    pairingCode: String,
+    onPairingCodeChange: (String) -> Unit,
+    onSubmitPairingCode: () -> Unit,
+    onRetryPairing: () -> Unit,
+) {
+    Text("Pairing required", color = AuraColors.Amber, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(10.dp))
+    when (pairingState) {
+        is PairingState.NeedsPairing -> {
+            Text(
+                "This device isn't paired with aura-bridge yet.",
+                color = AuraColors.Muted,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+            PairingTextField(deviceName, onDeviceNameChange, "Device name", onSubmit = onBeginPairing)
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Start Pairing",
+                color = AuraColors.Blue,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onBeginPairing)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+        is PairingState.CodeSent -> {
+            Text(
+                "A pairing code is now shown on the bridge's console.\nEnter it below to finish pairing “${pairingState.deviceName}”.",
+                color = AuraColors.Muted,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+            PairingTextField(pairingCode, onPairingCodeChange, "6-digit code", onSubmit = onSubmitPairingCode)
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Submit Code",
+                color = AuraColors.Blue,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onSubmitPairingCode)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+        is PairingState.Failed -> {
+            Text(pairingState.message, color = AuraColors.Red, fontSize = 14.sp)
+            Spacer(Modifier.height(16.dp))
+            PairingTextField(pairingCode, onPairingCodeChange, "6-digit code", onSubmit = onSubmitPairingCode)
+            Spacer(Modifier.height(12.dp))
+            Row {
+                Text(
+                    "Retry",
+                    color = AuraColors.Blue,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onSubmitPairingCode)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "Start Over",
+                    color = AuraColors.Muted,
+                    fontSize = 15.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onRetryPairing)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
+        PairingState.Authenticated -> {} // never reached — caller gates on this
+    }
+}
+
+@Composable
+private fun PairingTextField(value: String, onValueChange: (String) -> Unit, placeholder: String, onSubmit: () -> Unit) {
+    Box(
+        Modifier
+            .width(220.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(VsCodeColors.EditorBg)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        if (value.isEmpty()) {
+            Text(placeholder, color = AuraColors.Muted, fontSize = 14.sp)
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = TextStyle(color = AuraColors.Text, fontSize = 14.sp),
+            singleLine = true,
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(AuraColors.Text),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onSubmit() }),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

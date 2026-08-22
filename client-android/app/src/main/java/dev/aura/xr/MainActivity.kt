@@ -77,7 +77,12 @@ class MainActivity : ComponentActivity() {
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
             ?: "android-xr-dev"
         // 10.0.2.2 = host loopback from the Android emulator (aura-bridge).
-        bridge = BridgeClient(lifecycleScope, "ws://10.0.2.2:8137", deviceId)
+        bridge = BridgeClient(
+            lifecycleScope,
+            "ws://10.0.2.2:8137",
+            deviceId,
+            dev.aura.xr.net.PairingStore(applicationContext),
+        )
         bridge.connect()
 
         setContent { AuraWorkspace(bridge) }
@@ -231,6 +236,11 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var deleteConfirm by remember { mutableStateOf<dev.aura.xr.ui.DeleteConfirmState?>(null) }
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
+
+    // ── Device pairing (spec §55) ────────────────────────────────────────
+    val pairingState by bridge.pairingState.collectAsState()
+    var pairingDeviceName by remember { mutableStateOf("Aura XR Glasses") }
+    var pairingCode by remember { mutableStateOf("") }
 
     fun openAgentDetail(agent: dev.aura.xr.net.AgentInfo) {
         agentDetail = dev.aura.xr.ui.AgentDetailState(agent, preview = null)
@@ -557,6 +567,19 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         onTogglePin = { primaryLayout.togglePinned() },
                         onBringCloser = { primaryLayout.nudgeDepth(-40f) },
                         onPushFarther = { primaryLayout.nudgeDepth(40f) },
+                        pairingState = pairingState,
+                        deviceName = pairingDeviceName,
+                        onDeviceNameChange = { pairingDeviceName = it },
+                        onBeginPairing = { bridge.beginPairing(pairingDeviceName) },
+                        pairingCode = pairingCode,
+                        onPairingCodeChange = { pairingCode = it },
+                        onSubmitPairingCode = {
+                            bridge.completePairing(pairingDeviceName, pairingCode)
+                        },
+                        onRetryPairing = {
+                            pairingCode = ""
+                            bridge.beginPairing(pairingDeviceName)
+                        },
                     )
                 }
                 // Voice search is reachable from any view (dock mic button

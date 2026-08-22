@@ -51,6 +51,17 @@ data class GitStatus(val branch: String?, val files: List<GitFileStatus>)
 
 data class MachineInfo(val id: String, val label: String, val connected: Boolean = false)
 
+/** Client-side view of the pairing handshake (spec §55) — drives the pairing card. */
+sealed class PairingState {
+    /** Not paired yet and no pairing in progress; unauthenticated in prod mode. */
+    object NeedsPairing : PairingState()
+    /** pair.begin succeeded; code is shown on the bridge's own console, not here. */
+    data class CodeSent(val deviceName: String) : PairingState()
+    data class Failed(val deviceName: String, val message: String) : PairingState()
+    /** Either dev mode (pairing skipped) or pair.complete already succeeded. */
+    object Authenticated : PairingState()
+}
+
 /**
  * WebSocket client for aura-bridge speaking XR protocol v1 (see ../protocol).
  * Runs the initial-sync sequence (spec §7): hello → snapshot → subscribe, and
@@ -64,7 +75,10 @@ class BridgeClient(
     private val scope: CoroutineScope,
     private val url: String,
     private val deviceId: String,
+    private val pairingStore: PairingStore,
 ) {
+    private val _pairingState = MutableStateFlow<PairingState>(PairingState.NeedsPairing)
+    val pairingState: StateFlow<PairingState> = _pairingState
     data class UiState(
         val bridgeConnected: Boolean = false,
         val herdrConnected: Boolean = false,
@@ -129,6 +143,86 @@ class BridgeClient(
     fun close() {
         closedByUs = true
         ws?.close(1000, "bye")
+    }
+
+    private fun sendHello() {
+        val fields = JSONObject()
+            .put("protocolVersion", 1)
+            .put("deviceId", deviceId)
+            .put(
+                "clientInfo",
+                JSONObject()
+                    .put("app", "aura-xr-android")
+                    .put("version", "0.1.0")
+                    .put("platform", "android-xr"),
+            )
+        pairingStore.loadToken()?.let { fields.put("deviceToken", it) }
+        send(
+            "hello",
+            fields,
+            onResult = { helloResult ->
+                Log.d("AuraBridge", "hello result received: $helloResult")
+                _state.value = _state.value.copy(
+                    bridgeConnected = true,
+                    herdrConnected = helloResult.optBoolean("herdrConnected", false),
+                )
+                if (helloResult.optBoolean("authenticated", false)) {
+                    _pairingState.value = PairingState.Authenticated
+                    onAuthenticated()
+                } else {
+                    // Dev mode always authenticates; only prod, unpaired devices land
+                    // here. Nothing but hello/pair.* is reachable until this resolves.
+                    _pairingState.value = PairingState.NeedsPairing
+                }
+            },
+        )
+    }
+
+    private fun onAuthenticated() {
+        send("snapshot.request", onResult = { snapshotResult -> applySnapshot(snapshotResult) })
+        send("events.subscribe", JSONObject().put("topics", JSONArray().put("herdr")))
+        refreshTerminals()
+        refreshAgents()
+    }
+
+    /** Starts pairing (spec §55) — the 6-digit code itself is shown on the bridge's own console. */
+    fun beginPairing(deviceName: String) {
+        send(
+            "pair.begin",
+            JSONObject().put("deviceId", deviceId).put("deviceName", deviceName),
+            onResult = { _pairingState.value = PairingState.CodeSent(deviceName) },
+            onError = { error ->
+                _pairingState.value = PairingState.Failed(
+                    deviceName,
+                    error.optString("message", "Could not start pairing."),
+                )
+            },
+        )
+    }
+
+    /** Submits the code a human read off the bridge console and typed/spoke into XR. */
+    fun completePairing(deviceName: String, code: String) {
+        send(
+            "pair.complete",
+            JSONObject().put("deviceId", deviceId).put("pairingCode", code),
+            onResult = { result ->
+                pairingStore.saveToken(result.getString("deviceToken"))
+                _pairingState.value = PairingState.Authenticated
+                onAuthenticated()
+            },
+            onError = { error ->
+                // Stay in CodeSent (not NeedsPairing) so a wrong digit doesn't force
+                // starting the whole flow — and thus the code — over again.
+                _pairingState.value = PairingState.Failed(
+                    deviceName,
+                    error.optString("message", "That pairing code did not work."),
+                )
+            },
+        )
+    }
+
+    fun retryPairingAfterFailure(deviceName: String) {
+        _pairingState.value = PairingState.CodeSent(deviceName)
     }
 
     private fun send(
@@ -816,30 +910,7 @@ class BridgeClient(
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             Log.d("AuraBridge", "onOpen: socket open, sending hello")
-            send(
-                "hello",
-                JSONObject()
-                    .put("protocolVersion", 1)
-                    .put("deviceId", deviceId)
-                    .put(
-                        "clientInfo",
-                        JSONObject()
-                            .put("app", "aura-xr-android")
-                            .put("version", "0.1.0")
-                            .put("platform", "android-xr"),
-                    ),
-                onResult = { helloResult ->
-                    Log.d("AuraBridge", "hello result received: $helloResult")
-                    _state.value = _state.value.copy(
-                        bridgeConnected = true,
-                        herdrConnected = helloResult.optBoolean("herdrConnected", false),
-                    )
-                    send("snapshot.request", onResult = { snapshotResult -> applySnapshot(snapshotResult) })
-                    send("events.subscribe", JSONObject().put("topics", JSONArray().put("herdr")))
-                    refreshTerminals()
-                    refreshAgents()
-                },
-            )
+            sendHello()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
