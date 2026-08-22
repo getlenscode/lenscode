@@ -637,6 +637,14 @@ data class BranchConflictState(
     val onCancel: () -> Unit,
 )
 
+/** Generic destructive-action confirmation (spec §57) — branch delete, worktree removal, etc. */
+data class DeleteConfirmState(
+    val title: String,
+    val message: String,
+    val onConfirm: () -> Unit,
+    val onCancel: () -> Unit,
+)
+
 /** Git / Worktrees view: branch switcher up top, real Herdr worktree.list below. */
 @Composable
 fun GitPanelContent(
@@ -645,7 +653,10 @@ fun GitPanelContent(
     currentBranch: String?,
     onOpenInCode: (dev.aura.xr.net.WorktreeInfo) -> Unit,
     onSwitchBranch: (String) -> Unit,
+    onDeleteBranch: (String) -> Unit,
+    onRemoveWorktree: (dev.aura.xr.net.WorktreeInfo) -> Unit,
     conflict: BranchConflictState?,
+    deleteConfirm: DeleteConfirmState?,
 ) {
     Box(Modifier.fillMaxSize()) {
     GlassSurface {
@@ -658,7 +669,7 @@ fun GitPanelContent(
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     for (branch in branches) {
                         val isCurrent = branch == currentBranch
-                        Box(
+                        Row(
                             Modifier
                                 .padding(end = 8.dp)
                                 .clip(RoundedCornerShape(20.dp))
@@ -670,6 +681,7 @@ fun GitPanelContent(
                                 )
                                 .clickable(enabled = !isCurrent) { onSwitchBranch(branch) }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
                                 branch,
@@ -677,6 +689,17 @@ fun GitPanelContent(
                                 fontSize = 13.sp,
                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                             )
+                            // Never the current branch — git itself refuses that anyway.
+                            if (!isCurrent) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "×",
+                                    color = AuraColors.Muted,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { onDeleteBranch(branch) },
+                                )
+                            }
                         }
                     }
                 }
@@ -731,7 +754,16 @@ fun GitPanelContent(
                                 color = AuraColors.Eyebrow,
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f),
                             )
+                            // The main checkout isn't a worktree to remove — only linked ones are.
+                            if (wt.isLinked) {
+                                Text(
+                                    "🗑",
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.clickable { onRemoveWorktree(wt) }.padding(4.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -788,6 +820,46 @@ fun GitPanelContent(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onCancel).padding(vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    // Branch delete / worktree removal — never happens without this (spec §57).
+    if (deleteConfirm != null) {
+        Box(
+            Modifier.fillMaxSize().background(Color(0xAA000000)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .width(380.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(AuraColors.PanelGradTop)
+                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .padding(20.dp),
+            ) {
+                Column {
+                    Text(deleteConfirm.title, color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(deleteConfirm.message, color = AuraColors.Muted, fontSize = 13.sp)
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Cancel",
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = deleteConfirm.onCancel).padding(8.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "Delete",
+                            color = AuraColors.Red,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = deleteConfirm.onConfirm).padding(8.dp),
                         )
                     }
                 }

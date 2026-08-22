@@ -149,6 +149,15 @@ export class GitService {
   }
 
   /**
+   * `force` maps to `-D` (skip the "not fully merged" check) — the client
+   * only ever sends this after its own confirmation card, mirroring the
+   * interrupt/branch-switch pattern elsewhere (spec §57).
+   */
+  async deleteBranch(branch: string, force: boolean): Promise<void> {
+    await this.run(["branch", force ? "-D" : "-d", branch]);
+  }
+
+  /**
    * Stashes local changes (including untracked) before switching (spec §27's
    * "stash" resolution). If the checkout itself then fails — most commonly
    * because the target branch is already checked out in one of this repo's
@@ -171,8 +180,13 @@ export class GitService {
   }
 }
 
-/** Extracts the worktree path from git's "already used by worktree" refusal, if that's what failed. */
+/**
+ * Extracts the worktree path from git's "used by worktree" refusal, if
+ * that's what failed — covers both checkout ("is already used by worktree
+ * at '...'") and branch delete ("cannot delete branch 'x' used by worktree
+ * at '...'"), which share this substring.
+ */
 export function worktreeConflictPath(errorMessage: string): string | null {
-  const match = errorMessage.match(/is already used by worktree at '(.+)'/);
+  const match = errorMessage.match(/used by worktree at '(.+)'/);
   return match?.[1] ?? null;
 }

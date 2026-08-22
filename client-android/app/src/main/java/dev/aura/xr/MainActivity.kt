@@ -172,6 +172,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var selectedPane by remember { mutableStateOf<PaneInfo?>(null) }
     var stopConfirm by remember { mutableStateOf<dev.aura.xr.ui.StopConfirmState?>(null) }
     var branchConflict by remember { mutableStateOf<dev.aura.xr.ui.BranchConflictState?>(null) }
+    var deleteConfirm by remember { mutableStateOf<dev.aura.xr.ui.DeleteConfirmState?>(null) }
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
 
@@ -428,7 +429,46 @@ fun AuraWorkspace(bridge: BridgeClient) {
                                 },
                             )
                         },
+                        onDeleteBranch = { branch ->
+                            deleteConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                                title = "Delete branch?",
+                                message = "This deletes $branch. It can't be recovered if unmerged changes only exist there.",
+                                onConfirm = {
+                                    bridge.deleteBranch(
+                                        branch,
+                                        onDone = { deleteConfirm = null },
+                                        onError = { message ->
+                                            deleteConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                                                title = "Couldn't delete $branch",
+                                                message = message,
+                                                onConfirm = {
+                                                    // Not fully merged is the common reason git -d refuses — offer -D.
+                                                    bridge.deleteBranch(branch, force = true, onDone = { deleteConfirm = null }, onError = { deleteConfirm = null })
+                                                },
+                                                onCancel = { deleteConfirm = null },
+                                            )
+                                        },
+                                    )
+                                },
+                                onCancel = { deleteConfirm = null },
+                            )
+                        },
+                        onRemoveWorktree = { wt ->
+                            deleteConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                                title = "Remove worktree?",
+                                message = "This deletes the checkout at ${wt.path}. Any uncommitted changes there are lost.",
+                                onConfirm = {
+                                    bridge.removeWorktree(
+                                        wt,
+                                        onDone = { deleteConfirm = null },
+                                        onError = { deleteConfirm = null },
+                                    )
+                                },
+                                onCancel = { deleteConfirm = null },
+                            )
+                        },
                         conflict = branchConflict,
+                        deleteConfirm = deleteConfirm,
                     )
                     "remote" -> RemotePanelContent(
                         machines = machines,

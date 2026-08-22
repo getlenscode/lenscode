@@ -240,6 +240,17 @@ export const GitBranchSwitchRequest = z.object({
   ...machineScope,
 });
 
+/** Destructive — the client only ever sends this after its own confirmation card (spec §57). */
+export const GitBranchDeleteRequest = z.object({
+  ...requestBase,
+  type: z.literal("git.branch.delete"),
+  workspaceId: z.string(),
+  branch: z.string().min(1),
+  /** `-D` instead of `-d` — skips git's "not fully merged" check. */
+  force: z.boolean().optional(),
+  ...machineScope,
+});
+
 export const GitStatusRequest = z.object({
   ...requestBase,
   type: z.literal("git.status"),
@@ -327,6 +338,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   TerminalInterruptRequest,
   TerminalProcessInfoRequest,
   GitBranchSwitchRequest,
+  GitBranchDeleteRequest,
   GitStatusRequest,
   GitDiffRequest,
   GitBranchesRequest,

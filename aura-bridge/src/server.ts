@@ -362,6 +362,28 @@ export class BridgeServer {
         }
         return;
       }
+      case "git.branch.delete": {
+        try {
+          const git = await this.gitFor(req.workspaceId, req.machineId);
+          await git.deleteBranch(req.branch, req.force ?? false);
+          this.send(ws, { id: req.id, result: { deleted: req.branch } });
+        } catch (e) {
+          const message = String(e);
+          const worktreePath = worktreeConflictPath(message);
+          this.send(ws, {
+            id: req.id,
+            error: err(
+              "internal",
+              worktreePath
+                ? `${req.branch} is checked out in a worktree — remove that worktree first.`
+                : `Could not delete ${req.branch}.`,
+              true,
+              message,
+            ),
+          });
+        }
+        return;
+      }
       case "git.diff": {
         try {
           const git = await this.gitFor(req.workspaceId, req.machineId);

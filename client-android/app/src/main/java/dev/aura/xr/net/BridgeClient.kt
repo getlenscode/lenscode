@@ -763,6 +763,42 @@ class BridgeClient(
         }
     }
 
+    /**
+     * Removes a worktree's checkout (spec §57 — destructive, caller must have
+     * already shown a confirmation card). Only works for a worktree that's
+     * currently open (has a live workspace_id) — matches what the Git view
+     * can already show/act on.
+     */
+    fun removeWorktree(worktree: WorktreeInfo, onDone: () -> Unit, onError: (String) -> Unit) {
+        val workspaceId = worktree.openWorkspaceId
+        if (workspaceId == null) {
+            onError("That worktree isn't currently open.")
+            return
+        }
+        herdrRequest(
+            "worktree.remove",
+            JSONObject().put("workspace_id", workspaceId).put("force", true),
+            machineId = filesMachineId,
+            onError = { onError("Could not remove that worktree.") },
+        ) {
+            refreshWorktrees()
+            onDone()
+        }
+    }
+
+    /** Destructive (spec §57) — only ever called after the caller's own confirmation card. */
+    fun deleteBranch(branch: String, force: Boolean = false, onDone: () -> Unit, onError: (String) -> Unit) {
+        send(
+            "git.branch.delete",
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("branch", branch).put("force", force),
+            onResult = {
+                refreshBranches()
+                onDone()
+            },
+            onError = { error -> onError(error.optString("message", "Could not delete $branch.")) },
+        )
+    }
+
     private fun applyWorktrees(inner: JSONObject) {
         val arr = inner.optJSONArray("worktrees") ?: JSONArray()
         val list = (0 until arr.length()).map { i ->
