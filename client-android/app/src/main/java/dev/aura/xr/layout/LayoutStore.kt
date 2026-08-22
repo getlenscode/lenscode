@@ -45,6 +45,13 @@ class LayoutStore(context: Context) {
         prefs.edit().putFloat("$id.size.w", size.width).putFloat("$id.size.h", size.height).apply()
     }
 
+    /** Pin locks a panel's move/resize handles off (spec §52) — persisted like offset/size. */
+    fun loadPinned(id: String): Boolean = prefs.getBoolean("$id.pinned", false)
+
+    fun savePinned(id: String, pinned: Boolean) {
+        prefs.edit().putBoolean("$id.pinned", pinned).apply()
+    }
+
     /** Reset-layout action (spec §52) — clears every saved position/size back to defaults. */
     fun resetAll() {
         prefs.edit().clear().apply()

@@ -96,10 +96,85 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
+ * Holds one panel's live layout state — separated from the modifier itself so
+ * callers that want pin/depth controls (currently just the primary panel) can
+ * read/mutate it without re-deriving the SubspaceModifier chain by hand.
+ */
+class PanelLayoutState(
+    private val layoutStore: dev.aura.xr.layout.LayoutStore,
+    private val id: String,
+    offset: dev.aura.xr.layout.SavedOffset,
+    size: dev.aura.xr.layout.SavedSize,
+    pinned: Boolean,
+) {
+    var offset by mutableStateOf(offset)
+        private set
+    var size by mutableStateOf(size)
+        private set
+    var pinned by mutableStateOf(pinned)
+        private set
+
+    fun onMoveEnd(t: dev.aura.xr.layout.SavedOffset) {
+        offset = t
+        layoutStore.saveOffset(id, t)
+    }
+
+    fun onResizeEnd(s: dev.aura.xr.layout.SavedSize) {
+        size = s
+        layoutStore.saveSize(id, s)
+    }
+
+    fun togglePinned() {
+        pinned = !pinned
+        layoutStore.savePinned(id, pinned)
+    }
+
+    /** Bring-closer / push-farther (spec §52) — nudges depth (Z) by a fixed step. */
+    fun nudgeDepth(deltaZ: Float) {
+        val next = offset.copy(z = offset.z + deltaZ)
+        offset = next
+        layoutStore.saveOffset(id, next)
+    }
+
+    fun toModifier(padding: androidx.compose.ui.unit.Dp): SubspaceModifier = SubspaceModifier
+        .width(size.width.dp)
+        .height(size.height.dp)
+        .padding(padding)
+        .offset(offset.x.dp, offset.y.dp, offset.z.dp)
+        .movable(enabled = !pinned, onMoveEnd = { event ->
+            val t = event.pose.translation
+            onMoveEnd(dev.aura.xr.layout.SavedOffset(t.x, t.y, t.z))
+        })
+        .resizable(enabled = !pinned, onResizeEnd = { newSize ->
+            onResizeEnd(dev.aura.xr.layout.SavedSize(newSize.width.toFloat(), newSize.height.toFloat()))
+            true
+        })
+}
+
+@Composable
+private fun rememberPanelLayoutState(
+    layoutStore: dev.aura.xr.layout.LayoutStore,
+    id: String,
+    defaultWidth: Float,
+    defaultHeight: Float,
+    generation: Int = 0,
+): PanelLayoutState = remember(id, generation) {
+    PanelLayoutState(
+        layoutStore,
+        id,
+        layoutStore.loadOffset(id) ?: dev.aura.xr.layout.SavedOffset(0f, 0f, 0f),
+        layoutStore.loadSize(id) ?: dev.aura.xr.layout.SavedSize(defaultWidth, defaultHeight),
+        layoutStore.loadPinned(id),
+    )
+}
+
+/**
  * Builds the width/height/offset/movable/resizable chain for one panel,
- * loading its saved position/size (if any) and persisting on every move/
- * resize end (spec §52) — shared by every panel so "move it, it stays moved"
- * isn't just the primary panel's behavior.
+ * loading its saved position/size/pin (if any) and persisting on every move/
+ * resize/pin change (spec §52) — shared by every panel so "move it, it stays
+ * moved" isn't just the primary panel's behavior. Panels that also want pin/
+ * depth controls (primary panel only, for now) should use
+ * [rememberPanelLayoutState] directly instead.
  */
 @Composable
 private fun rememberPanelModifier(
@@ -111,27 +186,8 @@ private fun rememberPanelModifier(
     /** Bumped by "Reset Layout" to force every panel to re-read (now-cleared) saved state. */
     generation: Int = 0,
 ): SubspaceModifier {
-    var offset by remember(id, generation) {
-        mutableStateOf(layoutStore.loadOffset(id) ?: dev.aura.xr.layout.SavedOffset(0f, 0f, 0f))
-    }
-    var size by remember(id, generation) {
-        mutableStateOf(layoutStore.loadSize(id) ?: dev.aura.xr.layout.SavedSize(defaultWidth, defaultHeight))
-    }
-    return SubspaceModifier
-        .width(size.width.dp)
-        .height(size.height.dp)
-        .padding(padding)
-        .offset(offset.x.dp, offset.y.dp, offset.z.dp)
-        .movable(onMoveEnd = { event ->
-            val t = event.pose.translation
-            offset = dev.aura.xr.layout.SavedOffset(t.x, t.y, t.z)
-            layoutStore.saveOffset(id, offset)
-        })
-        .resizable(onResizeEnd = { newSize ->
-            size = dev.aura.xr.layout.SavedSize(newSize.width.toFloat(), newSize.height.toFloat())
-            layoutStore.saveSize(id, size)
-            true
-        })
+    val layoutState = rememberPanelLayoutState(layoutStore, id, defaultWidth, defaultHeight, generation)
+    return layoutState.toModifier(padding)
 }
 
 /**
@@ -308,9 +364,8 @@ fun AuraWorkspace(bridge: BridgeClient) {
             }
 
             // ── Primary panel ──────────────────────────────────────────────
-            SpatialPanel(
-                rememberPanelModifier(layoutStore, "primary", 900f, 520f, 12.dp, layoutGeneration),
-            ) {
+            val primaryLayout = rememberPanelLayoutState(layoutStore, "primary", 900f, 520f, layoutGeneration)
+            SpatialPanel(primaryLayout.toModifier(12.dp)) {
                 Box(Modifier.fillMaxSize()) {
                 when (activeView) {
                     "terminal" -> TerminalPanelContent(
@@ -495,7 +550,14 @@ fun AuraWorkspace(bridge: BridgeClient) {
                             bridge.startRemoteBrowse(machineId, label, "/")
                         },
                     )
-                    else -> PrimaryPanelContent(state, onResetLayout = { resetLayout() })
+                    else -> PrimaryPanelContent(
+                        state,
+                        onResetLayout = { resetLayout() },
+                        pinned = primaryLayout.pinned,
+                        onTogglePin = { primaryLayout.togglePinned() },
+                        onBringCloser = { primaryLayout.nudgeDepth(-40f) },
+                        onPushFarther = { primaryLayout.nudgeDepth(40f) },
+                    )
                 }
                 // Voice search is reachable from any view (dock mic button
                 // below), so its overlay lives here rather than inside one
