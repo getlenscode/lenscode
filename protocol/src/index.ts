@@ -274,6 +274,7 @@ export const HerdrProxyRequest = z.object({
     method: z.string().min(1),
     params: z.record(z.string(), z.unknown()),
   }),
+  ...machineScope,
 });
 
 // ---------------------------------------------------------------------------

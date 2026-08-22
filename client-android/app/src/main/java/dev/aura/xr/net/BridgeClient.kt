@@ -277,9 +277,9 @@ class BridgeClient(
     private val _filesRootLabel = MutableStateFlow("local")
     val filesRootLabel: StateFlow<String> = _filesRootLabel
 
-    /** Re-roots the file browser at a worktree (or any Herdr workspace) and opens it in Code. Always local. */
-    fun openWorkspaceInFiles(workspaceId: String, label: String) {
-        filesMachineId = "local"
+    /** Re-roots the file browser at a worktree (or any Herdr workspace) and opens it in Code. Defaults to local. */
+    fun openWorkspaceInFiles(workspaceId: String, label: String, machineId: String = "local") {
+        filesMachineId = machineId
         filesWorkspaceId = workspaceId
         _filesRootLabel.value = label
         listDir(".")
@@ -429,10 +429,12 @@ class BridgeClient(
         onDirty: String? = null,
         onSwitched: () -> Unit,
         onConflict: () -> Unit,
-        onWorktreeCreated: (String?) -> Unit,
+        /** (workspaceId, machineId) — the machine is whatever Code was scoped to when the switch was requested. */
+        onWorktreeCreated: (String?, String) -> Unit,
     ) {
+        val machineId = filesMachineId
         val fields = JSONObject()
-            .put("machineId", filesMachineId)
+            .put("machineId", machineId)
             .put("workspaceId", filesWorkspaceId)
             .put("target", target)
         if (onDirty != null) fields.put("onDirty", onDirty)
@@ -443,7 +445,7 @@ class BridgeClient(
                 when {
                     result.optBoolean("worktreeCreated", false) -> {
                         val wsId = if (result.isNull("workspaceId")) null else result.optString("workspaceId")
-                        onWorktreeCreated(wsId)
+                        onWorktreeCreated(wsId, machineId)
                     }
                     result.optBoolean("switched", false) -> {
                         refreshBranches()
@@ -483,15 +485,18 @@ class BridgeClient(
     private fun herdrRequest(
         method: String,
         params: JSONObject = JSONObject(),
+        machineId: String = "local",
         onError: (() -> Unit)? = null,
         onResult: (JSONObject) -> Unit,
     ) {
         send(
             "herdr.request",
-            JSONObject().put(
-                "request",
-                JSONObject().put("id", "hr${nextId.getAndIncrement()}").put("method", method).put("params", params),
-            ),
+            JSONObject()
+                .put("machineId", machineId)
+                .put(
+                    "request",
+                    JSONObject().put("id", "hr${nextId.getAndIncrement()}").put("method", method).put("params", params),
+                ),
             onResult = { result ->
                 val response = result.optJSONObject("response")
                 val inner = response?.optJSONObject("result")
@@ -665,29 +670,41 @@ class BridgeClient(
     }
 
     // ── Git worktrees & branches ─────────────────────────────────────────
+    // Scoped to whichever machine the Code view is currently rooted at
+    // (filesMachineId) — worktrees, like Diff and the branch switcher,
+    // follow Code rather than tracking their own separate machine context.
 
-    /** Once a workspace_id is confirmed to resolve inside a Git work tree, reuse it. */
+    /** Once a workspace_id is confirmed to resolve inside a Git work tree, reuse it — but only for the same machine. */
     private var worktreeWorkspaceId: String? = null
+    private var worktreeMachineId: String? = null
 
     fun refreshWorktrees() {
-        val known = worktreeWorkspaceId
-        if (known != null) {
-            fetchWorktrees(known)
+        val machineId = filesMachineId
+        if (worktreeMachineId == machineId && worktreeWorkspaceId != null) {
+            fetchWorktrees(machineId, worktreeWorkspaceId!!)
             return
         }
+        worktreeWorkspaceId = null
         // worktree.list requires a workspace whose cwd sits inside a Git work
-        // tree, and the client has no fixed answer for which one that is — try
-        // every workspace we know of (from live panes) until one resolves.
-        // The pane list may not be loaded yet on a cold "Git" tab open, so
-        // make sure it is before building the candidate list.
-        if (terminals.value.isEmpty()) {
-            refreshTerminals { tryWorktreeCandidates(terminals.value.map { it.workspaceId }.distinct()) }
-        } else {
-            tryWorktreeCandidates(terminals.value.map { it.workspaceId }.distinct())
-        }
+        // tree, and the client has no fixed answer for which one that is on
+        // this machine — try every pane's workspace on it until one resolves.
+        fetchPaneWorkspaceIds(machineId) { ids -> tryWorktreeCandidates(machineId, ids) }
     }
 
-    private fun tryWorktreeCandidates(remaining: List<String>) {
+    /** Distinct workspace ids from this machine's live panes, without touching the shared Terminal-view list. */
+    private fun fetchPaneWorkspaceIds(machineId: String, onResult: (List<String>) -> Unit) {
+        send(
+            "terminal.list",
+            JSONObject().put("machineId", machineId),
+            onResult = { result ->
+                val arr = result.optJSONArray("terminals") ?: JSONArray()
+                val ids = (0 until arr.length()).map { arr.getJSONObject(it).optString("workspaceId") }.distinct()
+                onResult(ids)
+            },
+        )
+    }
+
+    private fun tryWorktreeCandidates(machineId: String, remaining: List<String>) {
         val id = remaining.firstOrNull() ?: run {
             _worktrees.value = emptyList()
             return
@@ -695,17 +712,20 @@ class BridgeClient(
         herdrRequest(
             "worktree.list",
             JSONObject().put("workspace_id", id),
-            onError = { tryWorktreeCandidates(remaining.drop(1)) },
+            machineId = machineId,
+            onError = { tryWorktreeCandidates(machineId, remaining.drop(1)) },
         ) { inner ->
             worktreeWorkspaceId = id
+            worktreeMachineId = machineId
             applyWorktrees(inner)
         }
     }
 
-    private fun fetchWorktrees(workspaceId: String) {
+    private fun fetchWorktrees(machineId: String, workspaceId: String) {
         herdrRequest(
             "worktree.list",
             JSONObject().put("workspace_id", workspaceId),
+            machineId = machineId,
             onError = {
                 // Cached workspace stopped resolving (e.g. it was closed) —
                 // drop it and re-search from scratch next time.
@@ -720,23 +740,25 @@ class BridgeClient(
      * already have a live Herdr workspace (`openWorkspaceId`) — reuse it
      * directly. If one doesn't (e.g. after a Herdr restart dropped it),
      * `worktree.open` re-attaches a workspace to that same checkout path
-     * before browsing it.
+     * before browsing it. Always on whatever machine the Git view is
+     * currently scoped to (filesMachineId).
      */
     fun openWorktreeInCode(worktree: WorktreeInfo, onOpened: () -> Unit) {
         val label = worktree.branch ?: worktree.path.substringAfterLast('/')
         val existing = worktree.openWorkspaceId
         if (existing != null) {
-            openWorkspaceInFiles(existing, label)
+            openWorkspaceInFiles(existing, label, filesMachineId)
             onOpened()
             return
         }
         herdrRequest(
             "worktree.open",
             JSONObject().put("path", worktree.path).put("focus", false),
+            machineId = filesMachineId,
             onError = { onOpened() },
         ) { inner ->
             val workspaceId = inner.optJSONObject("workspace")?.optString("workspace_id")
-            if (workspaceId != null) openWorkspaceInFiles(workspaceId, label)
+            if (workspaceId != null) openWorkspaceInFiles(workspaceId, label, filesMachineId)
             onOpened()
         }
     }

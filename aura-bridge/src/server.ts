@@ -235,15 +235,30 @@ export class BridgeServer {
           });
           return;
         }
-        await this.ensureHerdr();
-        if (!this.herdr.connected) {
-          this.send(ws, {
-            id: req.id,
-            error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
-          });
-          return;
+        const machineId = req.machineId ?? "local";
+        let target: HerdrClient;
+        if (machineId === "local") {
+          await this.ensureHerdr();
+          if (!this.herdr.connected) {
+            this.send(ws, {
+              id: req.id,
+              error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
+            });
+            return;
+          }
+          target = this.herdr;
+        } else {
+          const remoteClient = this.remote.clientFor(machineId);
+          if (!remoteClient) {
+            this.send(ws, {
+              id: req.id,
+              error: err("herdr_unavailable", `Not connected to ${machineId} — connect to it first.`, true),
+            });
+            return;
+          }
+          target = remoteClient;
         }
-        const response = await this.herdr.proxyRequest(req.request);
+        const response = await target.proxyRequest(req.request);
         this.send(ws, { id: req.id, result: { response } });
         return;
       }
@@ -402,31 +417,24 @@ export class BridgeServer {
           // For a remote machine, workspaceId IS the absolute root already
           // (see resolveFiles/gitFor) — resolveWorkspaceRoot only knows how
           // to resolve the bridge's own local Herdr workspace ids.
-          const isRemote = Boolean(req.machineId) && req.machineId !== "local";
+          const machineId = req.machineId ?? "local";
+          const isRemote = machineId !== "local";
           const cwd = isRemote ? req.workspaceId : await this.resolveWorkspaceRoot(req.workspaceId);
-
-          if (dirty && req.onDirty === "worktree" && isRemote) {
-            // Herdr worktrees aren't wired up for remote machines yet — this
-            // resolution only ever runs against the bridge's own local Herdr.
-            this.send(ws, {
-              id: req.id,
-              error: err(
-                "invalid_request",
-                "Opening a new worktree isn't supported on a remote machine yet — try stash instead.",
-                false,
-              ),
-            });
-            return;
-          }
 
           if (dirty && req.onDirty === "worktree") {
             // Never touches the dirty tree at all: the target branch opens
             // in a brand-new worktree instead, so nothing here is at risk.
             // Herdr needs to be told which repo via cwd — it has no notion
-            // of the bridge's own "local" workspace id.
-            await this.ensureHerdr();
+            // of the bridge's own "local"/machine workspace ids.
+            let client: HerdrClient;
             try {
-              const created = (await this.herdr.request("worktree.create", {
+              client = await this.herdrClientFor(machineId);
+            } catch (e) {
+              this.send(ws, { id: req.id, error: err("herdr_unavailable", String(e), true) });
+              return;
+            }
+            try {
+              const created = (await client.request("worktree.create", {
                 branch: req.target,
                 cwd,
                 focus: false,
@@ -440,7 +448,7 @@ export class BridgeServer {
               // branches created via this UI each get their own persistent
               // worktree) — open the existing one instead of failing to make
               // a duplicate.
-              const existing = await this.findExistingWorktreeWorkspace(cwd, req.target);
+              const existing = await this.findExistingWorktreeWorkspace(client, cwd, req.target);
               if (existing) {
                 this.send(ws, { id: req.id, result: { switched: false, worktreeCreated: true, workspaceId: existing } });
               } else {
@@ -458,7 +466,7 @@ export class BridgeServer {
               await git.stashAndCheckout(req.target);
               this.send(ws, { id: req.id, result: { switched: true, stashed: true, branch: req.target } });
             } catch (e) {
-              await this.redirectToExistingWorktreeOrFail(ws, req.id, cwd, req.target, e);
+              await this.redirectToExistingWorktreeOrFail(ws, req.id, machineId, cwd, req.target, e);
             }
             return;
           }
@@ -467,7 +475,7 @@ export class BridgeServer {
             await git.checkout(req.target);
             this.send(ws, { id: req.id, result: { switched: true, branch: req.target } });
           } catch (e) {
-            await this.redirectToExistingWorktreeOrFail(ws, req.id, cwd, req.target, e);
+            await this.redirectToExistingWorktreeOrFail(ws, req.id, machineId, cwd, req.target, e);
           }
         } catch (e) {
           this.send(ws, {
@@ -676,9 +684,9 @@ export class BridgeServer {
   }
 
   /** Looks up the live workspace_id for a branch that already has a Herdr worktree checked out. */
-  private async findExistingWorktreeWorkspace(cwd: string, branch: string): Promise<string | null> {
+  private async findExistingWorktreeWorkspace(client: HerdrClient, cwd: string, branch: string): Promise<string | null> {
     try {
-      const result = (await this.herdr.request("worktree.list", { cwd })) as {
+      const result = (await client.request("worktree.list", { cwd })) as {
         worktrees?: Array<{ branch?: string | null; open_workspace_id?: string | null }>;
       };
       const match = result.worktrees?.find((w) => w.branch === branch && w.open_workspace_id);
@@ -686,6 +694,18 @@ export class BridgeServer {
     } catch {
       return null;
     }
+  }
+
+  /** Resolves "local" or a connected remote machine id to its HerdrClient, throwing a user-facing message otherwise. */
+  private async herdrClientFor(machineId: string): Promise<HerdrClient> {
+    if (machineId === "local") {
+      await this.ensureHerdr();
+      if (!this.herdr.connected) throw new Error("Herdr is not running on this machine.");
+      return this.herdr;
+    }
+    const client = this.remote.clientFor(machineId);
+    if (!client) throw new Error(`Not connected to ${machineId} — connect to it first.`);
+    return client;
   }
 
   /**
@@ -697,13 +717,15 @@ export class BridgeServer {
   private async redirectToExistingWorktreeOrFail(
     ws: WebSocket,
     id: string,
+    machineId: string,
     cwd: string,
     target: string,
     error: unknown,
   ): Promise<void> {
     const message = String(error);
     if (worktreeConflictPath(message)) {
-      const existing = await this.findExistingWorktreeWorkspace(cwd, target);
+      const client = await this.herdrClientFor(machineId).catch(() => null);
+      const existing = client ? await this.findExistingWorktreeWorkspace(client, cwd, target) : null;
       if (existing) {
         this.send(ws, {
           id,

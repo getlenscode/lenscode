@@ -320,7 +320,13 @@ fun AuraWorkspace(bridge: BridgeClient) {
                             bridge.switchBranch(
                                 target = target,
                                 onSwitched = { branchConflict = null },
-                                onWorktreeCreated = { branchConflict = null },
+                                onWorktreeCreated = { workspaceId, machineId ->
+                                    branchConflict = null
+                                    if (workspaceId != null) {
+                                        bridge.openWorkspaceInFiles(workspaceId, target, machineId)
+                                        activeView = "code"
+                                    }
+                                },
                                 onConflict = {
                                     branchConflict = dev.aura.xr.ui.BranchConflictState(
                                         target = target,
@@ -329,7 +335,13 @@ fun AuraWorkspace(bridge: BridgeClient) {
                                                 target = target,
                                                 onDirty = "stash",
                                                 onSwitched = { branchConflict = null },
-                                                onWorktreeCreated = { branchConflict = null },
+                                                onWorktreeCreated = { workspaceId, machineId ->
+                                                    branchConflict = null
+                                                    if (workspaceId != null) {
+                                                        bridge.openWorkspaceInFiles(workspaceId, target, machineId)
+                                                        activeView = "code"
+                                                    }
+                                                },
                                                 onConflict = { branchConflict = null },
                                             )
                                         },
@@ -338,7 +350,13 @@ fun AuraWorkspace(bridge: BridgeClient) {
                                                 target = target,
                                                 onDirty = "worktree",
                                                 onSwitched = { branchConflict = null },
-                                                onWorktreeCreated = { branchConflict = null },
+                                                onWorktreeCreated = { workspaceId, machineId ->
+                                                    branchConflict = null
+                                                    if (workspaceId != null) {
+                                                        bridge.openWorkspaceInFiles(workspaceId, target, machineId)
+                                                        activeView = "code"
+                                                    }
+                                                },
                                                 onConflict = { branchConflict = null },
                                             )
                                         },
@@ -347,7 +365,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                                                 target = target,
                                                 onDirty = "abort",
                                                 onSwitched = { branchConflict = null },
-                                                onWorktreeCreated = { branchConflict = null },
+                                                onWorktreeCreated = { _, _ -> branchConflict = null },
                                                 onConflict = { branchConflict = null },
                                             )
                                         },
