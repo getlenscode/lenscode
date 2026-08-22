@@ -14,6 +14,10 @@ import { HerdrClient } from "./herdr.ts";
 import { PairingRegistry } from "./pairing.ts";
 import { WorkspaceFiles } from "./files.ts";
 import { Terminals } from "./terminals.ts";
+import { GitService } from "./git.ts";
+import { listMachines } from "./machines.ts";
+import { RemoteManager } from "./remote.ts";
+import { RemoteFiles } from "./remoteFiles.ts";
 import { isHerdrMethodAllowed } from "./allowlist.ts";
 import { log } from "./log.ts";
 
@@ -52,7 +56,14 @@ export class BridgeServer {
   private pairing: PairingRegistry;
   /** workspaceId → file service rooted at that workspace's directory. */
   private workspaces = new Map<string, WorkspaceFiles>();
+  /** workspaceId → git service rooted at that same directory. */
+  private gitServices = new Map<string, GitService>();
+  /** "machineId:root" → remote file service rooted at that absolute path (spec §37). */
+  private remoteFileServices = new Map<string, RemoteFiles>();
   private terminals: Terminals;
+  private remote = new RemoteManager();
+  /** machineId ("local" or a connected remote) → Terminals bound to that machine's HerdrClient. */
+  private terminalsByMachine = new Map<string, Terminals>();
   /** Sockets that have passed hello with a valid device token (or dev mode). */
   private authed = new WeakSet<WebSocket>();
 
@@ -237,8 +248,8 @@ export class BridgeServer {
         return;
       }
       case "dir.list": {
-        const files = await this.filesFor(req.workspaceId);
         try {
+          const files = await this.resolveFiles(req.machineId, req.workspaceId);
           this.send(ws, { id: req.id, result: { entries: await files.listDir(req.path) } });
         } catch (e) {
           this.send(ws, {
@@ -249,8 +260,8 @@ export class BridgeServer {
         return;
       }
       case "file.open": {
-        const files = await this.filesFor(req.workspaceId);
         try {
+          const files = await this.resolveFiles(req.machineId, req.workspaceId);
           this.send(ws, { id: req.id, result: await files.openFile(req.path) });
         } catch (e) {
           this.send(ws, {
@@ -279,16 +290,33 @@ export class BridgeServer {
       case "terminal.input":
       case "terminal.interrupt":
       case "terminal.process_info": {
-        await this.ensureHerdr();
-        if (!this.herdr.connected) {
+        const machineId = req.machineId ?? "local";
+        if (machineId === "local") {
+          await this.ensureHerdr();
+          if (!this.herdr.connected) {
+            this.send(ws, {
+              id: req.id,
+              error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
+            });
+            return;
+          }
+        } else if (!this.remote.isConnected(machineId)) {
           this.send(ws, {
             id: req.id,
-            error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
+            error: err("herdr_unavailable", `Not connected to ${machineId} — connect to it first.`, true),
+          });
+          return;
+        }
+        const terminals = this.terminalsFor(machineId);
+        if (!terminals) {
+          this.send(ws, {
+            id: req.id,
+            error: err("herdr_unavailable", `Not connected to ${machineId}.`, true),
           });
           return;
         }
         try {
-          this.send(ws, { id: req.id, result: await this.dispatchTerminal(req) });
+          this.send(ws, { id: req.id, result: await this.dispatchTerminal(req, terminals) });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -307,9 +335,167 @@ export class BridgeServer {
         });
         return;
       }
+      case "git.status": {
+        try {
+          const git = await this.gitFor(req.workspaceId);
+          this.send(ws, { id: req.id, result: await git.status() });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", "Could not read Git status for that workspace.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "git.diff": {
+        try {
+          const git = await this.gitFor(req.workspaceId);
+          this.send(ws, { id: req.id, result: { path: req.path, diff: await git.diff(req.path) } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", "Could not diff that file.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "git.branches": {
+        try {
+          const git = await this.gitFor(req.workspaceId);
+          this.send(ws, { id: req.id, result: await git.listBranches() });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", "Could not list branches for that workspace.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "git.branch.switch": {
+        try {
+          const git = await this.gitFor(req.workspaceId);
+          const { files } = await git.status();
+          const dirty = files.length > 0;
+
+          // Spec §27: never switch over uncommitted changes without an
+          // explicit resolution — a bare retry-without-onDirty always means
+          // "I haven't decided yet", so it always re-reports dirty rather
+          // than silently picking one.
+          if (dirty && !req.onDirty) {
+            this.send(ws, {
+              id: req.id,
+              error: err(
+                "conflict",
+                "This branch has uncommitted changes — choose how to handle them.",
+                false,
+                "dirty",
+              ),
+            });
+            return;
+          }
+
+          if (dirty && req.onDirty === "abort") {
+            this.send(ws, { id: req.id, result: { switched: false, aborted: true } });
+            return;
+          }
+
+          if (dirty && req.onDirty === "worktree") {
+            // Never touches the dirty tree at all: the target branch opens
+            // in a brand-new worktree instead, so nothing here is at risk.
+            // Herdr needs to be told which repo via cwd — it has no notion
+            // of the bridge's own "local" workspace id.
+            await this.ensureHerdr();
+            const cwd = await this.resolveWorkspaceRoot(req.workspaceId);
+            const created = (await this.herdr.request("worktree.create", {
+              branch: req.target,
+              cwd,
+              focus: false,
+            })) as { workspace?: { workspace_id?: string } };
+            this.send(ws, {
+              id: req.id,
+              result: { switched: false, worktreeCreated: true, workspaceId: created.workspace?.workspace_id ?? null },
+            });
+            return;
+          }
+
+          if (dirty && req.onDirty === "stash") {
+            await git.stashAndCheckout(req.target);
+            this.send(ws, { id: req.id, result: { switched: true, stashed: true, branch: req.target } });
+            return;
+          }
+
+          await git.checkout(req.target);
+          this.send(ws, { id: req.id, result: { switched: true, branch: req.target } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", `Could not switch to ${req.target}.`, true, String(e)),
+          });
+        }
+        return;
+      }
+      case "machine.list": {
+        try {
+          const machines = await listMachines();
+          this.send(ws, {
+            id: req.id,
+            result: {
+              machines: machines.map((m) => ({ ...m, connected: this.remote.isConnected(m.id) })),
+            },
+          });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", "Could not read the SSH machine registry.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "machine.connect": {
+        // Only ever tunnel to an alias this bridge itself found in the SSH
+        // registry — never an arbitrary client-supplied string, since that
+        // string is handed straight to the `ssh` argv (spec §54).
+        const known = await listMachines();
+        if (!known.some((m) => m.id === req.machineId)) {
+          this.send(ws, {
+            id: req.id,
+            error: err("not_found", `${req.machineId} isn't in the SSH machine registry.`, false),
+          });
+          return;
+        }
+        try {
+          await this.remote.connect(req.machineId);
+          this.send(ws, {
+            id: req.id,
+            result: {
+              connected: true,
+              machineId: req.machineId,
+              homeDir: this.remote.homeDirFor(req.machineId),
+            },
+          });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("herdr_unavailable", `Could not connect to ${req.machineId}.`, true, String(e)),
+          });
+        }
+        return;
+      }
+      case "machine.disconnect": {
+        this.remote.disconnect(req.machineId);
+        this.terminalsByMachine.delete(req.machineId);
+        for (const key of [...this.remoteFileServices.keys()]) {
+          if (key.startsWith(`${req.machineId}:`)) this.remoteFileServices.delete(key);
+        }
+        this.send(ws, { id: req.id, result: { connected: false, machineId: req.machineId } });
+        return;
+      }
       default: {
+        // Every current XrRequest variant is now handled above — this stays
+        // as a forward-compatible fallback for whatever the protocol adds
+        // next, hence the casts (req is legitimately `never` here today).
         this.send(ws, {
-          id: req.id,
+          id: (req as { id: string }).id,
           error: err(
             "invalid_request",
             `Not implemented yet: ${(req as { type: string }).type}.`,
@@ -320,42 +506,54 @@ export class BridgeServer {
     }
   }
 
-  private async dispatchTerminal(req: XrRequest): Promise<unknown> {
+  private async dispatchTerminal(req: XrRequest, terminals: Terminals): Promise<unknown> {
     switch (req.type) {
       case "terminal.list":
-        return { terminals: await this.terminals.list() };
+        return { terminals: await terminals.list() };
       case "terminal.create":
         return {
-          terminal: await this.terminals.create({
+          terminal: await terminals.create({
             workspaceId: req.workspaceId,
             name: req.name,
             cwd: req.cwd,
           }),
         };
       case "terminal.close":
-        await this.terminals.close(req.paneId);
+        await terminals.close(req.paneId);
         return { closed: req.paneId };
       case "terminal.focus":
-        await this.terminals.focus(req.paneId);
+        await terminals.focus(req.paneId);
         return { focused: req.paneId };
       case "terminal.rename":
-        await this.terminals.rename(req.paneId, req.name);
+        await terminals.rename(req.paneId, req.name);
         return { renamed: req.paneId, name: req.name };
       case "terminal.read":
-        return this.terminals.read(req.paneId, req.source, req.format, req.lines);
+        return terminals.read(req.paneId, req.source, req.format, req.lines);
       case "terminal.input":
-        await this.terminals.sendText(req.paneId, req.text);
+        await terminals.sendText(req.paneId, req.text);
         return { sent: true };
       case "terminal.interrupt":
         // The protocol requires confirmed:true, so reaching here means the XR
         // confirmation card was shown (spec §20, §57).
-        await this.terminals.interrupt(req.paneId);
+        await terminals.interrupt(req.paneId);
         return { interrupted: req.paneId };
       case "terminal.process_info":
-        return { process: await this.terminals.processInfo(req.paneId) };
+        return { process: await terminals.processInfo(req.paneId) };
       default:
         throw new Error(`unhandled terminal request ${(req as { type: string }).type}`);
     }
+  }
+
+  /** Terminals bound to the right machine's HerdrClient — "local" or a connected remote (spec §37). */
+  private terminalsFor(machineId: string): Terminals | null {
+    if (machineId === "local") return this.terminals;
+    const cached = this.terminalsByMachine.get(machineId);
+    if (cached) return cached;
+    const client = this.remote.clientFor(machineId);
+    if (!client) return null;
+    const terminals = new Terminals(client);
+    this.terminalsByMachine.set(machineId, terminals);
+    return terminals;
   }
 
   /**
@@ -366,7 +564,43 @@ export class BridgeServer {
   private async filesFor(workspaceId: string): Promise<WorkspaceFiles> {
     const cached = this.workspaces.get(workspaceId);
     if (cached) return cached;
+    const files = new WorkspaceFiles(await this.resolveWorkspaceRoot(workspaceId));
+    this.workspaces.set(workspaceId, files);
+    return files;
+  }
 
+  /**
+   * Routes dir.list/file.open to local or remote (spec §37). For a remote
+   * machine, `workspaceId` isn't a Herdr workspace to resolve at all — it's
+   * literally the absolute folder the user picked there (e.g. "/tmp/project2"),
+   * used directly as both the cache key and the root.
+   */
+  private async resolveFiles(
+    machineId: string | undefined,
+    workspaceId: string,
+  ): Promise<WorkspaceFiles | RemoteFiles> {
+    if (!machineId || machineId === "local") return this.filesFor(workspaceId);
+    const key = `${machineId}:${workspaceId}`;
+    const cached = this.remoteFileServices.get(key);
+    if (cached) return cached;
+    if (!this.remote.isConnected(machineId)) {
+      throw new Error(`Not connected to ${machineId} — connect to it first.`);
+    }
+    const files = new RemoteFiles(machineId, workspaceId);
+    this.remoteFileServices.set(key, files);
+    return files;
+  }
+
+  /** Git service for the same workspace root "Code" browses (spec §23 — diff must match what's on screen). */
+  private async gitFor(workspaceId: string): Promise<GitService> {
+    const cached = this.gitServices.get(workspaceId);
+    if (cached) return cached;
+    const git = new GitService(await this.resolveWorkspaceRoot(workspaceId));
+    this.gitServices.set(workspaceId, git);
+    return git;
+  }
+
+  private async resolveWorkspaceRoot(workspaceId: string): Promise<string> {
     let root = this.cfg.projectRoot;
     if (workspaceId !== "local" && this.herdr.connected) {
       try {
@@ -379,9 +613,7 @@ export class BridgeServer {
         /* fall back to project root */
       }
     }
-    const files = new WorkspaceFiles(root);
-    this.workspaces.set(workspaceId, files);
-    return files;
+    return root;
   }
 
   private async ensureHerdr(): Promise<void> {
@@ -421,5 +653,6 @@ export class BridgeServer {
     this.wss.close();
     this.httpServer.close();
     this.herdr.close();
+    this.remote.disconnectAll();
   }
 }

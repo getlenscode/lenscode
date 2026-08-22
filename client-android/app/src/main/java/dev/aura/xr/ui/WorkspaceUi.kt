@@ -11,13 +11,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,11 +34,23 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import dev.aura.xr.net.AgentInfo
 import dev.aura.xr.net.BridgeClient
+import dev.aura.xr.net.DirEntry
+import dev.aura.xr.net.FileContent
+import dev.aura.xr.net.PaneInfo
+import dev.aura.xr.net.VoiceResolution
 
 /**
  * 2D content composables for the spatial panels — ported from the mockup's
@@ -162,7 +182,7 @@ fun PrimaryPanelContent(state: BridgeClient.UiState) {
 }
 
 @Composable
-fun AgentChipContent(name: String, stateLabel: String, dotColor: Color) {
+fun AgentChipContent(name: String, stateLabel: String, dotColor: Color, kind: String = name) {
     CardSurface {
         Column(
             Modifier.fillMaxSize().padding(vertical = 10.dp),
@@ -170,6 +190,8 @@ fun AgentChipContent(name: String, stateLabel: String, dotColor: Color) {
             verticalArrangement = Arrangement.Center,
         ) {
             // .logo circular badge: bg #0b1119, border #2c3b4a, per-agent accent color.
+            // Accent is looked up by kind (e.g. "claude"), not the user's custom
+            // display name — those rarely match one of the known providers.
             Box(
                 Modifier
                     .size(30.dp)
@@ -178,7 +200,7 @@ fun AgentChipContent(name: String, stateLabel: String, dotColor: Color) {
                     .border(1.dp, AuraColors.LogoBorder, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(name.take(1), color = AuraColors.agentAccent(name), fontWeight = FontWeight.Black, fontSize = 14.sp)
+                Text(name.take(1), color = AuraColors.agentAccent(kind), fontWeight = FontWeight.Black, fontSize = 14.sp)
             }
             Spacer(Modifier.height(6.dp))
             Text(name, color = AuraColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -188,6 +210,804 @@ fun AgentChipContent(name: String, stateLabel: String, dotColor: Color) {
                 Spacer(Modifier.width(4.dp))
                 Text(stateLabel, color = AuraColors.Muted, fontSize = 11.sp)
             }
+        }
+    }
+}
+
+/** State for the Ctrl+C confirmation card (spec §20 — never SIGINT without one). */
+data class StopConfirmState(
+    val pane: PaneInfo,
+    val processLabel: String,
+    val onConfirm: () -> Unit,
+    val onCancel: () -> Unit,
+)
+
+/** Terminal view: real Herdr panes on the left, selected pane's scrollback on the right. */
+@Composable
+fun TerminalPanelContent(
+    terminals: List<PaneInfo>,
+    machineId: String,
+    selected: PaneInfo?,
+    output: String?,
+    onSelect: (PaneInfo) -> Unit,
+    onNew: () -> Unit,
+    onClose: (PaneInfo) -> Unit,
+    onRequestStop: (PaneInfo) -> Unit,
+    stopConfirm: StopConfirmState?,
+) {
+    Box(Modifier.fillMaxSize()) {
+    GlassSurface {
+        Row(Modifier.fillMaxSize().padding(20.dp)) {
+            Column(Modifier.width(220.dp).fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Eyebrow("TERMINALS" + (if (machineId != "local") " · $machineId" else ""))
+                    Text(
+                        "+ New",
+                        color = AuraColors.Blue,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onNew),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                if (terminals.isEmpty()) {
+                    Text("No panes yet.", color = AuraColors.Muted, fontSize = 13.sp)
+                } else {
+                    LazyColumn {
+                        items(terminals) { pane ->
+                            val isSelected = pane.paneId == selected?.paneId
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) AuraColors.DockActiveGradTop else Color.Transparent)
+                                    .clickable { onSelect(pane) }
+                                    .padding(8.dp),
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        StatusDot(if (pane.focused) AuraColors.Green else AuraColors.Idle, size = 6.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(pane.title, color = AuraColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Text(pane.cwd, color = AuraColors.Muted, fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.fillMaxSize()) {
+                if (selected != null) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(selected.title, color = AuraColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Row {
+                            Text(
+                                "Stop",
+                                color = AuraColors.Amber,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { onRequestStop(selected) },
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                "Close",
+                                color = AuraColors.Red,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { onClose(selected) },
+                            )
+                        }
+                    }
+                }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AuraColors.CardBg)
+                        .padding(14.dp),
+                ) {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        if (selected == null) {
+                            Text("Select a terminal.", color = AuraColors.Muted, fontSize = 13.sp)
+                        } else {
+                            Text(
+                                output ?: "…loading…",
+                                color = AuraColors.Text,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Ctrl+C is never sent without this card (spec §20, §57) — Stop always
+    // routes here first regardless of how "sure" the click looked.
+    if (stopConfirm != null) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xAA000000)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .width(360.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(AuraColors.PanelGradTop)
+                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .padding(20.dp),
+            ) {
+                Column {
+                    Text("Stop this process?", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Sends Ctrl+C to ${stopConfirm.processLabel} in ${stopConfirm.pane.title}.",
+                        color = AuraColors.Muted,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Cancel",
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = stopConfirm.onCancel).padding(8.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "Stop process",
+                            color = AuraColors.Amber,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = stopConfirm.onConfirm).padding(8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    }
+}
+
+/**
+ * Code view styled like VS Code: an Explorer sidebar, a tab bar for the open
+ * file, a breadcrumb showing its full path, and a gutter + syntax-highlighted
+ * editor pane. Backed by real dir.list / file.open results from aura-bridge.
+ */
+@Composable
+fun FilesPanelContent(
+    rootLabel: String,
+    path: String,
+    entries: List<DirEntry>,
+    file: FileContent?,
+    onOpenDir: (String) -> Unit,
+    onOpenFile: (String) -> Unit,
+    onUp: () -> Unit,
+) {
+    val shape = RoundedCornerShape(PanelCorner)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .clip(shape)
+            .background(VsCodeColors.EditorBg)
+            .border(1.dp, VsCodeColors.Border, shape),
+    ) {
+        Row(Modifier.fillMaxSize()) {
+            // ── Explorer sidebar ─────────────────────────────────────────
+            Column(
+                Modifier
+                    .width(220.dp)
+                    .fillMaxSize()
+                    .background(VsCodeColors.SidebarBg)
+                    .padding(vertical = 10.dp),
+            ) {
+                Text(
+                    "EXPLORER",
+                    color = VsCodeColors.Breadcrumb,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+                Text(
+                    rootLabel,
+                    color = VsCodeColors.LineNumberActive,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onUp)
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                ) {
+                    Text("↑ ..", color = VsCodeColors.Breadcrumb, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                }
+                if (entries.isEmpty()) {
+                    Text(
+                        "Empty.",
+                        color = VsCodeColors.Breadcrumb,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    )
+                } else {
+                    LazyColumn {
+                        items(entries) { entry ->
+                            val isOpen = !entry.isDir && file != null &&
+                                file.path == if (path == ".") entry.name else "$path/${entry.name}"
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(if (isOpen) VsCodeColors.HoverRow else Color.Transparent)
+                                    .clickable {
+                                        val next = if (path == ".") entry.name else "$path/${entry.name}"
+                                        if (entry.isDir) onOpenDir(next) else onOpenFile(next)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(if (entry.isDir) "📁" else "📄", fontSize = 12.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    entry.name,
+                                    color = if (isOpen) VsCodeColors.LineNumberActive else VsCodeColors.Plain,
+                                    fontSize = 13.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Editor ───────────────────────────────────────────────────
+            Column(Modifier.fillMaxSize()) {
+                if (file == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Select a file to open it.", color = VsCodeColors.Breadcrumb, fontSize = 14.sp)
+                    }
+                } else {
+                    val fileName = file.path.substringAfterLast('/')
+                    // Tab bar — one active tab, matching VS Code's tab strip.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(VsCodeColors.TabBarBg),
+                    ) {
+                        Column {
+                            Row(
+                                Modifier
+                                    .background(VsCodeColors.ActiveTabBg)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("📄", fontSize = 12.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(fileName, color = VsCodeColors.Plain, fontSize = 13.sp)
+                            }
+                            Box(Modifier.fillMaxWidth().height(2.dp).background(VsCodeColors.ActiveTabAccent))
+                        }
+                    }
+                    // Breadcrumb — the full open-file path, VS Code style.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(VsCodeColors.EditorBg)
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                    ) {
+                        val segments = file.path.split("/").filter { it.isNotEmpty() }
+                        segments.forEachIndexed { i, segment ->
+                            if (i > 0) {
+                                Text(" › ", color = VsCodeColors.Breadcrumb, fontSize = 12.sp)
+                            }
+                            Text(
+                                segment,
+                                color = if (i == segments.lastIndex) VsCodeColors.LineNumberActive else VsCodeColors.Breadcrumb,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(VsCodeColors.Border))
+
+                    // Gutter + syntax-highlighted source, one row per line.
+                    val annotated = remember(file.content, file.language) { highlightCode(file.content, file.language) }
+                    val lines = remember(file.content) { file.content.split("\n") }
+                    val annotatedLines = remember(annotated, lines) {
+                        var offset = 0
+                        lines.map { line ->
+                            val end = (offset + line.length).coerceAtMost(annotated.length)
+                            val slice = if (offset <= end) annotated.subSequence(offset, end) else AnnotatedString("")
+                            offset = end + 1
+                            slice
+                        }
+                    }
+                    LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+                        itemsIndexed(annotatedLines) { idx, lineText ->
+                            Row(Modifier.fillMaxWidth()) {
+                                Text(
+                                    (idx + 1).toString(),
+                                    color = VsCodeColors.LineNumber,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.width(44.dp).padding(end = 12.dp),
+                                )
+                                Text(lineText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+                    }
+                    if (file.truncated) {
+                        Text(
+                            "(truncated — file is larger than the preview limit)",
+                            color = AuraColors.Amber,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Agents view: real herdr agent.list — honestly empty until an agent process is started. */
+@Composable
+fun AgentsPanelContent(agents: List<AgentInfo>, onSelect: (AgentInfo) -> Unit) {
+    GlassSurface {
+        Column(Modifier.fillMaxSize().padding(24.dp)) {
+            Eyebrow("AGENTS")
+            Spacer(Modifier.height(4.dp))
+            if (agents.isNotEmpty()) {
+                Text("Tap an agent to see status and respond.", color = AuraColors.Muted, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            if (agents.isEmpty()) {
+                Text(
+                    "No agents running.",
+                    color = AuraColors.Text,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Herdr reports zero active agent sessions right now — start one\nwith `herdr agent start` to see it appear here.",
+                    color = AuraColors.Muted,
+                    fontSize = 13.sp,
+                )
+            } else {
+                LazyColumn {
+                    items(agents) { agent ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSelect(agent) }
+                                .padding(vertical = 6.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StatusDot(AuraColors.agentStatusColor(agent.status), size = 8.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(agent.label, color = AuraColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            Text("(${agent.kind})", color = AuraColors.Eyebrow, fontSize = 12.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(agent.status, color = AuraColors.Muted, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * State for the branch-switch dirty-conflict card (spec §27 — never resolve
+ * uncommitted changes silently). Shown whenever the bridge reports the
+ * working tree is dirty; the user picks how to handle it.
+ */
+data class BranchConflictState(
+    val target: String,
+    val onStash: () -> Unit,
+    val onWorktree: () -> Unit,
+    val onCancel: () -> Unit,
+)
+
+/** Git / Worktrees view: branch switcher up top, real Herdr worktree.list below. */
+@Composable
+fun GitPanelContent(
+    worktrees: List<dev.aura.xr.net.WorktreeInfo>,
+    branches: List<String>,
+    currentBranch: String?,
+    onOpenInCode: (dev.aura.xr.net.WorktreeInfo) -> Unit,
+    onSwitchBranch: (String) -> Unit,
+    conflict: BranchConflictState?,
+) {
+    Box(Modifier.fillMaxSize()) {
+    GlassSurface {
+        Column(Modifier.fillMaxSize().padding(24.dp)) {
+            Eyebrow("BRANCH" + (currentBranch?.let { " · $it" } ?: ""))
+            Spacer(Modifier.height(10.dp))
+            if (branches.isEmpty()) {
+                Text("No branches found.", color = AuraColors.Muted, fontSize = 13.sp)
+            } else {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    for (branch in branches) {
+                        val isCurrent = branch == currentBranch
+                        Box(
+                            Modifier
+                                .padding(end = 8.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (isCurrent) AuraColors.DockActiveGradTop else AuraColors.CardBg)
+                                .border(
+                                    1.dp,
+                                    if (isCurrent) AuraColors.DockActiveBorder else AuraColors.CardBorder,
+                                    RoundedCornerShape(20.dp),
+                                )
+                                .clickable(enabled = !isCurrent) { onSwitchBranch(branch) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                branch,
+                                color = if (isCurrent) AuraColors.ActiveDock else AuraColors.Text,
+                                fontSize = 13.sp,
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Eyebrow("WORKTREES")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap a worktree to open its checkout in Code.",
+                color = AuraColors.Muted,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(14.dp))
+            if (worktrees.isEmpty()) {
+                Text("No worktrees found.", color = AuraColors.Muted, fontSize = 14.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Create one with `herdr worktree create --branch <name>`.",
+                    color = AuraColors.Muted,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(worktrees) { wt ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpenInCode(wt) }
+                                .padding(horizontal = 6.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StatusDot(if (wt.isLinked) AuraColors.Cyan else AuraColors.Green, size = 7.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.width(220.dp)) {
+                                Text(
+                                    wt.branch ?: "(detached)",
+                                    color = AuraColors.Text,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    if (wt.isLinked) "linked worktree" else "main checkout",
+                                    color = AuraColors.Muted,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                wt.path,
+                                color = AuraColors.Eyebrow,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // A dirty tree is never resolved silently (spec §27) — this always
+    // appears first, and the actual switch only happens after a choice here.
+    if (conflict != null) {
+        Box(
+            Modifier.fillMaxSize().background(Color(0xAA000000)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .width(380.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(AuraColors.PanelGradTop)
+                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .padding(20.dp),
+            ) {
+                Column {
+                    Text(
+                        "Uncommitted changes",
+                        color = AuraColors.Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Switching to ${conflict.target} would affect files you haven't committed.",
+                        color = AuraColors.Muted,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Column {
+                        Text(
+                            "Stash changes and switch",
+                            color = AuraColors.Amber,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onStash).padding(vertical = 8.dp),
+                        )
+                        Text(
+                            "Open in a new worktree instead",
+                            color = AuraColors.Cyan,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onWorktree).padding(vertical = 8.dp),
+                        )
+                        Text(
+                            "Cancel",
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onCancel).padding(vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    }
+}
+
+/** Badge color per `GitFileStatus.status` (added/modified/deleted/renamed/untracked). */
+private fun gitStatusColor(status: String): Color = when (status) {
+    "added" -> AuraColors.Green
+    "deleted" -> AuraColors.Red
+    "renamed" -> AuraColors.Purple
+    "untracked" -> AuraColors.Cyan
+    else -> AuraColors.Amber // modified
+}
+
+private fun gitStatusLabel(status: String): String = when (status) {
+    "added" -> "A"
+    "deleted" -> "D"
+    "renamed" -> "R"
+    "untracked" -> "U"
+    else -> "M"
+}
+
+/**
+ * Diff view: real `git status` on the left (scoped to whatever the Code view
+ * is currently rooted at), a colored unified diff for the selected file on
+ * the right — VS Code-style +/- line tinting, no external diff library.
+ */
+@Composable
+fun DiffPanelContent(
+    status: dev.aura.xr.net.GitStatus?,
+    diffPath: String?,
+    diffText: String?,
+    onSelectFile: (String) -> Unit,
+) {
+    GlassSurface {
+        Row(Modifier.fillMaxSize().padding(20.dp)) {
+            Column(Modifier.width(240.dp).fillMaxSize()) {
+                Eyebrow("DIFF" + (status?.branch?.let { " · $it" } ?: ""))
+                Spacer(Modifier.height(10.dp))
+                val files = status?.files.orEmpty()
+                if (status == null) {
+                    Text("Loading…", color = AuraColors.Muted, fontSize = 13.sp)
+                } else if (files.isEmpty()) {
+                    Text("No changes.", color = AuraColors.Muted, fontSize = 13.sp)
+                } else {
+                    LazyColumn {
+                        items(files) { f ->
+                            val isSelected = f.path == diffPath
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) AuraColors.DockActiveGradTop else Color.Transparent)
+                                    .clickable { onSelectFile(f.path) }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    gitStatusLabel(f.status),
+                                    color = gitStatusColor(f.status),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.width(18.dp),
+                                )
+                                Text(
+                                    f.path.substringAfterLast('/'),
+                                    color = AuraColors.Text,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(VsCodeColors.EditorBg)
+                    .padding(14.dp),
+            ) {
+                when {
+                    diffPath == null -> Text("Select a changed file.", color = AuraColors.Muted, fontSize = 13.sp)
+                    diffText == null -> Text("Loading diff…", color = AuraColors.Muted, fontSize = 13.sp)
+                    diffText.isBlank() -> Text("No textual diff to show.", color = AuraColors.Muted, fontSize = 13.sp)
+                    else -> LazyColumn(Modifier.fillMaxSize()) {
+                        items(diffText.split("\n")) { line ->
+                            val (color, bg) = when {
+                                line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ") ->
+                                    VsCodeColors.Breadcrumb to Color.Transparent
+                                line.startsWith("@@") -> AuraColors.Purple to Color.Transparent
+                                line.startsWith("+") -> Color(0xFFB8E6B0) to Color(0x2A3FB950)
+                                line.startsWith("-") -> Color(0xFFF2B8B5) to Color(0x2AF85149)
+                                else -> VsCodeColors.Plain to Color.Transparent
+                            }
+                            Text(
+                                line,
+                                color = color,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.fillMaxWidth().background(bg),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Remote view: real SSH host aliases from `~/.ssh/config` (spec §36). Only
+ * ever a bare alias — no IP, user, or key path ever leaves the bridge, and
+ * any alias that was itself an IP address is filtered out server-side since
+ * there'd be no other label to show. Connect opens a real SSH tunnel to that
+ * machine's own Herdr socket (spec §37); once connected, its terminals are
+ * reachable the same way local ones are, just scoped to that machine id.
+ */
+@Composable
+fun RemotePanelContent(
+    machines: List<dev.aura.xr.net.MachineInfo>,
+    connectingMachineId: String?,
+    connectError: String?,
+    onConnect: (String) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onViewTerminals: (String) -> Unit,
+    onBrowse: (String) -> Unit,
+) {
+    GlassSurface {
+        Column(Modifier.fillMaxSize().padding(24.dp)) {
+            Eyebrow("REMOTE · SSH MACHINES")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "From ~/.ssh/config, tunneled straight to that machine's own Herdr.",
+                color = AuraColors.Muted,
+                fontSize = 12.sp,
+            )
+            if (connectError != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(connectError, color = AuraColors.Amber, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(14.dp))
+            if (machines.isEmpty()) {
+                Text("No SSH hosts found.", color = AuraColors.Muted, fontSize = 14.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Add a Host entry to ~/.ssh/config to see it here.",
+                    color = AuraColors.Muted,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(machines) { machine ->
+                        val isConnecting = connectingMachineId == machine.id
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StatusDot(if (machine.connected) AuraColors.Green else AuraColors.Idle, size = 7.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                machine.label,
+                                color = AuraColors.Text,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            when {
+                                isConnecting -> Text("Connecting…", color = AuraColors.Muted, fontSize = 12.sp)
+                                machine.connected -> Row {
+                                    Text(
+                                        "Browse",
+                                        color = AuraColors.Blue,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { onBrowse(machine.id) },
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text(
+                                        "Terminals",
+                                        color = AuraColors.Cyan,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { onViewTerminals(machine.id) },
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text(
+                                        "Disconnect",
+                                        color = AuraColors.Muted,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { onDisconnect(machine.id) },
+                                    )
+                                }
+                                else -> Text(
+                                    "Connect",
+                                    color = AuraColors.Blue,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { onConnect(machine.id) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Not-yet-implemented dock views (Diff, Remote — Phase 2/3) — honest placeholder, not fake data. */
+@Composable
+fun PlaceholderPanelContent(title: String, note: String) {
+    GlassSurface {
+        Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Eyebrow(title)
+            Spacer(Modifier.height(12.dp))
+            Text(note, color = AuraColors.Muted, fontSize = 14.sp)
         }
     }
 }
@@ -219,6 +1039,364 @@ fun DockButtonContent(icon: String, label: String, active: Boolean, onClick: () 
                 fontSize = 11.sp,
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
             )
+        }
+    }
+}
+
+/**
+ * Voice file search overlay (spec §13, §63) — sits on top of whatever view is
+ * active, since the mic is reachable from anywhere. Three states, mutually
+ * exclusive: listening (live partial transcript), an error, or an ambiguous
+ * result's candidate list. A confident result never reaches here — the
+ * caller opens it directly and clears state before this ever renders.
+ */
+@Composable
+fun VoiceOverlay(
+    isListening: Boolean,
+    partial: String,
+    error: String?,
+    result: VoiceResolution?,
+    onSelectCandidate: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val showCandidates = result != null && !result.confident
+    if (!isListening && error == null && !showCandidates) return
+
+    Box(
+        Modifier.fillMaxSize().background(Color(0xAA000000)).clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .width(420.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(AuraColors.PanelGradTop)
+                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                // Swallow clicks so tapping inside the card doesn't dismiss it.
+                .clickable(enabled = false) {}
+                .padding(20.dp),
+        ) {
+            Column {
+                when {
+                    isListening -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusDot(AuraColors.Red, size = 8.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Listening…", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            partial.ifBlank { "Say a filename…" },
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                        )
+                    }
+                    error != null -> {
+                        Text("Voice search", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(10.dp))
+                        Text(error, color = AuraColors.Amber, fontSize = 14.sp)
+                    }
+                    result != null -> {
+                        Text(
+                            if (result.candidates.isEmpty()) "No match" else "Which one?",
+                            color = AuraColors.Text,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Not confident enough to open one automatically.",
+                            color = AuraColors.Muted,
+                            fontSize = 12.sp,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Column(Modifier.heightIn(max = 260.dp)) {
+                            for (candidate in result.candidates) {
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onSelectCandidate(candidate.path) }
+                                        .padding(vertical = 8.dp, horizontal = 6.dp),
+                                ) {
+                                    Text(
+                                        candidate.path,
+                                        color = AuraColors.Text,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    if (candidate.preview != null) {
+                                        Text(
+                                            candidate.preview,
+                                            color = AuraColors.Muted,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Tap outside to dismiss",
+                    color = AuraColors.Eyebrow,
+                    fontSize = 11.sp,
+                    modifier = Modifier.clickable(onClick = onDismiss),
+                )
+            }
+        }
+    }
+}
+
+/** What the agent detail card shows — [preview] is null while its terminal snippet is still loading. */
+data class AgentDetailState(val agent: AgentInfo, val preview: String?, val promptError: String? = null)
+
+/**
+ * Agent detail card (spec §10 — a chip "expands to a detail card" rather than
+ * navigating away). What it offers depends on the agent's real status:
+ * a prompt box only makes sense when the agent can accept one — Herdr
+ * rejects `agent.prompt` outright with `agent_blocked` if the agent is
+ * sitting at a raw prompt (e.g. a "trust this folder?" choice), so a blocked
+ * agent gets "Open Terminal" instead, which is the only thing that can
+ * actually unblock it (real keystrokes, not a chat turn).
+ */
+@Composable
+fun AgentDetailOverlay(
+    state: AgentDetailState?,
+    promptText: String,
+    onPromptChange: (String) -> Unit,
+    onSendPrompt: () -> Unit,
+    onInterrupt: () -> Unit,
+    onOpenTerminal: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (state == null) return
+    val agent = state.agent
+    val canPrompt = agent.status != "blocked"
+
+    Box(
+        Modifier.fillMaxSize().background(Color(0xAA000000)).clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .width(440.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(AuraColors.PanelGradTop)
+                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                .clickable(enabled = false) {} // swallow taps so the card itself doesn't dismiss
+                .padding(20.dp),
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(28.dp).clip(CircleShape).background(AuraColors.LogoBg)
+                            .border(1.dp, AuraColors.LogoBorder, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            agent.label.take(1),
+                            color = AuraColors.agentAccent(agent.kind),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(agent.label, color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusDot(AuraColors.agentStatusColor(agent.status), size = 6.dp)
+                            Spacer(Modifier.width(4.dp))
+                            Text("${agent.kind} · ${agent.status}", color = AuraColors.Muted, fontSize = 12.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 60.dp, max = 140.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(VsCodeColors.EditorBg)
+                        .padding(10.dp),
+                ) {
+                    Text(
+                        state.preview?.takeLast(600) ?: "Loading…",
+                        color = VsCodeColors.Plain,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                if (canPrompt) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(VsCodeColors.EditorBg)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        ) {
+                            if (promptText.isEmpty()) {
+                                Text("Send a message…", color = AuraColors.Muted, fontSize = 13.sp)
+                            }
+                            BasicTextField(
+                                value = promptText,
+                                onValueChange = onPromptChange,
+                                textStyle = TextStyle(color = AuraColors.Text, fontSize = 13.sp),
+                                singleLine = true,
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(AuraColors.Text),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { onSendPrompt() }),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Send",
+                            color = AuraColors.Blue,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = onSendPrompt).padding(8.dp),
+                        )
+                    }
+                    if (state.promptError != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(state.promptError, color = AuraColors.Amber, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                } else {
+                    Text(
+                        "This agent is waiting on a raw response it can't take as a chat message — open its terminal to answer directly.",
+                        color = AuraColors.Amber,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                }
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Open Terminal",
+                        color = AuraColors.Cyan,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onOpenTerminal),
+                    )
+                    Text(
+                        "Interrupt",
+                        color = AuraColors.Amber,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onInterrupt),
+                    )
+                    Text(
+                        "Close",
+                        color = AuraColors.Muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onDismiss),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Remote folder browser (spec §37) — appears right after Connect so picking
+ * a folder is the natural next step, not a separate hunt. "Open" re-roots
+ * both Code and a fresh Terminal at whatever directory is on screen when
+ * tapped, so what you see here is exactly what you get.
+ */
+@Composable
+fun RemoteBrowseOverlay(
+    state: dev.aura.xr.net.BridgeClient.RemoteBrowseState?,
+    onNavigate: (String) -> Unit,
+    onUp: () -> Unit,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (state == null) return
+    Box(
+        Modifier.fillMaxSize().background(Color(0xAA000000)).clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .width(460.dp)
+                .heightIn(max = 420.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(AuraColors.PanelGradTop)
+                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                .clickable(enabled = false) {}
+                .padding(20.dp),
+        ) {
+            Column {
+                Text(
+                    "Open folder on ${state.machineLabel}",
+                    color = AuraColors.Text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    state.path,
+                    color = AuraColors.Muted,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth().clickable(onClick = onUp).padding(vertical = 5.dp),
+                ) {
+                    Text("↑ ..", color = AuraColors.Blue, fontSize = 13.sp)
+                }
+                Box(Modifier.heightIn(min = 80.dp, max = 220.dp)) {
+                    if (state.loading) {
+                        Text("Loading…", color = AuraColors.Muted, fontSize = 13.sp)
+                    } else if (state.entries.none { it.isDir }) {
+                        Text("No subfolders here.", color = AuraColors.Muted, fontSize = 13.sp)
+                    } else {
+                        LazyColumn {
+                            items(state.entries.filter { it.isDir }) { entry ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val next = if (state.path.endsWith("/")) "${state.path}${entry.name}" else "${state.path}/${entry.name}"
+                                            onNavigate(next)
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("📁", fontSize = 13.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(entry.name, color = AuraColors.Text, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Cancel",
+                        color = AuraColors.Muted,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onDismiss),
+                    )
+                    Text(
+                        "Open this folder",
+                        color = AuraColors.Blue,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onOpen),
+                    )
+                }
+            }
         }
     }
 }

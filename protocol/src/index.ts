@@ -144,9 +144,13 @@ export const VoiceSearchRequest = z.object({
 // Terminals (spec §18–21) — ergonomic wrappers over Herdr pane operations
 // ---------------------------------------------------------------------------
 
+/** Every terminal.* request carries this — "local" (the default) or a connected remote machine id (spec §37). */
+const machineScope = { machineId: z.string().optional() };
+
 export const TerminalListRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.list"),
+  ...machineScope,
 });
 
 export const TerminalCreateRequest = z.object({
@@ -156,18 +160,21 @@ export const TerminalCreateRequest = z.object({
   workspaceId: z.string().optional(),
   name: z.string().optional(),
   cwd: z.string().optional(),
+  ...machineScope,
 });
 
 export const TerminalCloseRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.close"),
   paneId: z.string().min(1),
+  ...machineScope,
 });
 
 export const TerminalFocusRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.focus"),
   paneId: z.string().min(1),
+  ...machineScope,
 });
 
 export const TerminalRenameRequest = z.object({
@@ -176,6 +183,7 @@ export const TerminalRenameRequest = z.object({
   /** Herdr names tabs, not panes; the bridge resolves the pane's tab. */
   paneId: z.string().min(1),
   name: z.string().min(1),
+  ...machineScope,
 });
 
 export const TerminalReadRequest = z.object({
@@ -186,6 +194,7 @@ export const TerminalReadRequest = z.object({
   lines: z.number().int().positive().max(50_000).optional(),
   /** ANSI is kept for the XR renderer's color pass; strip for plain preview. */
   format: z.enum(["text", "ansi"]).default("ansi"),
+  ...machineScope,
 });
 
 export const TerminalInputRequest = z.object({
@@ -193,6 +202,7 @@ export const TerminalInputRequest = z.object({
   type: z.literal("terminal.input"),
   paneId: z.string().min(1),
   text: z.string(),
+  ...machineScope,
 });
 
 /** Ctrl+C / SIGINT to the foreground process (spec §20). */
@@ -202,6 +212,7 @@ export const TerminalInterruptRequest = z.object({
   paneId: z.string().min(1),
   /** Must be true — the XR confirmation card is mandatory before interrupting. */
   confirmed: z.literal(true),
+  ...machineScope,
 });
 
 /** Powers the "Stop process?" card: what is actually running right now. */
@@ -209,6 +220,7 @@ export const TerminalProcessInfoRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.process_info"),
   paneId: z.string().min(1),
+  ...machineScope,
 });
 
 // ---------------------------------------------------------------------------
@@ -230,6 +242,21 @@ export const GitStatusRequest = z.object({
   workspaceId: z.string(),
 });
 
+/** Local branch names for the quick switcher (spec §26). */
+export const GitBranchesRequest = z.object({
+  ...requestBase,
+  type: z.literal("git.branches"),
+  workspaceId: z.string(),
+});
+
+/** Unified diff for one file, relative to HEAD (untracked files diff against empty). */
+export const GitDiffRequest = z.object({
+  ...requestBase,
+  type: z.literal("git.diff"),
+  workspaceId: z.string(),
+  path: z.string().min(1),
+});
+
 // ---------------------------------------------------------------------------
 // Herdr transparent proxy (spec §70, docs/herdr-ipc.md)
 // ---------------------------------------------------------------------------
@@ -243,6 +270,29 @@ export const HerdrProxyRequest = z.object({
     method: z.string().min(1),
     params: z.record(z.string(), z.unknown()),
   }),
+});
+
+// ---------------------------------------------------------------------------
+// Remote machines (spec §36–37, Phase 3)
+// ---------------------------------------------------------------------------
+
+/** Lists configured SSH host aliases. Never returns IPs/users/key paths (spec §54, §36). */
+export const MachineListRequest = z.object({
+  ...requestBase,
+  type: z.literal("machine.list"),
+});
+
+/** Opens an SSH tunnel to the machine's own Herdr socket (spec §37). Raw key material never leaves the bridge. */
+export const MachineConnectRequest = z.object({
+  ...requestBase,
+  type: z.literal("machine.connect"),
+  machineId: z.string().min(1),
+});
+
+export const MachineDisconnectRequest = z.object({
+  ...requestBase,
+  type: z.literal("machine.disconnect"),
+  machineId: z.string().min(1),
 });
 
 // ---------------------------------------------------------------------------
@@ -270,6 +320,11 @@ export const XrRequest = z.discriminatedUnion("type", [
   TerminalProcessInfoRequest,
   GitBranchSwitchRequest,
   GitStatusRequest,
+  GitDiffRequest,
+  GitBranchesRequest,
+  MachineListRequest,
+  MachineConnectRequest,
+  MachineDisconnectRequest,
   HerdrProxyRequest,
 ]);
 export type XrRequest = z.infer<typeof XrRequest>;

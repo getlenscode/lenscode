@@ -1,19 +1,30 @@
 package dev.aura.xr
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.xr.compose.platform.requestFullSpace
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import androidx.xr.compose.spatial.Subspace
@@ -27,10 +38,20 @@ import androidx.xr.compose.subspace.layout.padding
 import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.width
 import dev.aura.xr.net.BridgeClient
+import dev.aura.xr.net.PaneInfo
 import dev.aura.xr.ui.AgentChipContent
+import dev.aura.xr.ui.AgentsPanelContent
 import dev.aura.xr.ui.AuraColors
+import dev.aura.xr.ui.DiffPanelContent
 import dev.aura.xr.ui.DockButtonContent
+import dev.aura.xr.ui.FilesPanelContent
+import dev.aura.xr.ui.GitPanelContent
+import dev.aura.xr.ui.RemoteBrowseOverlay
+import dev.aura.xr.ui.RemotePanelContent
 import dev.aura.xr.ui.PrimaryPanelContent
+import dev.aura.xr.ui.TerminalPanelContent
+import dev.aura.xr.ui.VoiceOverlay
+import dev.aura.xr.voice.VoiceRecognizer
 
 class MainActivity : ComponentActivity() {
 
@@ -80,29 +101,147 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraWorkspace(bridge: BridgeClient) {
     val state by bridge.state.collectAsState()
-    var activeView by remember { mutableStateOf("code") }
+    val terminals by bridge.terminals.collectAsState()
+    val terminalOutput by bridge.terminalOutput.collectAsState()
+    val dirPath by bridge.dirPath.collectAsState()
+    val dirEntries by bridge.dirEntries.collectAsState()
+    val filesRootLabel by bridge.filesRootLabel.collectAsState()
+    val openFile by bridge.openFile.collectAsState()
+    val agents by bridge.agents.collectAsState()
+    val worktrees by bridge.worktrees.collectAsState()
+    val machines by bridge.machines.collectAsState()
+    val connectingMachineId by bridge.connectingMachineId.collectAsState()
+    val machineConnectError by bridge.machineConnectError.collectAsState()
+    val terminalsMachineId by bridge.terminalsMachineId.collectAsState()
+    val remoteBrowse by bridge.remoteBrowse.collectAsState()
+    val gitStatus by bridge.gitStatus.collectAsState()
+    val gitDiffPath by bridge.gitDiffPath.collectAsState()
+    val gitDiffText by bridge.gitDiffText.collectAsState()
+    val branches by bridge.branches.collectAsState()
+    val currentBranch by bridge.currentBranch.collectAsState()
+    val voiceResult by bridge.voiceResult.collectAsState()
+    var activeView by remember { mutableStateOf("home") }
+    var selectedPane by remember { mutableStateOf<PaneInfo?>(null) }
+    var stopConfirm by remember { mutableStateOf<dev.aura.xr.ui.StopConfirmState?>(null) }
+    var branchConflict by remember { mutableStateOf<dev.aura.xr.ui.BranchConflictState?>(null) }
+    var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
+    var agentPromptText by remember { mutableStateOf("") }
+
+    fun openAgentDetail(agent: dev.aura.xr.net.AgentInfo) {
+        agentDetail = dev.aura.xr.ui.AgentDetailState(agent, preview = null)
+        agentPromptText = ""
+        bridge.peekTerminal(agent.paneId) { text ->
+            // Guard against a stale response landing after the card was
+            // dismissed or reopened on a different agent in the meantime.
+            if (agentDetail?.agent?.paneId == agent.paneId) {
+                agentDetail = agentDetail?.copy(preview = text)
+            }
+        }
+    }
+
+    fun openAgentTerminal(agent: dev.aura.xr.net.AgentInfo) {
+        // Agents are always local — force the Terminal view back to "local"
+        // explicitly rather than trusting whatever machine it last showed
+        // (it may currently be pointed at a connected remote).
+        val pane = terminals.find { it.paneId == agent.paneId && it.machineId == "local" }
+            ?: PaneInfo(agent.paneId, "", "", "", agent.label, focused = false, machineId = "local")
+        selectedPane = pane
+        bridge.readTerminal(agent.paneId, machineId = "local")
+        bridge.switchTerminalsMachine("local") // also updates the Terminal view's machine context/badge
+        activeView = "terminal"
+        agentDetail = null
+    }
+
+    // ── Voice file search (spec §13, §63) ───────────────────────────────
+    val context = LocalContext.current
+    val voiceRecognizer = remember { VoiceRecognizer(context) }
+    var isListening by remember { mutableStateOf(false) }
+    var voicePartial by remember { mutableStateOf("") }
+    var voiceError by remember { mutableStateOf<String?>(null) }
+
+    fun startListening() {
+        voiceError = null
+        voicePartial = ""
+        isListening = true
+        bridge.clearVoiceResult()
+        voiceRecognizer.listen(
+            onPartial = { voicePartial = it },
+            onResult = { text ->
+                isListening = false
+                bridge.voiceSearch(text)
+            },
+            onError = { message ->
+                isListening = false
+                voiceError = message
+            },
+        )
+    }
+
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startListening() else voiceError = "Microphone permission is required for voice search."
+    }
+
+    fun requestVoiceSearch() {
+        if (isListening) return // already listening — a second tap shouldn't restart the session mid-capture
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) startListening() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    // A confident hit opens straight away; anything else surfaces candidates
+    // (or "no match") through the overlay instead of ever guessing (spec §13).
+    LaunchedEffect(voiceResult) {
+        val result = voiceResult ?: return@LaunchedEffect
+        if (result.confident && result.resolvedPath != null) {
+            bridge.openFile(result.resolvedPath)
+            activeView = "code"
+            bridge.clearVoiceResult()
+        }
+    }
+
+    // Refresh the data a view needs the moment it becomes active, rather than
+    // only at connect time — dock switches are the user's "load this" signal.
+    // Code is skipped when we already have a listing: jumping here from a
+    // worktree click already fired its own dir.list at the new root, and
+    // re-requesting the (stale, pre-switch) dirPath here would race it.
+    LaunchedEffect(activeView) {
+        when (activeView) {
+            "terminal" -> bridge.refreshTerminals()
+            "code" -> if (dirEntries.isEmpty()) bridge.listDir(dirPath)
+            "agents" -> bridge.refreshAgents()
+            "git" -> {
+                bridge.refreshWorktrees()
+                bridge.refreshBranches()
+            }
+            "diff" -> bridge.refreshGitStatus()
+            "remote" -> bridge.refreshMachines()
+        }
+    }
 
     Subspace {
         SpatialColumn {
-            // ── Agent strip ────────────────────────────────────────────────
+            // ── Agent strip — real herdr agent.list, honestly empty if none ──
             SpatialRow {
-                for (
-                agent in listOf(
-                    Triple("Claude", "Working", AuraColors.Green),
-                    Triple("Codex", "Testing", AuraColors.Green),
-                    Triple("Hermes", "Idle", AuraColors.Idle),
-                    Triple("Pi", "Approval", AuraColors.Amber),
-                )
-                ) {
+                if (agents.isEmpty()) {
                     SpatialPanel(
-                        SubspaceModifier
-                            .width(220.dp)
-                            .height(110.dp)
-                            .padding(8.dp)
-                            .movable()
-                            .resizable(),
+                        SubspaceModifier.width(460.dp).height(90.dp).padding(8.dp).movable().resizable(),
                     ) {
-                        AgentChipContent(agent.first, agent.second, agent.third)
+                        AgentChipContent("—", "No agents running", AuraColors.Idle)
+                    }
+                } else {
+                    for (agent in agents) {
+                        SpatialPanel(
+                            SubspaceModifier
+                                .width(220.dp)
+                                .height(110.dp)
+                                .padding(8.dp)
+                                .movable()
+                                .resizable(),
+                        ) {
+                            Box(Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
+                                AgentChipContent(agent.label, agent.status, AuraColors.agentStatusColor(agent.status), agent.kind)
+                            }
+                        }
                     }
                 }
             }
@@ -116,7 +255,216 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     .movable()
                     .resizable(),
             ) {
-                PrimaryPanelContent(state)
+                Box(Modifier.fillMaxSize()) {
+                when (activeView) {
+                    "terminal" -> TerminalPanelContent(
+                        terminals = terminals,
+                        machineId = terminalsMachineId,
+                        selected = selectedPane,
+                        output = terminalOutput,
+                        onSelect = { pane ->
+                            selectedPane = pane
+                            bridge.readTerminal(pane.paneId, pane.machineId)
+                        },
+                        onNew = { bridge.createTerminal() },
+                        onClose = { pane ->
+                            bridge.closeTerminal(pane.paneId, pane.machineId) {
+                                if (selectedPane?.paneId == pane.paneId) selectedPane = null
+                            }
+                        },
+                        onRequestStop = { pane ->
+                            // Fetch what's actually running before showing the
+                            // card — the confirmation is meaningless if it
+                            // can't say what it's about to interrupt.
+                            bridge.fetchProcessInfo(pane.paneId, pane.machineId) { label ->
+                                stopConfirm = dev.aura.xr.ui.StopConfirmState(
+                                    pane = pane,
+                                    processLabel = label,
+                                    onConfirm = {
+                                        bridge.interruptTerminal(pane.paneId, pane.machineId)
+                                        stopConfirm = null
+                                    },
+                                    onCancel = { stopConfirm = null },
+                                )
+                            }
+                        },
+                        stopConfirm = stopConfirm,
+                    )
+                    "code" -> FilesPanelContent(
+                        rootLabel = filesRootLabel,
+                        path = dirPath,
+                        entries = dirEntries,
+                        file = openFile,
+                        onOpenDir = { bridge.listDir(it) },
+                        onOpenFile = { bridge.openFile(it) },
+                        onUp = {
+                            val parent = dirPath.substringBeforeLast('/', ".")
+                            bridge.listDir(parent)
+                        },
+                    )
+                    "agents" -> AgentsPanelContent(agents, onSelect = { openAgentDetail(it) })
+                    "diff" -> DiffPanelContent(
+                        status = gitStatus,
+                        diffPath = gitDiffPath,
+                        diffText = gitDiffText,
+                        onSelectFile = { path -> bridge.loadGitDiff(path) },
+                    )
+                    "git" -> GitPanelContent(
+                        worktrees = worktrees,
+                        branches = branches,
+                        currentBranch = currentBranch,
+                        onOpenInCode = { wt ->
+                            bridge.openWorktreeInCode(wt) { activeView = "code" }
+                        },
+                        onSwitchBranch = { target ->
+                            bridge.switchBranch(
+                                target = target,
+                                onSwitched = { branchConflict = null },
+                                onWorktreeCreated = { branchConflict = null },
+                                onConflict = {
+                                    branchConflict = dev.aura.xr.ui.BranchConflictState(
+                                        target = target,
+                                        onStash = {
+                                            bridge.switchBranch(
+                                                target = target,
+                                                onDirty = "stash",
+                                                onSwitched = { branchConflict = null },
+                                                onWorktreeCreated = { branchConflict = null },
+                                                onConflict = { branchConflict = null },
+                                            )
+                                        },
+                                        onWorktree = {
+                                            bridge.switchBranch(
+                                                target = target,
+                                                onDirty = "worktree",
+                                                onSwitched = { branchConflict = null },
+                                                onWorktreeCreated = { branchConflict = null },
+                                                onConflict = { branchConflict = null },
+                                            )
+                                        },
+                                        onCancel = {
+                                            bridge.switchBranch(
+                                                target = target,
+                                                onDirty = "abort",
+                                                onSwitched = { branchConflict = null },
+                                                onWorktreeCreated = { branchConflict = null },
+                                                onConflict = { branchConflict = null },
+                                            )
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                        conflict = branchConflict,
+                    )
+                    "remote" -> RemotePanelContent(
+                        machines = machines,
+                        connectingMachineId = connectingMachineId,
+                        connectError = machineConnectError,
+                        onConnect = { machineId ->
+                            val label = machines.find { it.id == machineId }?.label ?: machineId
+                            bridge.connectMachine(machineId, label)
+                        },
+                        onDisconnect = { machineId ->
+                            bridge.disconnectMachine(machineId)
+                            // If the Terminal view was showing this machine, fall back
+                            // to local rather than silently pointing at a dead tunnel.
+                            if (bridge.terminalsMachineId.value == machineId) {
+                                bridge.switchTerminalsMachine("local")
+                            }
+                        },
+                        onViewTerminals = { machineId ->
+                            bridge.switchTerminalsMachine(machineId)
+                            activeView = "terminal"
+                        },
+                        onBrowse = { machineId ->
+                            val label = machines.find { it.id == machineId }?.label ?: machineId
+                            bridge.startRemoteBrowse(machineId, label, "/")
+                        },
+                    )
+                    else -> PrimaryPanelContent(state)
+                }
+                // Voice search is reachable from any view (dock mic button
+                // below), so its overlay lives here rather than inside one
+                // specific view's content.
+                VoiceOverlay(
+                    isListening = isListening,
+                    partial = voicePartial,
+                    error = voiceError,
+                    result = voiceResult,
+                    onSelectCandidate = { path ->
+                        bridge.openFile(path)
+                        activeView = "code"
+                        bridge.clearVoiceResult()
+                    },
+                    onDismiss = {
+                        isListening = false
+                        voiceError = null
+                        bridge.clearVoiceResult()
+                    },
+                )
+                // Agent chips (strip above, or the Agents view) expand here
+                // rather than navigating away — see openAgentDetail's doc.
+                dev.aura.xr.ui.AgentDetailOverlay(
+                    state = agentDetail,
+                    promptText = agentPromptText,
+                    onPromptChange = { agentPromptText = it },
+                    onSendPrompt = {
+                        val target = agentDetail?.agent
+                        if (target != null && agentPromptText.isNotBlank()) {
+                            bridge.sendAgentPrompt(
+                                target.paneId,
+                                agentPromptText,
+                                onDone = {
+                                    agentPromptText = ""
+                                    agentDetail = null
+                                },
+                                onError = {
+                                    // Most likely the agent went blocked between opening
+                                    // the card and hitting Send — surface that instead of
+                                    // failing silently.
+                                    agentDetail = agentDetail?.copy(
+                                        promptError = "Couldn't send — the agent may need a direct response now.",
+                                    )
+                                },
+                            )
+                        }
+                    },
+                    onInterrupt = {
+                        val target = agentDetail?.agent
+                        if (target != null) {
+                            bridge.fetchProcessInfo(target.paneId) { label ->
+                                stopConfirm = dev.aura.xr.ui.StopConfirmState(
+                                    pane = PaneInfo(target.paneId, "", "", "", target.label, focused = false),
+                                    processLabel = label,
+                                    onConfirm = {
+                                        bridge.interruptTerminal(target.paneId)
+                                        stopConfirm = null
+                                        agentDetail = null
+                                    },
+                                    onCancel = { stopConfirm = null },
+                                )
+                            }
+                        }
+                    },
+                    onOpenTerminal = {
+                        agentDetail?.agent?.let { openAgentTerminal(it) }
+                    },
+                    onDismiss = { agentDetail = null },
+                )
+                // Shown right after a successful Connect (spec §37) — picking a
+                // folder here re-roots both Code and a fresh Terminal at it.
+                RemoteBrowseOverlay(
+                    state = remoteBrowse,
+                    onNavigate = { path -> bridge.browseRemoteDir(path) },
+                    onUp = { bridge.browseRemoteUp() },
+                    onOpen = {
+                        bridge.openRemoteBrowsedFolder()
+                        activeView = "code"
+                    },
+                    onDismiss = { bridge.closeRemoteBrowse() },
+                )
+                }
             }
 
             // ── Quick dock (icons match the mockup's dock glyphs) ───────────
@@ -129,6 +477,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     Triple("⑂", "Git", "git"),
                     Triple("◎", "Agents", "agents"),
                     Triple("▥", "Remote", "remote"),
+                    Triple("🎤", "Voice", "voice"),
                 )
                 ) {
                     val (icon, label, id) = dock
@@ -140,7 +489,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
                             .movable()
                             .resizable(),
                     ) {
-                        DockButtonContent(icon, label, active = activeView == id) { activeView = id }
+                        DockButtonContent(icon, label, active = activeView == id) {
+                            if (id == "voice") requestVoiceSearch() else activeView = id
+                        }
                     }
                 }
             }

@@ -63,4 +63,13 @@ object AuraColors {
         "pi" -> Color(0xFFD8B4FE)
         else -> Text
     }
+
+    /** Herdr's real agent_status values (idle/working/blocked/done/unknown) — spec §10's 6-state strip. */
+    fun agentStatusColor(status: String): Color = when (status) {
+        "working" -> Green
+        "blocked" -> Amber
+        "done" -> Cyan
+        "idle" -> Idle
+        else -> Idle
+    }
 }

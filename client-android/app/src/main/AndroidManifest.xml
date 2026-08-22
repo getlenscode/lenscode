@@ -2,9 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Voice file search (spec §13, §63) — Android SpeechRecognizer. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- XR-only app: request the immersive feature. -->
     <uses-feature android:name="android.software.xr.immersive" android:required="true" />
+
+    <!-- Android 11+ package visibility: without this, SpeechRecognizer.isRecognitionAvailable()
+         can't see the on-device recognition service even when one exists. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <application
         android:label="Aura Workspace"
