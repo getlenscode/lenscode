@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,7 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -784,9 +789,83 @@ fun FilesPanelContent(
                             slice
                         }
                     }
-                    LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+
+                    // Find-in-file (spec §15) — purely client-side, the file's
+                    // already fully loaded; no bridge round-trip needed.
+                    var findQuery by remember(file.path) { mutableStateOf("") }
+                    var findIndex by remember(file.path) { mutableStateOf(0) }
+                    val findMatches = remember(findQuery, lines) {
+                        if (findQuery.isBlank()) emptyList()
+                        else lines.indices.filter { lines[it].contains(findQuery, ignoreCase = true) }
+                    }
+                    LaunchedEffect(findMatches) { findIndex = 0 }
+                    val listState = rememberLazyListState()
+                    LaunchedEffect(findIndex, findMatches) {
+                        findMatches.getOrNull(findIndex)?.let { listState.scrollToItem(it, scrollOffset = -200) }
+                    }
+                    fun jump(delta: Int) {
+                        if (findMatches.isEmpty()) return
+                        findIndex = ((findIndex + delta) % findMatches.size + findMatches.size) % findMatches.size
+                    }
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(VsCodeColors.EditorBg)
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .width(200.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(VsCodeColors.SidebarBg)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            if (findQuery.isEmpty()) {
+                                Text("🔎 Find in file…", color = VsCodeColors.Breadcrumb, fontSize = 12.sp)
+                            }
+                            BasicTextField(
+                                value = findQuery,
+                                onValueChange = { findQuery = it },
+                                textStyle = TextStyle(color = VsCodeColors.Plain, fontSize = 12.sp),
+                                singleLine = true,
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(VsCodeColors.Plain),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { jump(1) }),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        if (findQuery.isNotEmpty()) {
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                if (findMatches.isEmpty()) "no matches" else "${findIndex + 1}/${findMatches.size}",
+                                color = VsCodeColors.Breadcrumb,
+                                fontSize = 12.sp,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text("▲", color = AuraColors.Blue, fontSize = 13.sp, modifier = Modifier.clickable { jump(-1) })
+                            Spacer(Modifier.width(10.dp))
+                            Text("▼", color = AuraColors.Blue, fontSize = 13.sp, modifier = Modifier.clickable { jump(1) })
+                        }
+                    }
+
+                    val currentMatchLine = findMatches.getOrNull(findIndex)
+                    LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp), state = listState) {
                         itemsIndexed(annotatedLines) { idx, lineText ->
-                            Row(Modifier.fillMaxWidth()) {
+                            val isMatch = idx in findMatches
+                            val isCurrent = idx == currentMatchLine
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        when {
+                                            isCurrent -> Color(0x552F81F7)
+                                            isMatch -> Color(0x33F0C040)
+                                            else -> Color.Transparent
+                                        },
+                                    ),
+                            ) {
                                 Text(
                                     (idx + 1).toString(),
                                     color = VsCodeColors.LineNumber,
