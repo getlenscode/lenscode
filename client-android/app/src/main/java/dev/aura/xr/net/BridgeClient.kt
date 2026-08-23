@@ -45,6 +45,9 @@ data class GitFileStatus(val path: String, val oldPath: String?, val status: Str
 
 data class VoiceCandidate(val path: String, val score: Double, val preview: String?)
 
+/** A typed `search.files` hit (spec §13 back-end) — filename or ripgrep text match. */
+data class FileSearchHit(val path: String, val score: Double, val kind: String, val preview: String?, val line: Int?)
+
 data class VoiceResolution(val confident: Boolean, val resolvedPath: String?, val candidates: List<VoiceCandidate>)
 
 data class GitStatus(val branch: String?, val files: List<GitFileStatus>)
@@ -108,6 +111,9 @@ class BridgeClient(
 
     private val _voiceResult = MutableStateFlow<VoiceResolution?>(null)
     val voiceResult: StateFlow<VoiceResolution?> = _voiceResult
+
+    private val _searchResults = MutableStateFlow<List<FileSearchHit>>(emptyList())
+    val searchResults: StateFlow<List<FileSearchHit>> = _searchResults
 
     private val _agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val agents: StateFlow<List<AgentInfo>> = _agents
@@ -461,6 +467,38 @@ class BridgeClient(
 
     fun clearVoiceResult() {
         _voiceResult.value = null
+    }
+
+    // ── Typed file search (spec §13 back-end) ───────────────────────────
+    // Distinct from voiceSearch: this never auto-opens anything — it's a
+    // plain results list the human picks from, no confidence gating needed.
+
+    fun searchFiles(query: String) {
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
+        send(
+            "search.files",
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("query", query).put("limit", 20),
+            onResult = { result ->
+                val arr = result.optJSONArray("hits") ?: JSONArray()
+                _searchResults.value = (0 until arr.length()).map { i ->
+                    val h = arr.getJSONObject(i)
+                    FileSearchHit(
+                        path = h.optString("path"),
+                        score = h.optDouble("score", 0.0),
+                        kind = h.optString("kind", "filename"),
+                        preview = if (h.isNull("preview")) null else h.optString("preview"),
+                        line = if (h.isNull("line")) null else h.optInt("line"),
+                    )
+                }
+            },
+        )
+    }
+
+    fun clearSearchResults() {
+        _searchResults.value = emptyList()
     }
 
     // ── Git diff ─────────────────────────────────────────────────────────

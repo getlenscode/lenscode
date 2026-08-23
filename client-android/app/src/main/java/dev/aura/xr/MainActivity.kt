@@ -236,6 +236,8 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var deleteConfirm by remember { mutableStateOf<dev.aura.xr.ui.DeleteConfirmState?>(null) }
     var diffDiscardConfirm by remember { mutableStateOf<dev.aura.xr.ui.DeleteConfirmState?>(null) }
     var stagedHunks by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var fileSearchQuery by remember { mutableStateOf("") }
+    val fileSearchResults by bridge.searchResults.collectAsState()
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
 
@@ -419,11 +421,21 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         entries = dirEntries,
                         file = openFile,
                         onOpenDir = { bridge.listDir(it) },
-                        onOpenFile = { bridge.openFile(it) },
+                        onOpenFile = {
+                            fileSearchQuery = ""
+                            bridge.clearSearchResults()
+                            bridge.openFile(it)
+                        },
                         onUp = {
                             val parent = dirPath.substringBeforeLast('/', ".")
                             bridge.listDir(parent)
                         },
+                        searchQuery = fileSearchQuery,
+                        onSearchQueryChange = { q ->
+                            fileSearchQuery = q
+                            bridge.searchFiles(q)
+                        },
+                        searchResults = fileSearchResults,
                     )
                     "agents" -> AgentsPanelContent(agents, onSelect = { openAgentDetail(it) })
                     "diff" -> DiffPanelContent(

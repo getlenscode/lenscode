@@ -580,6 +580,9 @@ fun FilesPanelContent(
     onOpenDir: (String) -> Unit,
     onOpenFile: (String) -> Unit,
     onUp: () -> Unit,
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    searchResults: List<dev.aura.xr.net.FileSearchHit> = emptyList(),
 ) {
     val shape = RoundedCornerShape(PanelCorner)
     Box(
@@ -613,45 +616,106 @@ fun FilesPanelContent(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
                 )
-                Spacer(Modifier.height(10.dp))
-                Row(
+                Spacer(Modifier.height(8.dp))
+                // Typed file search (spec §13 back-end) — separate from voice
+                // search: a plain results list, no confidence gating, never
+                // auto-opens anything.
+                Box(
                     Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onUp)
-                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                        .padding(horizontal = 14.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(VsCodeColors.EditorBg)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
-                    Text("↑ ..", color = VsCodeColors.Breadcrumb, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-                }
-                if (entries.isEmpty()) {
-                    Text(
-                        "Empty.",
-                        color = VsCodeColors.Breadcrumb,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    if (searchQuery.isEmpty()) {
+                        Text("🔍 Search files…", color = VsCodeColors.Breadcrumb, fontSize = 12.sp)
+                    }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        textStyle = TextStyle(color = VsCodeColors.Plain, fontSize = 12.sp),
+                        singleLine = true,
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(VsCodeColors.Plain),
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                } else {
-                    LazyColumn {
-                        items(entries) { entry ->
-                            val isOpen = !entry.isDir && file != null &&
-                                file.path == if (path == ".") entry.name else "$path/${entry.name}"
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(if (isOpen) VsCodeColors.HoverRow else Color.Transparent)
-                                    .clickable {
-                                        val next = if (path == ".") entry.name else "$path/${entry.name}"
-                                        if (entry.isDir) onOpenDir(next) else onOpenFile(next)
+                }
+                Spacer(Modifier.height(8.dp))
+                if (searchQuery.isNotEmpty()) {
+                    if (searchResults.isEmpty()) {
+                        Text(
+                            "No matches.",
+                            color = VsCodeColors.Breadcrumb,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    } else {
+                        LazyColumn {
+                            items(searchResults) { hit ->
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenFile(hit.path) }
+                                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(if (hit.kind == "text") "🔎" else "📄", fontSize = 12.sp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(hit.path, color = VsCodeColors.Plain, fontSize = 13.sp)
                                     }
-                                    .padding(horizontal = 14.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(if (entry.isDir) "📁" else "📄", fontSize = 12.sp)
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    entry.name,
-                                    color = if (isOpen) VsCodeColors.LineNumberActive else VsCodeColors.Plain,
-                                    fontSize = 13.sp,
-                                )
+                                    if (hit.preview != null) {
+                                        Text(
+                                            hit.preview.trim().take(60) + (hit.line?.let { " · L$it" } ?: ""),
+                                            color = VsCodeColors.Breadcrumb,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(start = 18.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onUp)
+                            .padding(horizontal = 14.dp, vertical = 5.dp),
+                    ) {
+                        Text("↑ ..", color = VsCodeColors.Breadcrumb, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                    }
+                    if (entries.isEmpty()) {
+                        Text(
+                            "Empty.",
+                            color = VsCodeColors.Breadcrumb,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    } else {
+                        LazyColumn {
+                            items(entries) { entry ->
+                                val isOpen = !entry.isDir && file != null &&
+                                    file.path == if (path == ".") entry.name else "$path/${entry.name}"
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .background(if (isOpen) VsCodeColors.HoverRow else Color.Transparent)
+                                        .clickable {
+                                            val next = if (path == ".") entry.name else "$path/${entry.name}"
+                                            if (entry.isDir) onOpenDir(next) else onOpenFile(next)
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(if (entry.isDir) "📁" else "📄", fontSize = 12.sp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        entry.name,
+                                        color = if (isOpen) VsCodeColors.LineNumberActive else VsCodeColors.Plain,
+                                        fontSize = 13.sp,
+                                    )
+                                }
                             }
                         }
                     }
