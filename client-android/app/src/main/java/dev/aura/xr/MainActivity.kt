@@ -238,6 +238,12 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var stagedHunks by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var fileSearchQuery by remember { mutableStateOf("") }
     val fileSearchResults by bridge.searchResults.collectAsState()
+
+    // ── Walking mode (spec §50, §78) ─────────────────────────────────────
+    // Manual toggle, not sensor-driven (no locomotion sensing available here):
+    // suppresses the dense dock + full panel content down to agent strip +
+    // voice, per spec's "readability over density" walking-mode discipline.
+    var walkingMode by remember { mutableStateOf(false) }
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
 
@@ -381,6 +387,14 @@ fun AuraWorkspace(bridge: BridgeClient) {
             val primaryLayout = rememberPanelLayoutState(layoutStore, "primary", 900f, 520f, layoutGeneration)
             SpatialPanel(primaryLayout.toModifier(12.dp)) {
                 Box(Modifier.fillMaxSize()) {
+                if (walkingMode) {
+                    dev.aura.xr.ui.WalkingModeContent(
+                        herdrConnected = state.herdrConnected,
+                        onExit = { walkingMode = false },
+                        onVoice = { requestVoiceSearch() },
+                        isListening = isListening,
+                    )
+                } else {
                 when (activeView) {
                     "terminal" -> TerminalPanelContent(
                         terminals = terminals,
@@ -608,6 +622,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         onTogglePin = { primaryLayout.togglePinned() },
                         onBringCloser = { primaryLayout.nudgeDepth(-40f) },
                         onPushFarther = { primaryLayout.nudgeDepth(40f) },
+                        onEnterWalkingMode = { walkingMode = true },
                         pairingState = pairingState,
                         deviceName = pairingDeviceName,
                         onDeviceNameChange = { pairingDeviceName = it },
@@ -622,6 +637,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                             bridge.beginPairing(pairingDeviceName)
                         },
                     )
+                }
                 }
                 // Voice search is reachable from any view (dock mic button
                 // below), so its overlay lives here rather than inside one
@@ -709,6 +725,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
             }
 
             // ── Quick dock (icons match the mockup's dock glyphs) ───────────
+            // Hidden in walking mode (spec §50) — the primary panel's own
+            // exit/voice controls are the only way back while it's active.
+            if (!walkingMode) {
             SpatialRow {
                 for (
                 dock in listOf(
@@ -730,6 +749,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         }
                     }
                 }
+            }
             }
         }
     }

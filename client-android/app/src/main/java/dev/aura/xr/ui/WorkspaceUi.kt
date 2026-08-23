@@ -153,6 +153,7 @@ fun PrimaryPanelContent(
     onTogglePin: () -> Unit = {},
     onBringCloser: () -> Unit = {},
     onPushFarther: () -> Unit = {},
+    onEnterWalkingMode: () -> Unit = {},
     pairingState: PairingState = PairingState.Authenticated,
     deviceName: String = "",
     onDeviceNameChange: (String) -> Unit = {},
@@ -247,8 +248,68 @@ fun PrimaryPanelContent(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable(onClick = onResetLayout),
                     )
+                    Spacer(Modifier.width(16.dp))
+                    // Manual toggle (spec §50, §78) — no locomotion sensor here to
+                    // drive it automatically; suppresses the dock + dense panels
+                    // down to agent strip + voice while active.
+                    Text(
+                        "🚶 Walking Mode",
+                        color = AuraColors.Eyebrow,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onEnterWalkingMode),
+                    )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Walking mode's primary panel content (spec §50, §78) — deliberately just
+ * this: a status dot, a mic, and the way back. Everything else (dock, Code/
+ * Diff/Git/Agents detail) is suppressed at the call site while active.
+ */
+@Composable
+fun WalkingModeContent(
+    herdrConnected: Boolean,
+    onExit: () -> Unit,
+    onVoice: () -> Unit,
+    isListening: Boolean,
+) {
+    GlassSurface {
+        Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(if (herdrConnected) AuraColors.Green else AuraColors.Red)
+                Spacer(Modifier.width(8.dp))
+                Text("🚶 Walking Mode", color = AuraColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(20.dp))
+            if (isListening) {
+                StatusDot(AuraColors.Red, size = 14.dp)
+                Spacer(Modifier.height(8.dp))
+                Text("Listening…", color = AuraColors.Muted, fontSize = 14.sp)
+            } else {
+                Text(
+                    "🎤",
+                    fontSize = 40.sp,
+                    modifier = Modifier.clickable(onClick = onVoice),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("Tap to speak", color = AuraColors.Muted, fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(28.dp))
+            Text(
+                "🧍 Exit Walking Mode",
+                color = AuraColors.Eyebrow,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(onClick = onExit),
+            )
         }
     }
 }
