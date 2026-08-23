@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -815,6 +816,7 @@ fun FilesPanelContent(
                     // find-in-file already uses.
                     val symbols = remember(file.content, file.language) { extractSymbols(file.content, file.language) }
                     var showOutline by remember(file.path) { mutableStateOf(false) }
+                    var focusSymbol by remember(file.path) { mutableStateOf<CodeSymbol?>(null) }
                     val editorScope = rememberCoroutineScope()
 
                     Row(
@@ -938,6 +940,80 @@ fun FilesPanelContent(
                                                 fontSize = 11.sp,
                                                 fontFamily = FontFamily.Monospace,
                                             )
+                                            Spacer(Modifier.width(8.dp))
+                                            // Focus card (spec §16) — isolates just this symbol's
+                                            // body, separate from "jump to it in the full file"
+                                            // (clicking the row itself).
+                                            Text(
+                                                "⤢",
+                                                color = AuraColors.Blue,
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.clickable {
+                                                    showOutline = false
+                                                    focusSymbol = sym
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (focusSymbol != null) {
+                            val range = remember(focusSymbol, lines, file.language) {
+                                symbolBodyRange(lines, focusSymbol!!, file.language)
+                            }
+                            Box(
+                                Modifier.fillMaxSize().background(Color(0xDD000000)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth(0.92f)
+                                        .fillMaxHeight(0.88f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(VsCodeColors.EditorBg)
+                                        .border(1.dp, VsCodeColors.Border, RoundedCornerShape(12.dp))
+                                        .padding(16.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(symbolKindIcon(focusSymbol!!.kind), fontSize = 15.sp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            focusSymbol!!.name,
+                                            color = VsCodeColors.Plain,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "${focusSymbol!!.kind} · L${range.first + 1}–${range.last + 1}",
+                                            color = VsCodeColors.Breadcrumb,
+                                            fontSize = 12.sp,
+                                        )
+                                        Spacer(Modifier.weight(1f))
+                                        Text(
+                                            "✕ Close",
+                                            color = AuraColors.Muted,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable { focusSymbol = null },
+                                        )
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Box(Modifier.fillMaxWidth().height(1.dp).background(VsCodeColors.Border))
+                                    Spacer(Modifier.height(6.dp))
+                                    LazyColumn(Modifier.fillMaxSize()) {
+                                        items((range.first..range.last).toList()) { idx ->
+                                            Row(Modifier.fillMaxWidth()) {
+                                                Text(
+                                                    (idx + 1).toString(),
+                                                    color = VsCodeColors.LineNumber,
+                                                    fontSize = 12.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    modifier = Modifier.width(44.dp).padding(end = 12.dp),
+                                                )
+                                                Text(annotatedLines[idx], fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                            }
                                         }
                                     }
                                 }

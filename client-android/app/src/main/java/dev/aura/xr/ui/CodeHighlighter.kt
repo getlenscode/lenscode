@@ -196,3 +196,57 @@ fun extractSymbols(code: String, language: String?): List<CodeSymbol> {
     }
     return symbols
 }
+
+private val BRACE_LANGS = setOf("typescript", "javascript", "rust", "go", "c", "cpp", "csharp")
+
+/**
+ * Code focus cards (spec §16): isolates one symbol's body by brace-matching
+ * (curly-brace languages) or indentation (Python) — heuristic, not a real
+ * parser, so pathological formatting can under/over-shoot; callers should
+ * treat the result as "best effort," same spirit as [highlightCode].
+ */
+fun symbolBodyRange(lines: List<String>, symbol: CodeSymbol, language: String?): IntRange {
+    if (symbol.line !in lines.indices) return symbol.line..symbol.line
+    return when {
+        language == "python" -> pythonBlockRange(lines, symbol.line)
+        language in BRACE_LANGS -> braceBlockRange(lines, symbol.line, language)
+        else -> symbol.line..symbol.line
+    }
+}
+
+private fun stripStringsAndComments(line: String, language: String?): String {
+    var s = Regex(commentPattern(language)).replace(line, "")
+    s = Regex(STRING_RE).replace(s, "\"\"")
+    return s
+}
+
+private fun braceBlockRange(lines: List<String>, startLine: Int, language: String?): IntRange {
+    var depth = 0
+    var seenOpen = false
+    var end = startLine
+    for (i in startLine until lines.size) {
+        for (ch in stripStringsAndComments(lines[i], language)) {
+            if (ch == '{') { depth++; seenOpen = true } else if (ch == '}') depth--
+        }
+        end = i
+        if (seenOpen && depth <= 0) break
+        if (i - startLine > 500) break // safety cap against a runaway match
+    }
+    return startLine..end
+}
+
+private fun pythonBlockRange(lines: List<String>, startLine: Int): IntRange {
+    val baseIndent = lines[startLine].takeWhile { it == ' ' || it == '\t' }.length
+    var end = startLine
+    for (i in (startLine + 1) until lines.size) {
+        val line = lines[i]
+        if (line.isBlank()) {
+            end = i
+            continue
+        }
+        val indent = line.takeWhile { it == ' ' || it == '\t' }.length
+        if (indent <= baseIndent) break
+        end = i
+    }
+    return startLine..end
+}
