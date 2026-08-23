@@ -124,3 +124,75 @@ fun highlightCode(code: String, language: String?): AnnotatedString {
         if (last < code.length) append(code.substring(last))
     }
 }
+
+/** One entry in the symbol outline (spec §15) — 0-based line for scroll targeting. */
+data class CodeSymbol(val name: String, val kind: String, val line: Int)
+
+/** name-capturing regex, tagged with the outline kind it represents. */
+private data class SymbolPattern(val regex: Regex, val kind: String)
+
+/**
+ * Regex-based symbol extraction, same "good enough for read-only preview,
+ * not a real parser" spirit as [highlightCode] — no AST, no LSP. Good enough
+ * to jump around a file by its top-level shape; not guaranteed exhaustive on
+ * unusual formatting.
+ */
+private val SYMBOL_PATTERNS: Map<String, List<SymbolPattern>> = mapOf(
+    "typescript" to listOf(
+        SymbolPattern(Regex("""^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)"""), "function"),
+        SymbolPattern(Regex("""^\s*(?:export\s+)?class\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*(?:export\s+)?interface\s+(\w+)"""), "interface"),
+        SymbolPattern(Regex("""^\s*(?:export\s+)?type\s+(\w+)\s*="""), "type"),
+        SymbolPattern(Regex("""^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\("""), "function"),
+    ),
+    "javascript" to listOf(
+        SymbolPattern(Regex("""^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)"""), "function"),
+        SymbolPattern(Regex("""^\s*(?:export\s+)?class\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\("""), "function"),
+    ),
+    "python" to listOf(
+        SymbolPattern(Regex("""^\s*def\s+(\w+)"""), "function"),
+        SymbolPattern(Regex("""^\s*class\s+(\w+)"""), "class"),
+    ),
+    "rust" to listOf(
+        SymbolPattern(Regex("""^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)"""), "function"),
+        SymbolPattern(Regex("""^\s*(?:pub\s+)?struct\s+(\w+)"""), "struct"),
+        SymbolPattern(Regex("""^\s*(?:pub\s+)?enum\s+(\w+)"""), "enum"),
+        SymbolPattern(Regex("""^\s*(?:pub\s+)?trait\s+(\w+)"""), "trait"),
+        SymbolPattern(Regex("""^\s*impl(?:<[^>]*>)?\s+(?:\w+\s+for\s+)?(\w+)"""), "impl"),
+    ),
+    "go" to listOf(
+        SymbolPattern(Regex("""^func\s+(?:\([^)]*\)\s*)?(\w+)"""), "function"),
+        SymbolPattern(Regex("""^type\s+(\w+)\s+struct"""), "struct"),
+        SymbolPattern(Regex("""^type\s+(\w+)\s+interface"""), "interface"),
+    ),
+    "c" to listOf(
+        SymbolPattern(Regex("""^\s*struct\s+(\w+)\s*\{"""), "struct"),
+        SymbolPattern(Regex("""^\w[\w\s*]*?\s(\w+)\s*\([^;]*\)\s*\{"""), "function"),
+    ),
+    "cpp" to listOf(
+        SymbolPattern(Regex("""^\s*class\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*struct\s+(\w+)\s*\{"""), "struct"),
+        SymbolPattern(Regex("""^\w[\w\s*:<>]*?\s(\w+)\s*\([^;]*\)\s*\{"""), "function"),
+    ),
+    "csharp" to listOf(
+        SymbolPattern(Regex("""^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?class\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?interface\s+(\w+)"""), "interface"),
+        SymbolPattern(Regex("""^\s*(?:public|private|protected|internal)\s+[\w<>\[\]]+\s+(\w+)\s*\("""), "method"),
+    ),
+)
+
+/** Extracts an outline of top-level definitions, in source order. */
+fun extractSymbols(code: String, language: String?): List<CodeSymbol> {
+    val patterns = SYMBOL_PATTERNS[language] ?: return emptyList()
+    val symbols = mutableListOf<CodeSymbol>()
+    code.split("\n").forEachIndexed { idx, line ->
+        for (p in patterns) {
+            val m = p.regex.find(line) ?: continue
+            val name = m.groupValues.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: continue
+            symbols.add(CodeSymbol(name, p.kind, idx))
+            break // one symbol per line, first pattern wins
+        }
+    }
+    return symbols
+}

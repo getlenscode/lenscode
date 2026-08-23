@@ -30,7 +30,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -808,6 +810,13 @@ fun FilesPanelContent(
                         findIndex = ((findIndex + delta) % findMatches.size + findMatches.size) % findMatches.size
                     }
 
+                    // Symbol outline (spec §15) — same regex-based, no-parser
+                    // spirit as highlightCode; jumps scroll the same LazyColumn
+                    // find-in-file already uses.
+                    val symbols = remember(file.content, file.language) { extractSymbols(file.content, file.language) }
+                    var showOutline by remember(file.path) { mutableStateOf(false) }
+                    val editorScope = rememberCoroutineScope()
+
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -848,32 +857,90 @@ fun FilesPanelContent(
                             Spacer(Modifier.width(10.dp))
                             Text("▼", color = AuraColors.Blue, fontSize = 13.sp, modifier = Modifier.clickable { jump(1) })
                         }
+                        Spacer(Modifier.weight(1f))
+                        if (symbols.isNotEmpty()) {
+                            Text(
+                                "🗂 Outline (${symbols.size})",
+                                color = if (showOutline) AuraColors.Blue else VsCodeColors.Breadcrumb,
+                                fontSize = 12.sp,
+                                modifier = Modifier.clickable { showOutline = !showOutline },
+                            )
+                        }
                     }
 
                     val currentMatchLine = findMatches.getOrNull(findIndex)
-                    LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp), state = listState) {
-                        itemsIndexed(annotatedLines) { idx, lineText ->
-                            val isMatch = idx in findMatches
-                            val isCurrent = idx == currentMatchLine
-                            Row(
+                    Box(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp), state = listState) {
+                            itemsIndexed(annotatedLines) { idx, lineText ->
+                                val isMatch = idx in findMatches
+                                val isCurrent = idx == currentMatchLine
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            when {
+                                                isCurrent -> Color(0x552F81F7)
+                                                isMatch -> Color(0x33F0C040)
+                                                else -> Color.Transparent
+                                            },
+                                        ),
+                                ) {
+                                    Text(
+                                        (idx + 1).toString(),
+                                        color = VsCodeColors.LineNumber,
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.width(44.dp).padding(end = 12.dp),
+                                    )
+                                    Text(lineText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                }
+                            }
+                        }
+                        if (showOutline) {
+                            Box(
                                 Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        when {
-                                            isCurrent -> Color(0x552F81F7)
-                                            isMatch -> Color(0x33F0C040)
-                                            else -> Color.Transparent
-                                        },
-                                    ),
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 4.dp, end = 8.dp)
+                                    .width(260.dp)
+                                    .heightIn(max = 320.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(VsCodeColors.SidebarBg)
+                                    .border(1.dp, VsCodeColors.Border, RoundedCornerShape(10.dp))
+                                    .padding(vertical = 6.dp),
                             ) {
-                                Text(
-                                    (idx + 1).toString(),
-                                    color = VsCodeColors.LineNumber,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.width(44.dp).padding(end = 12.dp),
-                                )
-                                Text(lineText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                LazyColumn {
+                                    items(symbols) { sym ->
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    showOutline = false
+                                                    editorScope.launch { listState.scrollToItem(sym.line, scrollOffset = -100) }
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                symbolKindIcon(sym.kind),
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.width(20.dp),
+                                            )
+                                            Text(
+                                                sym.name,
+                                                color = VsCodeColors.Plain,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            Text(
+                                                "${sym.line + 1}",
+                                                color = VsCodeColors.Breadcrumb,
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1200,6 +1267,20 @@ private fun gitStatusLabel(status: String): String = when (status) {
     "renamed" -> "R"
     "untracked" -> "U"
     else -> "M"
+}
+
+/** Icon for one outline entry's kind (spec §15) — same casual mapping as the file tree's 📁/📄. */
+private fun symbolKindIcon(kind: String): String = when (kind) {
+    "function" -> "ƒ"
+    "class" -> "🄲"
+    "interface" -> "🄸"
+    "struct" -> "🅂"
+    "enum" -> "🄴"
+    "trait" -> "🅃"
+    "impl" -> "▸"
+    "type" -> "🅃"
+    "method" -> "ƒ"
+    else -> "•"
 }
 
 /** One `@@ … @@` block (its header line + every line until the next hunk/EOF). */
