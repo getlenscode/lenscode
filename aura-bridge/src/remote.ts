@@ -1,24 +1,28 @@
 /**
- * Remote Herdr connections (spec §37): tunnels the local bridge to a remote
- * machine's own Herdr socket over plain SSH port forwarding, then reuses the
- * exact same HerdrClient/Terminals/GitService/WorkspaceFiles code this bridge
- * already uses locally — a remote machine is just a HerdrClient pointed at a
- * different (forwarded) socket path. No new IPC protocol, no raw key
+ * Remote Paseo connections (spec §37): tunnels the local bridge to a remote
+ * machine's own Paseo daemon over plain SSH TCP port forwarding, then reuses
+ * the exact same PaseoClient/Terminals/GitService/WorkspaceFiles code this
+ * bridge already uses locally — a remote machine is just a PaseoClient
+ * pointed at a forwarded local port. No new IPC protocol, no raw key
  * material ever leaves this process (spec §54): ssh reads `~/.ssh/config`
  * itself, this code never touches a private key or password.
+ *
+ * docs/paseo-migration-plan.md, Phase 1: Herdr used a Unix domain socket, so
+ * remote access forwarded that socket path directly. Paseo's daemon listens
+ * on a TCP port (default 6767), so this forwards a local TCP port to the
+ * remote daemon's port instead of a socket path.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { HerdrClient } from "./herdr.ts";
+import { PaseoClient } from "./paseo.ts";
 import { log } from "./log.ts";
+
+const REMOTE_PASEO_PORT = 6767;
 
 interface Connection {
   tunnel: ChildProcess;
-  client: HerdrClient;
-  localSocketPath: string;
+  client: PaseoClient;
+  localPort: number;
   homeDir: string;
 }
 
@@ -42,6 +46,12 @@ function runSsh(machineId: string, command: string, timeoutMs = 8000): Promise<s
   });
 }
 
+/** Deterministic local port per machine id, offset into the ephemeral range. */
+function localPortFor(machineId: string): number {
+  const hash = createHash("sha1").update(machineId).digest();
+  return 20000 + (hash.readUInt16BE(0) % 20000);
+}
+
 export class RemoteManager {
   private connections = new Map<string, Connection>();
 
@@ -50,7 +60,7 @@ export class RemoteManager {
   }
 
   /** Null for "local" and for any machine that isn't currently connected. */
-  clientFor(machineId: string): HerdrClient | null {
+  clientFor(machineId: string): PaseoClient | null {
     if (machineId === "local") return null;
     return this.connections.get(machineId)?.client ?? null;
   }
@@ -63,18 +73,10 @@ export class RemoteManager {
   async connect(machineId: string): Promise<void> {
     if (this.connections.has(machineId)) return;
 
-    // sshd's own forwarding implementation doesn't shell-expand "~" in the
-    // remote_socket argument, so the path must already be absolute.
     const home = (await runSsh(machineId, "echo $HOME")).trim();
     if (!home) throw new Error(`Could not resolve a home directory on ${machineId}.`);
-    const remoteSocket = `${home}/.config/herdr/herdr.sock`;
 
-    // Unix domain socket paths are capped around 104-108 bytes on both macOS
-    // and Linux — a short hashed name under the OS temp dir stays well clear
-    // of that regardless of how long the machine id is.
-    const hash = createHash("sha1").update(machineId).digest("hex").slice(0, 12);
-    const localSocketPath = join(tmpdir(), `aura-remote-${hash}.sock`);
-    if (existsSync(localSocketPath)) unlinkSync(localSocketPath);
+    const localPort = localPortFor(machineId);
 
     const tunnel = spawn("ssh", [
       "-o", "BatchMode=yes",
@@ -82,7 +84,7 @@ export class RemoteManager {
       "-o", "ConnectTimeout=10",
       "-o", "ServerAliveInterval=15",
       "-o", "ServerAliveCountMax=3",
-      "-L", `${localSocketPath}:${remoteSocket}`,
+      "-L", `127.0.0.1:${localPort}:127.0.0.1:${REMOTE_PASEO_PORT}`,
       "-N",
       machineId,
     ]);
@@ -99,35 +101,36 @@ export class RemoteManager {
       tunnelExited = true;
     });
 
-    // ssh creates the forwarded socket once its control channel is up —
-    // poll for it rather than guessing a fixed delay.
+    // ssh's forwarding listener comes up once its control channel is
+    // established — poll by attempting the Paseo connection rather than
+    // guessing a fixed delay.
+    const client = new PaseoClient({ url: `ws://127.0.0.1:${localPort}/ws` });
     const deadline = Date.now() + 8000;
-    while (!existsSync(localSocketPath)) {
+    let lastError: unknown;
+    while (Date.now() < deadline) {
       if (tunnelExited) throw new Error(`The SSH tunnel to ${machineId} closed before it came up.`);
-      if (Date.now() > deadline) {
-        tunnel.kill();
-        throw new Error(`Timed out opening a tunnel to ${machineId}.`);
+      try {
+        await client.connect();
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e;
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-
-    const client = new HerdrClient(localSocketPath);
-    try {
-      await client.connect();
-    } catch (e) {
+    if (lastError) {
       tunnel.kill();
-      if (existsSync(localSocketPath)) unlinkSync(localSocketPath);
-      throw new Error(`Tunnel to ${machineId} is up, but Herdr isn't reachable there: ${e}`);
+      throw new Error(`Tunnel to ${machineId} is up, but Paseo isn't reachable there: ${lastError}`);
     }
 
-    this.connections.set(machineId, { tunnel, client, localSocketPath, homeDir: home });
+    this.connections.set(machineId, { tunnel, client, localPort, homeDir: home });
   }
 
   disconnect(machineId: string): void {
     const conn = this.connections.get(machineId);
     if (!conn) return;
+    conn.client.close();
     conn.tunnel.kill();
-    if (existsSync(conn.localSocketPath)) unlinkSync(conn.localSocketPath);
     this.connections.delete(machineId);
   }
 

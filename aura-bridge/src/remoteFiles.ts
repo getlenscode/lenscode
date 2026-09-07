@@ -49,7 +49,7 @@ function shQuote(path: string): string {
 export class RemoteFiles {
   private machineId: string;
   /** Absolute POSIX path this instance is rooted at — chosen by the client
-   * (a folder they picked), not resolved through any Herdr workspace. */
+   * (a folder they picked), not resolved through any Paseo workspace. */
   private root: string;
 
   constructor(machineId: string, root: string) {

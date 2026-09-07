@@ -1,156 +1,155 @@
 /**
- * Terminal subsystem (spec §18–21). Herdr owns every PTY, tab, and pane
- * (spec §4.1) — this module only translates XR-shaped operations into Herdr
- * pane/tab calls and normalizes the results for the client.
+ * Terminal subsystem (spec §18–21). Paseo owns every terminal (spec §4.1) —
+ * this module only translates XR-shaped operations into Paseo terminal RPCs
+ * and normalizes the results for the client.
+ *
+ * docs/paseo-migration-plan.md, Phase 1: replaces the Herdr pane/tab model.
+ * Paseo has no per-terminal "focus" concept and no process-info RPC — those
+ * two Herdr operations have no daemon equivalent (see the RPC mapping table
+ * in the plan); `focus` is now a bridge-local acknowledgement only.
  */
-import type { HerdrClient } from "./herdr.ts";
+import type { PaseoClient } from "./paseo.ts";
 
 export interface TerminalInfo {
-  paneId: string;
-  tabId: string;
-  workspaceId: string;
+  terminalId: string;
+  workspaceId: string | null;
   name: string;
   cwd: string | null;
-  focused: boolean;
-  agentStatus: string | null;
+  agentStatus: "idle" | "working" | "attention" | null;
 }
 
-interface HerdrPane {
-  pane_id: string;
-  tab_id: string;
-  workspace_id: string;
+interface PaseoTerminalInfo {
+  id: string;
+  name: string;
+  /** Omitted from list_terminals_response entries (they're scoped by the query cwd already); present on create. */
   cwd?: string;
-  foreground_cwd?: string;
-  focused?: boolean;
-  agent_status?: string;
+  workspaceId?: string;
+  title?: string;
+  activity?: { state: "idle" | "working" | "attention" } | null;
 }
 
-interface HerdrTab {
-  tab_id: string;
-  label?: string;
+/**
+ * Confirmed live against paseo 0.7.2: `name` is set once at creation (an
+ * explicit request name, or an auto-numbered "Terminal N") and never changes
+ * afterwards; `terminal.rename.request` instead sets `title`, which starts
+ * out as the terminal's cwd (an absolute path) and only stops looking like a
+ * path once the client explicitly renames it — the opposite of
+ * WorkspaceDescriptorPayload, where `title` is the explicit override. So: an
+ * absolute-path-shaped title is still the daemon's own default, not a rename
+ * — fall back to `name` for those; a renamed title wins.
+ */
+function displayName(t: PaseoTerminalInfo): string {
+  if (t.title && !t.title.startsWith("/")) return t.title;
+  return t.name;
+}
+
+function toTerminalInfo(t: PaseoTerminalInfo): TerminalInfo {
+  return {
+    terminalId: t.id,
+    workspaceId: t.workspaceId ?? null,
+    name: displayName(t),
+    cwd: t.cwd ?? null,
+    agentStatus: t.activity?.state ?? null,
+  };
 }
 
 export class Terminals {
-  private herdr: HerdrClient;
+  private paseo: PaseoClient;
 
-  constructor(herdr: HerdrClient) {
-    this.herdr = herdr;
+  constructor(paseo: PaseoClient) {
+    this.paseo = paseo;
   }
 
   async list(): Promise<TerminalInfo[]> {
-    const [panesRes, tabsRes] = await Promise.all([
-      this.herdr.request("pane.list", {}) as Promise<{ panes?: HerdrPane[] }>,
-      this.herdr.request("tab.list", {}) as Promise<{ tabs?: HerdrTab[] }>,
-    ]);
-    const tabLabels = new Map(
-      (tabsRes.tabs ?? []).map((t) => [t.tab_id, t.label ?? t.tab_id]),
-    );
-    return (panesRes.panes ?? []).map((p) => ({
-      paneId: p.pane_id,
-      tabId: p.tab_id,
-      workspaceId: p.workspace_id,
-      name: tabLabels.get(p.tab_id) ?? p.pane_id,
-      cwd: p.foreground_cwd ?? p.cwd ?? null,
-      focused: p.focused ?? false,
-      agentStatus: p.agent_status ?? null,
-    }));
+    const res = await this.paseo.daemon.listTerminals();
+    return (res.terminals ?? []).map((t) => toTerminalInfo(t as PaseoTerminalInfo));
   }
 
   /**
-   * Creates a terminal as a new Herdr tab (spec §19 tab model). If Herdr has no
-   * workspace yet, one is created first — asking for a terminal from XR must
-   * never fail merely because the session is empty.
+   * Creates a terminal (spec §19). `cwd` defaults to the bridge's project
+   * root when the client omits it — asking for a terminal from XR must never
+   * fail merely because no directory was specified.
+   *
+   * Unlike Herdr, Paseo's create_terminal_request requires a workspaceId
+   * (confirmed live against paseo 0.7.2: "workspaceId is required" without
+   * one) — there's no bare "just start a shell in this cwd" call. So the
+   * bridge resolves one first: reuse an existing workspace already backed by
+   * `cwd`, or create a directory-backed workspace for it (spec §19's model —
+   * asking for a terminal from XR must never fail merely because no
+   * workspace exists yet for that directory).
    */
   async create(opts: { workspaceId?: string; name?: string; cwd?: string }): Promise<TerminalInfo> {
-    let workspaceId = opts.workspaceId;
-    if (!workspaceId) {
-      const list = (await this.herdr.request("workspace.list", {})) as {
-        workspaces?: Array<{ workspace_id: string; focused?: boolean }>;
-      };
-      const existing = list.workspaces ?? [];
-      if (existing.length === 0) {
-        const ws = (await this.herdr.request("workspace.create", {
-          focus: true,
-          ...(opts.cwd ? { cwd: opts.cwd } : {}),
-        })) as { workspace?: { workspace_id: string }; root_pane?: HerdrPane };
-        workspaceId = ws.workspace?.workspace_id;
-        // workspace.create already yields a tab + root pane; name and return it.
-        const paneId = ws.root_pane?.pane_id;
-        if (paneId) {
-          if (opts.name) await this.rename(paneId, opts.name);
-          const info = (await this.list()).find((t) => t.paneId === paneId);
-          if (info) return info;
-        }
-      } else {
-        workspaceId = (existing.find((w) => w.focused) ?? existing[0]).workspace_id;
-      }
+    const cwd = opts.cwd ?? process.cwd();
+    const workspaceId = opts.workspaceId ?? (await this.resolveOrCreateWorkspace(cwd));
+    const res = await this.paseo.daemon.createTerminal(cwd, opts.name, undefined, {
+      workspaceId,
+    });
+    if (!res.terminal) {
+      throw new Error(res.error ?? "Paseo did not return a terminal.");
     }
-
-    const created = (await this.herdr.request("tab.create", {
-      ...(workspaceId ? { workspace_id: workspaceId } : {}),
-      ...(opts.cwd ? { cwd: opts.cwd } : {}),
-      ...(opts.name ? { label: opts.name } : {}),
-      focus: true,
-    })) as { tab?: HerdrTab; root_pane?: HerdrPane };
-    const paneId = created.root_pane?.pane_id;
-    if (!paneId) throw new Error("Herdr did not return a pane for the new tab.");
-    const all = await this.list();
-    const info = all.find((t) => t.paneId === paneId);
-    if (!info) throw new Error("New terminal did not appear in the pane list.");
-    return info;
+    return toTerminalInfo(res.terminal as PaseoTerminalInfo);
   }
 
-  async close(paneId: string): Promise<void> {
-    await this.herdr.request("pane.close", { pane_id: paneId });
+  private async resolveOrCreateWorkspace(cwd: string): Promise<string> {
+    const { entries } = await this.paseo.daemon.fetchWorkspaces({ page: { limit: 200 } });
+    const existing = entries.find(
+      (e) => e.workspaceDirectory === cwd || e.projectRootPath === cwd,
+    );
+    if (existing) return existing.id;
+    const created = await this.paseo.daemon.createWorkspace({
+      source: { kind: "directory", path: cwd },
+    });
+    if (!created.workspace) {
+      throw new Error(created.error ?? `Could not open a Paseo workspace at ${cwd}.`);
+    }
+    return created.workspace.id;
   }
 
-  async focus(paneId: string): Promise<void> {
-    await this.herdr.request("pane.focus", { pane_id: paneId });
+  async close(terminalId: string): Promise<void> {
+    await this.paseo.daemon.killTerminal(terminalId);
   }
 
-  async rename(paneId: string, name: string): Promise<void> {
-    const panes = (await this.herdr.request("pane.list", {})) as { panes?: HerdrPane[] };
-    const pane = panes.panes?.find((p) => p.pane_id === paneId);
-    if (!pane) throw new Error("That terminal no longer exists.");
-    await this.herdr.request("tab.rename", { tab_id: pane.tab_id, name });
+  /** No daemon equivalent (Paseo has no server-side terminal focus) — bridge-local ack. */
+  async focus(_terminalId: string): Promise<void> {
+    return;
   }
 
+  async rename(terminalId: string, name: string): Promise<void> {
+    const res = await this.paseo.daemon.renameTerminal({ terminalId, title: name });
+    if (!res.success) throw new Error(res.error ?? "Could not rename that terminal.");
+  }
+
+  /**
+   * `source`/`format` from the old Herdr-shaped request are accepted for
+   * protocol compatibility but Paseo's capture is always a plain-text line
+   * range; ANSI passthrough and Herdr's "recent_unwrapped" distinction have
+   * no equivalent here (see docs/paseo-migration-plan.md risks).
+   */
   async read(
-    paneId: string,
-    source: "visible" | "recent" | "recent_unwrapped",
+    terminalId: string,
+    _source: "visible" | "recent" | "recent_unwrapped",
     format: "text" | "ansi",
     lines?: number,
   ): Promise<{ content: string; lines: number; truncated: boolean; revision: number }> {
-    const res = (await this.herdr.request("pane.read", {
-      pane_id: paneId,
-      source,
-      format,
-      strip_ansi: format === "text",
-      ...(lines ? { lines } : {}),
-    })) as { read?: { text?: string; truncated?: boolean; revision?: number } };
-    const content = res.read?.text ?? "";
+    const res = await this.paseo.daemon.captureTerminal(terminalId, {
+      ...(lines ? { start: -lines } : {}),
+      stripAnsi: format === "text",
+    });
+    const content = res.lines.join("\n");
     return {
       content,
-      lines: content ? content.split("\n").length : 0,
-      truncated: res.read?.truncated ?? false,
-      revision: res.read?.revision ?? 0,
+      lines: res.lines.length,
+      truncated: res.lines.length < res.totalLines,
+      revision: res.totalLines,
     };
   }
 
-  async sendText(paneId: string, text: string): Promise<void> {
-    await this.herdr.request("pane.send_text", { pane_id: paneId, text });
+  sendText(terminalId: string, text: string): void {
+    this.paseo.daemon.sendTerminalInput(terminalId, { type: "input", data: text });
   }
 
-  /**
-   * Sends Ctrl+C to the pane's foreground process. Herdr validates key names
-   * before writing bytes; "ctrl+c" is its documented interrupt chord.
-   */
-  async interrupt(paneId: string): Promise<void> {
-    await this.herdr.request("pane.send_keys", { pane_id: paneId, keys: ["ctrl+c"] });
-  }
-
-  /** Foreground process detail for the "Stop process?" confirmation card. */
-  async processInfo(paneId: string): Promise<unknown> {
-    return this.herdr.request("pane.process_info", { pane_id: paneId });
+  /** Sends Ctrl+C (0x03) to the terminal's foreground process (spec §20). */
+  interrupt(terminalId: string): void {
+    this.paseo.daemon.sendTerminalInput(terminalId, { type: "input", data: "\x03" });
   }
 }

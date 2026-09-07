@@ -1,15 +1,34 @@
 /**
- * Aura XR protocol v1 — the contract between the Unity XR client and aura-bridge.
+ * Aura XR protocol v3 — the contract between the Android XR client and aura-bridge.
  *
  * Design (spec §69):
  *  - every request carries a client-generated `id`; responses echo it
  *  - structured errors, never bare strings
  *  - server-push events are versioned envelopes
- *  - `herdr.request` transparently wraps a native Herdr envelope (docs/herdr-ipc.md)
+ *
+ * v2 (docs/paseo-migration-plan.md, Phase 1): the bridge's backend switched from
+ * Herdr to Paseo (https://github.com/getpaseo/paseo). There is no raw proxy
+ * request anymore — Paseo's protocol churns on its own dated compat schedule
+ * (packages/protocol/src/client-capabilities.ts upstream), and leaking that
+ * straight into the Kotlin client would mean re-deriving those compat gates on
+ * every daemon release. Every capability the XR client needs is modelled
+ * explicitly below instead. `paneId` is renamed `terminalId` throughout to
+ * match Paseo's own terminal ids (they are not Herdr panes).
+ *
+ * v3 (docs/paseo-migration-plan.md, Phase 2): agents become first-class. Herdr
+ * had no agent model at all — Aura inferred agent state by scraping terminal
+ * output. Paseo tracks agents as their own objects (status, provider/model,
+ * cost, pending permission requests), so `agent.*` and `permission.*` below
+ * are new, not renamed. Agent/terminal push events (agent_stream,
+ * agent_permission_request, terminals_changed, …) are not modelled as
+ * distinct XR event types yet — they ride the existing generic `backend`
+ * topic verbatim (bridge's `broadcastPaseoEvent`), same as every Paseo event
+ * since Phase 1. Splitting them into typed topics is a client-ergonomics
+ * improvement for Phase 3, not a protocol requirement.
  */
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Envelopes
@@ -21,8 +40,8 @@ export const StructuredError = z.object({
     "pairing_required",
     "invalid_request",
     "not_found",
-    "herdr_unavailable",
-    "herdr_error",
+    "backend_unavailable",
+    "backend_error",
     "conflict",
     "dangerous_op_unconfirmed",
     "internal",
@@ -84,7 +103,7 @@ export const SnapshotRequest = z.object({
 export const SubscribeRequest = z.object({
   ...requestBase,
   type: z.literal("events.subscribe"),
-  topics: z.array(z.enum(["herdr", "git", "files", "machines"])).min(1),
+  topics: z.array(z.enum(["backend", "git", "files", "machines"])).min(1),
 });
 
 // ---------------------------------------------------------------------------
@@ -145,7 +164,7 @@ export const VoiceSearchRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Terminals (spec §18–21) — ergonomic wrappers over Herdr pane operations
+// Terminals (spec §18–21) — ergonomic wrappers over Paseo terminal operations
 // ---------------------------------------------------------------------------
 
 // Every terminal.* request below carries machineScope too.
@@ -159,7 +178,7 @@ export const TerminalListRequest = z.object({
 export const TerminalCreateRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.create"),
-  /** Omit to create a tab in the focused workspace. */
+  /** Omit to create a terminal in the focused workspace. */
   workspaceId: z.string().optional(),
   name: z.string().optional(),
   cwd: z.string().optional(),
@@ -169,22 +188,26 @@ export const TerminalCreateRequest = z.object({
 export const TerminalCloseRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.close"),
-  paneId: z.string().min(1),
+  terminalId: z.string().min(1),
   ...machineScope,
 });
 
+/**
+ * Paseo has no server-side notion of terminal focus — the bridge tracks the
+ * XR client's last-focused terminal locally and this is a no-op acknowledged
+ * round-trip, kept so the client doesn't need a special case.
+ */
 export const TerminalFocusRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.focus"),
-  paneId: z.string().min(1),
+  terminalId: z.string().min(1),
   ...machineScope,
 });
 
 export const TerminalRenameRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.rename"),
-  /** Herdr names tabs, not panes; the bridge resolves the pane's tab. */
-  paneId: z.string().min(1),
+  terminalId: z.string().min(1),
   name: z.string().min(1),
   ...machineScope,
 });
@@ -192,7 +215,7 @@ export const TerminalRenameRequest = z.object({
 export const TerminalReadRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.read"),
-  paneId: z.string().min(1),
+  terminalId: z.string().min(1),
   source: z.enum(["visible", "recent", "recent_unwrapped"]).default("visible"),
   lines: z.number().int().positive().max(50_000).optional(),
   /** ANSI is kept for the XR renderer's color pass; strip for plain preview. */
@@ -203,7 +226,7 @@ export const TerminalReadRequest = z.object({
 export const TerminalInputRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.input"),
-  paneId: z.string().min(1),
+  terminalId: z.string().min(1),
   text: z.string(),
   ...machineScope,
 });
@@ -212,17 +235,9 @@ export const TerminalInputRequest = z.object({
 export const TerminalInterruptRequest = z.object({
   ...requestBase,
   type: z.literal("terminal.interrupt"),
-  paneId: z.string().min(1),
+  terminalId: z.string().min(1),
   /** Must be true — the XR confirmation card is mandatory before interrupting. */
   confirmed: z.literal(true),
-  ...machineScope,
-});
-
-/** Powers the "Stop process?" card: what is actually running right now. */
-export const TerminalProcessInfoRequest = z.object({
-  ...requestBase,
-  type: z.literal("terminal.process_info"),
-  paneId: z.string().min(1),
   ...machineScope,
 });
 
@@ -295,18 +310,135 @@ export const GitHunkApplyRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Herdr transparent proxy (spec §70, docs/herdr-ipc.md)
+// Agents (docs/paseo-migration-plan.md, Phase 2) — first-class Paseo agents
 // ---------------------------------------------------------------------------
 
-export const HerdrProxyRequest = z.object({
+export const AgentListRequest = z.object({
   ...requestBase,
-  type: z.literal("herdr.request"),
-  /** Native Herdr envelope; bridge validates method against its allowlist. */
-  request: z.object({
-    id: z.string(),
-    method: z.string().min(1),
-    params: z.record(z.string(), z.unknown()),
-  }),
+  type: z.literal("agent.list"),
+  ...machineScope,
+});
+
+export const AgentCreateRequest = z.object({
+  ...requestBase,
+  type: z.literal("agent.create"),
+  /** e.g. "claude", "codex", "opencode", "pi" — see provider.list. */
+  provider: z.string().min(1),
+  model: z.string().optional(),
+  cwd: z.string().min(1),
+  workspaceId: z.string().optional(),
+  title: z.string().optional(),
+  /** Starts the agent working immediately; omit to create it idle. */
+  prompt: z.string().optional(),
+  /**
+   * Paseo permission mode, e.g. "default" (ask every time — the daemon's own
+   * default), "auto" (classifier-reviewed auto-approval), "acceptEdits",
+   * "bypassPermissions". Omit for "default" — confirmed live (2026-09-07): a
+   * voice-created agent left on "default" sits forever on its first tool
+   * call's permission request since nothing in the voice flow ever answers
+   * it, so ask_agent always passes one explicitly.
+   */
+  modeId: z.string().optional(),
+  ...machineScope,
+});
+
+/** Sends a follow-up prompt to an existing agent (fire-and-forget; watch agent_stream for the reply). */
+export const AgentSendRequest = z.object({
+  ...requestBase,
+  type: z.literal("agent.send"),
+  agentId: z.string().min(1),
+  text: z.string().min(1),
+  ...machineScope,
+});
+
+/**
+ * The agent's own activity — every message and tool call, tail-first (docs/paseo-migration-plan.md
+ * follow-up: previously an agent's Bash/tool output was only visible by querying
+ * the Paseo daemon directly; no XR-client-facing view existed at all). A thin
+ * projection of Paseo's fetchAgentTimeline, normalized to the handful of item
+ * shapes the client actually renders.
+ */
+export const AgentTimelineRequest = z.object({
+  ...requestBase,
+  type: z.literal("agent.timeline"),
+  agentId: z.string().min(1),
+  /** Most recent N entries. Defaults bridge-side (agents.ts) if omitted. */
+  limit: z.number().int().positive().optional(),
+  ...machineScope,
+});
+
+/** Soft-deletes the agent and closes its runtime (spec §57 — destructive; client confirms first). */
+export const AgentArchiveRequest = z.object({
+  ...requestBase,
+  type: z.literal("agent.archive"),
+  agentId: z.string().min(1),
+  ...machineScope,
+});
+
+// ---------------------------------------------------------------------------
+// Permissions (docs/paseo-migration-plan.md, Phase 2) — the spatial "approve
+// this tool call" card is the highest-value glasses affordance in this phase.
+// ---------------------------------------------------------------------------
+
+/** Every pending permission request across all local agents — the confirmation queue. */
+export const PermissionListRequest = z.object({
+  ...requestBase,
+  type: z.literal("permission.list"),
+  ...machineScope,
+});
+
+export const PermissionRespondRequest = z.object({
+  ...requestBase,
+  type: z.literal("permission.respond"),
+  agentId: z.string().min(1),
+  /** id of the AgentPermissionRequest being answered (from an agent_permission_request event). */
+  permissionRequestId: z.string().min(1),
+  behavior: z.enum(["allow", "deny"]),
+  /** One of the request's own offered actions, when it had more than a bare allow/deny. */
+  selectedActionId: z.string().optional(),
+  /** Shown to the agent when denying (e.g. "not right now"). */
+  message: z.string().optional(),
+  ...machineScope,
+});
+
+// ---------------------------------------------------------------------------
+// Providers (docs/paseo-migration-plan.md, Phase 2) — populates a provider/model picker
+// ---------------------------------------------------------------------------
+
+export const ProviderListRequest = z.object({
+  ...requestBase,
+  type: z.literal("provider.list"),
+  ...machineScope,
+});
+
+// ---------------------------------------------------------------------------
+// Worktrees (docs/paseo-migration-plan.md, Phase 3) — Herdr's worktree.* was
+// reachable through the now-removed herdr.request proxy; these are its
+// direct XR-protocol replacements, backed by Paseo's Paseo-owned-worktree
+// RPCs (getPaseoWorktreeList / createPaseoWorktree / archivePaseoWorktree).
+// ---------------------------------------------------------------------------
+
+export const WorktreeListRequest = z.object({
+  ...requestBase,
+  type: z.literal("worktree.list"),
+  workspaceId: z.string(),
+  ...machineScope,
+});
+
+/** Opens (creating a workspace for it if needed) the checkout at an existing worktree path. */
+export const WorktreeOpenRequest = z.object({
+  ...requestBase,
+  type: z.literal("worktree.open"),
+  path: z.string().min(1),
+  ...machineScope,
+});
+
+/** Destructive (spec §57) — only ever sent after the client's own confirmation card. */
+export const WorktreeRemoveRequest = z.object({
+  ...requestBase,
+  type: z.literal("worktree.remove"),
+  /** The worktree's own open workspace id (from worktree.list's openWorkspaceId). */
+  workspaceId: z.string().min(1),
   ...machineScope,
 });
 
@@ -320,7 +452,7 @@ export const MachineListRequest = z.object({
   type: z.literal("machine.list"),
 });
 
-/** Opens an SSH tunnel to the machine's own Herdr socket (spec §37). Raw key material never leaves the bridge. */
+/** Opens an SSH tunnel to the machine's own Paseo daemon port (spec §37). Raw key material never leaves the bridge. */
 export const MachineConnectRequest = z.object({
   ...requestBase,
   type: z.literal("machine.connect"),
@@ -355,7 +487,6 @@ export const XrRequest = z.discriminatedUnion("type", [
   TerminalReadRequest,
   TerminalInputRequest,
   TerminalInterruptRequest,
-  TerminalProcessInfoRequest,
   GitBranchSwitchRequest,
   GitBranchDeleteRequest,
   GitStatusRequest,
@@ -365,7 +496,17 @@ export const XrRequest = z.discriminatedUnion("type", [
   MachineListRequest,
   MachineConnectRequest,
   MachineDisconnectRequest,
-  HerdrProxyRequest,
+  AgentListRequest,
+  AgentCreateRequest,
+  AgentSendRequest,
+  AgentTimelineRequest,
+  AgentArchiveRequest,
+  PermissionListRequest,
+  PermissionRespondRequest,
+  ProviderListRequest,
+  WorktreeListRequest,
+  WorktreeOpenRequest,
+  WorktreeRemoveRequest,
 ]);
 export type XrRequest = z.infer<typeof XrRequest>;
 
@@ -379,7 +520,7 @@ export type XrResponse = z.infer<typeof XrResponse>;
 
 export const XrEvent = z.object({
   type: z.literal("event"),
-  topic: z.enum(["herdr", "git", "files", "machines", "connection"]),
+  topic: z.enum(["backend", "git", "files", "machines", "connection"]),
   event: z.string().min(1),
   data: z.unknown(),
   /** Monotonic per-topic sequence for gap detection after reconnect (spec §59). */
@@ -398,11 +539,18 @@ export const HelloResult = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string(),
   authenticated: z.boolean(),
-  herdrProtocol: z.number().int().nullable(),
-  herdrConnected: z.boolean(),
+  /** Paseo daemon version string (e.g. "0.7.2"), null if never connected. */
+  backendProtocol: z.string().nullable(),
+  backendConnected: z.boolean(),
 });
 export type HelloResult = z.infer<typeof HelloResult>;
 
+/**
+ * Speculative pre-Paseo agent state enum (M1–M2 spec draft) — unused by
+ * anything current; only the archived client-unity ever referenced it. The
+ * real backend status enum is `AgentStatus` below (Paseo's own
+ * AGENT_LIFECYCLE_STATUSES). Kept for now so client-unity still parses.
+ */
 export const AgentState = z.enum([
   "working",
   "idle",
@@ -412,9 +560,90 @@ export const AgentState = z.enum([
   "stopped",
 ]);
 
+// ---------------------------------------------------------------------------
+// Agent / permission result payloads (docs/paseo-migration-plan.md, Phase 2)
+// ---------------------------------------------------------------------------
+
+/** Mirrors Paseo's AGENT_LIFECYCLE_STATUSES verbatim (backend is authoritative). */
+export const AgentStatus = z.enum(["initializing", "idle", "running", "error", "closed"]);
+export type AgentStatus = z.infer<typeof AgentStatus>;
+
+export const AgentSummary = z.object({
+  agentId: z.string(),
+  provider: z.string(),
+  model: z.string().nullable(),
+  title: z.string().nullable(),
+  status: AgentStatus,
+  cwd: z.string(),
+  workspaceId: z.string().nullable(),
+  requiresAttention: z.boolean(),
+  attentionReason: z.enum(["finished", "error", "permission"]).nullable(),
+  pendingPermissionCount: z.number().int().nonnegative(),
+  lastError: z.string().nullable(),
+  costUsd: z.number().nullable(),
+});
+export type AgentSummary = z.infer<typeof AgentSummary>;
+
+/**
+ * One entry in an agent's activity feed — normalized from Paseo's timeline
+ * item union down to what the client actually renders. `kind` picks which
+ * other fields are populated; unrecognized Paseo item types collapse to
+ * "other" with a best-effort `text` rather than being dropped, so a new
+ * provider event type shows up as *something* instead of silently vanishing.
+ */
+export const AgentTimelineEntry = z.object({
+  kind: z.enum(["user_message", "assistant_message", "tool_call", "other"]),
+  text: z.string().nullable(),
+  /** Only for kind=tool_call, e.g. "Bash", "Read", "Edit". */
+  toolName: z.string().nullable(),
+  /** Only for kind=tool_call with a shell command (Paseo's "shell" detail type). */
+  command: z.string().nullable(),
+  /** Only for kind=tool_call: the tool's result text, once it has one. */
+  output: z.string().nullable(),
+  /** Only for kind=tool_call: "running" | "completed" | "error" | ... — Paseo's own status string. */
+  status: z.string().nullable(),
+  timestamp: z.string(),
+});
+export type AgentTimelineEntry = z.infer<typeof AgentTimelineEntry>;
+
+/** One pending "approve this tool call" request — the spatial confirmation card's data. */
+export const PermissionRequestSummary = z.object({
+  permissionRequestId: z.string(),
+  agentId: z.string(),
+  kind: z.enum(["tool", "plan", "question", "mode", "other"]),
+  title: z.string().nullable(),
+  description: z.string().nullable(),
+  actions: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      behavior: z.enum(["allow", "deny"]),
+    }),
+  ),
+});
+export type PermissionRequestSummary = z.infer<typeof PermissionRequestSummary>;
+
+/** One provider/model combination the daemon can start an agent with. */
+export const ProviderSummary = z.object({
+  provider: z.string(),
+  label: z.string(),
+  available: z.boolean(),
+  models: z.array(z.string()),
+});
+export type ProviderSummary = z.infer<typeof ProviderSummary>;
+
+/** One Paseo-owned worktree (docs/paseo-migration-plan.md, Phase 3). */
+export const WorktreeSummary = z.object({
+  path: z.string(),
+  branch: z.string().nullable(),
+  /** Non-null when a workspace is currently open on this worktree (worktree.open resolves/creates one). */
+  openWorkspaceId: z.string().nullable(),
+});
+export type WorktreeSummary = z.infer<typeof WorktreeSummary>;
+
 export const SnapshotResult = z.object({
-  /** Herdr session snapshot, forwarded verbatim (backend is authoritative, spec §58). */
-  herdr: z.unknown().nullable(),
+  /** Paseo daemon snapshot (terminals + projects today; agents in Phase 2), forwarded verbatim (backend is authoritative, spec §58). */
+  backend: z.unknown().nullable(),
   machines: z.array(
     z.object({
       machineId: z.string(),

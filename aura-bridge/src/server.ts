@@ -10,15 +10,15 @@ import {
   type XrEvent,
 } from "@aura/protocol";
 import type { BridgeConfig } from "./config.ts";
-import { HerdrClient } from "./herdr.ts";
+import { PaseoClient } from "./paseo.ts";
 import { PairingRegistry } from "./pairing.ts";
 import { WorkspaceFiles } from "./files.ts";
 import { Terminals } from "./terminals.ts";
+import { Agents, listProviders } from "./agents.ts";
 import { GitService, worktreeConflictPath } from "./git.ts";
 import { listMachines } from "./machines.ts";
 import { RemoteManager } from "./remote.ts";
 import { RemoteFiles } from "./remoteFiles.ts";
-import { isHerdrMethodAllowed } from "./allowlist.ts";
 import { log } from "./log.ts";
 
 const BRIDGE_VERSION = "0.1.0";
@@ -48,7 +48,7 @@ function terminalErrorMessage(type: string): string {
 
 export class BridgeServer {
   private wss: WebSocketServer;
-  private herdr: HerdrClient;
+  private paseo: PaseoClient;
   private clients = new Set<WebSocket>();
   private eventSeq = 0;
   private cfg: BridgeConfig;
@@ -61,8 +61,10 @@ export class BridgeServer {
   /** "machineId:root" → remote file service rooted at that absolute path (spec §37). */
   private remoteFileServices = new Map<string, RemoteFiles>();
   private terminals: Terminals;
+  /** Local-machine only for now (docs/paseo-migration-plan.md, Phase 2) — no remote-agent story yet. */
+  private agents: Agents;
   private remote = new RemoteManager();
-  /** machineId ("local" or a connected remote) → Terminals bound to that machine's HerdrClient. */
+  /** machineId ("local" or a connected remote) → Terminals bound to that machine's PaseoClient. */
   private terminalsByMachine = new Map<string, Terminals>();
   /** Sockets that have passed hello with a valid device token (or dev mode). */
   private authed = new WeakSet<WebSocket>();
@@ -70,8 +72,9 @@ export class BridgeServer {
   constructor(cfg: BridgeConfig) {
     this.cfg = cfg;
     this.pairing = new PairingRegistry(cfg.pairingStorePath);
-    this.herdr = new HerdrClient(cfg.herdrSocketPath);
-    this.terminals = new Terminals(this.herdr);
+    this.paseo = new PaseoClient({ url: cfg.paseoUrl, password: cfg.paseoPassword });
+    this.terminals = new Terminals(this.paseo);
+    this.agents = new Agents(this.paseo);
     if (cfg.insecureProd) {
       log("warn", "INSECURE: prod pairing enforcement without TLS — tests only");
     }
@@ -92,19 +95,18 @@ export class BridgeServer {
         tls: cfg.mode === "prod",
       });
     });
-    this.herdr.on("herdr-event", (ev) => this.broadcastHerdrEvent(ev));
-    this.herdr.on("disconnected", () =>
-      this.broadcastEvent("connection", "herdr_disconnected", {}),
+    this.paseo.on("paseo-event", (ev) => this.broadcastPaseoEvent(ev));
+    this.paseo.on("disconnected", () =>
+      this.broadcastEvent("connection", "backend_disconnected", {}),
     );
   }
 
   async start(): Promise<void> {
     try {
-      await this.herdr.connect();
-      await this.herdr.subscribeEvents();
+      await this.paseo.connect();
     } catch (e) {
-      // Herdr may start later; clients get herdrConnected:false in hello.
-      log("warn", "herdr unavailable at startup", { error: String(e) });
+      // The Paseo daemon may start later; clients get backendConnected:false in hello.
+      log("warn", "paseo daemon unavailable at startup", { error: String(e) });
     }
   }
 
@@ -159,15 +161,15 @@ export class BridgeServer {
           this.cfg.mode === "dev" ||
           this.pairing.isAuthorized(req.deviceId, req.deviceToken);
         if (authenticated) this.authed.add(ws);
-        await this.ensureHerdr();
+        await this.ensurePaseo();
         this.send(ws, {
           id: req.id,
           result: {
             protocolVersion: PROTOCOL_VERSION,
             serverVersion: BRIDGE_VERSION,
             authenticated,
-            herdrProtocol: this.herdr.protocol,
-            herdrConnected: this.herdr.connected,
+            backendProtocol: this.paseo.protocol,
+            backendConnected: this.paseo.connected,
           },
         });
         return;
@@ -190,23 +192,26 @@ export class BridgeServer {
         return;
       }
       case "snapshot.request": {
-        await this.ensureHerdr();
-        if (!this.herdr.connected) {
+        await this.ensurePaseo();
+        if (!this.paseo.connected) {
           this.send(ws, {
             id: req.id,
             error: err(
-              "herdr_unavailable",
-              "Herdr is not running on this machine.",
+              "backend_unavailable",
+              "Paseo is not running on this machine.",
               true,
             ),
           });
           return;
         }
-        const snapshot = await this.herdr.request("session.snapshot", {});
+        const [terminals, projects] = await Promise.all([
+          this.paseo.daemon.listTerminals(),
+          this.paseo.daemon.listProjects().catch(() => null),
+        ]);
         this.send(ws, {
           id: req.id,
           result: {
-            herdr: snapshot,
+            backend: { terminals: terminals.terminals, projects },
             machines: [
               {
                 machineId: "local",
@@ -222,44 +227,6 @@ export class BridgeServer {
       case "events.subscribe": {
         // M1: all connected clients receive all events; per-topic filtering later.
         this.send(ws, { id: req.id, result: { subscribed: req.topics } });
-        return;
-      }
-      case "herdr.request": {
-        if (!isHerdrMethodAllowed(req.request.method)) {
-          this.send(ws, {
-            id: req.id,
-            error: err(
-              "unauthorized",
-              `The method ${req.request.method} is not available from XR.`,
-            ),
-          });
-          return;
-        }
-        const machineId = req.machineId ?? "local";
-        let target: HerdrClient;
-        if (machineId === "local") {
-          await this.ensureHerdr();
-          if (!this.herdr.connected) {
-            this.send(ws, {
-              id: req.id,
-              error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
-            });
-            return;
-          }
-          target = this.herdr;
-        } else {
-          const remoteClient = this.remote.clientFor(machineId);
-          if (!remoteClient) {
-            this.send(ws, {
-              id: req.id,
-              error: err("herdr_unavailable", `Not connected to ${machineId} — connect to it first.`, true),
-            });
-            return;
-          }
-          target = remoteClient;
-        }
-        const response = await target.proxyRequest(req.request);
-        this.send(ws, { id: req.id, result: { response } });
         return;
       }
       case "dir.list": {
@@ -303,22 +270,21 @@ export class BridgeServer {
       case "terminal.rename":
       case "terminal.read":
       case "terminal.input":
-      case "terminal.interrupt":
-      case "terminal.process_info": {
+      case "terminal.interrupt": {
         const machineId = req.machineId ?? "local";
         if (machineId === "local") {
-          await this.ensureHerdr();
-          if (!this.herdr.connected) {
+          await this.ensurePaseo();
+          if (!this.paseo.connected) {
             this.send(ws, {
               id: req.id,
-              error: err("herdr_unavailable", "Herdr is not running on this machine.", true),
+              error: err("backend_unavailable", "Paseo is not running on this machine.", true),
             });
             return;
           }
         } else if (!this.remote.isConnected(machineId)) {
           this.send(ws, {
             id: req.id,
-            error: err("herdr_unavailable", `Not connected to ${machineId} — connect to it first.`, true),
+            error: err("backend_unavailable", `Not connected to ${machineId} — connect to it first.`, true),
           });
           return;
         }
@@ -326,7 +292,7 @@ export class BridgeServer {
         if (!terminals) {
           this.send(ws, {
             id: req.id,
-            error: err("herdr_unavailable", `Not connected to ${machineId}.`, true),
+            error: err("backend_unavailable", `Not connected to ${machineId}.`, true),
           });
           return;
         }
@@ -335,7 +301,7 @@ export class BridgeServer {
         } catch (e) {
           this.send(ws, {
             id: req.id,
-            error: err("herdr_error", terminalErrorMessage(req.type), true, String(e)),
+            error: err("backend_error", terminalErrorMessage(req.type), true, String(e)),
           });
         }
         return;
@@ -458,7 +424,7 @@ export class BridgeServer {
 
           // For a remote machine, workspaceId IS the absolute root already
           // (see resolveFiles/gitFor) — resolveWorkspaceRoot only knows how
-          // to resolve the bridge's own local Herdr workspace ids.
+          // to resolve the bridge's own local Paseo workspace ids.
           const machineId = req.machineId ?? "local";
           const isRemote = machineId !== "local";
           const cwd = isRemote ? req.workspaceId : await this.resolveWorkspaceRoot(req.workspaceId);
@@ -466,24 +432,25 @@ export class BridgeServer {
           if (dirty && req.onDirty === "worktree") {
             // Never touches the dirty tree at all: the target branch opens
             // in a brand-new worktree instead, so nothing here is at risk.
-            // Herdr needs to be told which repo via cwd — it has no notion
+            // Paseo needs to be told which repo via cwd — it has no notion
             // of the bridge's own "local"/machine workspace ids.
-            let client: HerdrClient;
+            let client: PaseoClient;
             try {
-              client = await this.herdrClientFor(machineId);
+              client = await this.paseoClientFor(machineId);
             } catch (e) {
-              this.send(ws, { id: req.id, error: err("herdr_unavailable", String(e), true) });
+              this.send(ws, { id: req.id, error: err("backend_unavailable", String(e), true) });
               return;
             }
             try {
-              const created = (await client.request("worktree.create", {
-                branch: req.target,
+              const created = await client.daemon.createPaseoWorktree({
                 cwd,
-                focus: false,
-              })) as { workspace?: { workspace_id?: string } };
+                refName: req.target,
+                action: "checkout",
+              });
+              if (created.error || !created.workspace) throw new Error(created.error ?? "unknown error");
               this.send(ws, {
                 id: req.id,
-                result: { switched: false, worktreeCreated: true, workspaceId: created.workspace?.workspace_id ?? null },
+                result: { switched: false, worktreeCreated: true, workspaceId: created.workspace.id },
               });
             } catch (e) {
               // A worktree for this branch already exists (spec §28's model —
@@ -569,7 +536,7 @@ export class BridgeServer {
         } catch (e) {
           this.send(ws, {
             id: req.id,
-            error: err("herdr_unavailable", `Could not connect to ${req.machineId}.`, true, String(e)),
+            error: err("backend_unavailable", `Could not connect to ${req.machineId}.`, true, String(e)),
           });
         }
         return;
@@ -581,6 +548,220 @@ export class BridgeServer {
           if (key.startsWith(`${req.machineId}:`)) this.remoteFileServices.delete(key);
         }
         this.send(ws, { id: req.id, result: { connected: false, machineId: req.machineId } });
+        return;
+      }
+      case "agent.list": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          this.send(ws, { id: req.id, result: { agents: await this.agents.list() } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not list agents.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "agent.create": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          // req.cwd is whatever the client had handy — the XR client in
+          // particular has no real filesystem view of its own and just sends
+          // ".", which means nothing to Paseo (it'd resolve against the
+          // daemon process's own cwd, not the user's project — confirmed
+          // live: it landed agents in a random scratch directory). Treat a
+          // missing/relative cwd as "the local workspace root" the same way
+          // resolveWorkspaceRoot does for files/git, rather than passing it
+          // through unresolved.
+          const cwd = req.cwd && req.cwd !== "." && req.cwd.startsWith("/")
+            ? req.cwd
+            : await this.resolveWorkspaceRoot(req.workspaceId ?? "local");
+          const agent = await this.agents.create({
+            provider: req.provider,
+            model: req.model,
+            cwd,
+            workspaceId: req.workspaceId,
+            title: req.title,
+            prompt: req.prompt,
+            modeId: req.modeId,
+          });
+          this.send(ws, { id: req.id, result: { agent } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not create that agent.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "agent.timeline": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          const entries = await this.agents.timeline(req.agentId, req.limit);
+          this.send(ws, { id: req.id, result: { entries } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not load that agent's activity.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "agent.send": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          await this.agents.send(req.agentId, req.text);
+          this.send(ws, { id: req.id, result: { sent: true } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not send that message.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "agent.archive": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          await this.agents.archive(req.agentId);
+          this.send(ws, { id: req.id, result: { archived: req.agentId } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not archive that agent.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "permission.list": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          this.send(ws, { id: req.id, result: { permissions: await this.agents.pendingPermissions() } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not list permission requests.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "permission.respond": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          await this.agents.respondToPermission(
+            req.agentId,
+            req.permissionRequestId,
+            req.behavior,
+            req.selectedActionId,
+            req.message,
+          );
+          this.send(ws, { id: req.id, result: { responded: req.permissionRequestId } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not answer that permission request.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "provider.list": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          this.send(ws, { id: req.id, result: { providers: await listProviders(this.paseo) } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not list providers.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "worktree.list": {
+        const machineId = req.machineId ?? "local";
+        let client: PaseoClient;
+        try {
+          client = await this.paseoClientFor(machineId);
+        } catch (e) {
+          this.send(ws, { id: req.id, error: err("backend_unavailable", String(e), true) });
+          return;
+        }
+        try {
+          const isRemote = machineId !== "local";
+          const cwd = isRemote ? req.workspaceId : await this.resolveWorkspaceRoot(req.workspaceId);
+          this.send(ws, { id: req.id, result: { worktrees: await this.listWorktrees(client, cwd) } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not list worktrees for that workspace.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "worktree.open": {
+        const machineId = req.machineId ?? "local";
+        let client: PaseoClient;
+        try {
+          client = await this.paseoClientFor(machineId);
+        } catch (e) {
+          this.send(ws, { id: req.id, error: err("backend_unavailable", String(e), true) });
+          return;
+        }
+        try {
+          const { entries } = await client.daemon.fetchWorkspaces({ page: { limit: 200 } });
+          const existing = entries.find(
+            (e) => e.workspaceDirectory === req.path || e.projectRootPath === req.path,
+          );
+          const workspaceId =
+            existing?.id ??
+            (
+              await client.daemon.createWorkspace({
+                source: { kind: "directory", path: req.path },
+              })
+            ).workspace?.id;
+          if (!workspaceId) {
+            this.send(ws, {
+              id: req.id,
+              error: err("backend_error", `Could not open a workspace at ${req.path}.`, true),
+            });
+            return;
+          }
+          this.send(ws, { id: req.id, result: { workspaceId } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", `Could not open ${req.path}.`, true, String(e)),
+          });
+        }
+        return;
+      }
+      case "worktree.remove": {
+        const machineId = req.machineId ?? "local";
+        let client: PaseoClient;
+        try {
+          client = await this.paseoClientFor(machineId);
+        } catch (e) {
+          this.send(ws, { id: req.id, error: err("backend_unavailable", String(e), true) });
+          return;
+        }
+        try {
+          // archivePaseoWorktree's `workspaceId` field alone isn't enough — the
+          // live daemon requires worktreePath/worktreeSlug/repoRoot+branchName
+          // (confirmed live against paseo 0.7.2); resolve the path first.
+          const { entries } = await client.daemon.fetchWorkspaces({ page: { limit: 200 } });
+          const workspace = entries.find((e) => e.id === req.workspaceId);
+          const worktreePath = workspace?.workspaceDirectory ?? workspace?.projectRootPath;
+          if (!worktreePath) {
+            throw new Error("That worktree's checkout path could not be resolved.");
+          }
+          const result = await client.daemon.archivePaseoWorktree({ worktreePath, scope: "worktree" });
+          if (!result.success) throw new Error(result.error?.message ?? "unknown error");
+          this.send(ws, { id: req.id, result: { removed: req.workspaceId } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not remove that worktree.", true, String(e)),
+          });
+        }
         return;
       }
       default: {
@@ -603,41 +784,49 @@ export class BridgeServer {
     switch (req.type) {
       case "terminal.list":
         return { terminals: await terminals.list() };
-      case "terminal.create":
+      case "terminal.create": {
+        // Same fix as agent.create: an omitted cwd used to fall through to
+        // terminals.create's own default of process.cwd() — the bridge
+        // process's own directory, not the user's project (confirmed live:
+        // a "+ New" terminal opened with prompt "bread@MacBookPro
+        // aura-bridge %"). Only fill it in when the caller gave neither cwd
+        // nor workspaceId — an explicit one (e.g. an agent's own cwd) is
+        // never second-guessed.
+        const hasRealCwd = req.cwd && req.cwd !== "." && req.cwd.startsWith("/");
+        const cwd = hasRealCwd ? req.cwd : req.workspaceId ? undefined : await this.resolveWorkspaceRoot("local");
         return {
           terminal: await terminals.create({
             workspaceId: req.workspaceId,
             name: req.name,
-            cwd: req.cwd,
+            cwd,
           }),
         };
+      }
       case "terminal.close":
-        await terminals.close(req.paneId);
-        return { closed: req.paneId };
+        await terminals.close(req.terminalId);
+        return { closed: req.terminalId };
       case "terminal.focus":
-        await terminals.focus(req.paneId);
-        return { focused: req.paneId };
+        await terminals.focus(req.terminalId);
+        return { focused: req.terminalId };
       case "terminal.rename":
-        await terminals.rename(req.paneId, req.name);
-        return { renamed: req.paneId, name: req.name };
+        await terminals.rename(req.terminalId, req.name);
+        return { renamed: req.terminalId, name: req.name };
       case "terminal.read":
-        return terminals.read(req.paneId, req.source, req.format, req.lines);
+        return terminals.read(req.terminalId, req.source, req.format, req.lines);
       case "terminal.input":
-        await terminals.sendText(req.paneId, req.text);
+        terminals.sendText(req.terminalId, req.text);
         return { sent: true };
       case "terminal.interrupt":
         // The protocol requires confirmed:true, so reaching here means the XR
         // confirmation card was shown (spec §20, §57).
-        await terminals.interrupt(req.paneId);
-        return { interrupted: req.paneId };
-      case "terminal.process_info":
-        return { process: await terminals.processInfo(req.paneId) };
+        terminals.interrupt(req.terminalId);
+        return { interrupted: req.terminalId };
       default:
         throw new Error(`unhandled terminal request ${(req as { type: string }).type}`);
     }
   }
 
-  /** Terminals bound to the right machine's HerdrClient — "local" or a connected remote (spec §37). */
+  /** Terminals bound to the right machine's PaseoClient — "local" or a connected remote (spec §37). */
   private terminalsFor(machineId: string): Terminals | null {
     if (machineId === "local") return this.terminals;
     const cached = this.terminalsByMachine.get(machineId);
@@ -650,9 +839,9 @@ export class BridgeServer {
   }
 
   /**
-   * Resolves a workspaceId to a file service. Herdr workspace ids map to that
-   * workspace's first pane cwd; "local" (or unknown ids in dev) map to the
-   * bridge's project root.
+   * Resolves a workspaceId to a file service. Paseo workspace ids map to that
+   * workspace's cwd (via its terminals); "local" (or unknown ids in dev) map
+   * to the bridge's project root.
    */
   private async filesFor(workspaceId: string): Promise<WorkspaceFiles> {
     const cached = this.workspaces.get(workspaceId);
@@ -664,7 +853,7 @@ export class BridgeServer {
 
   /**
    * Routes dir.list/file.open to local or remote (spec §37). For a remote
-   * machine, `workspaceId` isn't a Herdr workspace to resolve at all — it's
+   * machine, `workspaceId` isn't a Paseo workspace to resolve at all — it's
    * literally the absolute folder the user picked there (e.g. "/tmp/project2"),
    * used directly as both the cache key and the root.
    */
@@ -688,7 +877,7 @@ export class BridgeServer {
    * Git service for the same workspace root "Code" browses (spec §23 — diff
    * must match what's on screen). Routes to a remote machine the same way
    * [resolveFiles] does: for a remote, `workspaceId` is the literal absolute
-   * root, not a Herdr workspace id to resolve.
+   * root, not a Paseo workspace id to resolve.
    */
   private async gitFor(workspaceId: string, machineId?: string): Promise<GitService> {
     if (machineId && machineId !== "local") {
@@ -711,13 +900,12 @@ export class BridgeServer {
 
   private async resolveWorkspaceRoot(workspaceId: string): Promise<string> {
     let root = this.cfg.projectRoot;
-    if (workspaceId !== "local" && this.herdr.connected) {
+    if (workspaceId !== "local" && this.paseo.connected) {
       try {
-        const panes = (await this.herdr.request("pane.list", {})) as {
-          panes?: Array<{ workspace_id: string; cwd?: string }>;
-        };
-        const pane = panes.panes?.find((p) => p.workspace_id === workspaceId && p.cwd);
-        if (pane?.cwd) root = pane.cwd;
+        const { entries } = await this.paseo.daemon.fetchWorkspaces({ page: { limit: 200 } });
+        const workspace = entries.find((e) => e.id === workspaceId);
+        const dir = workspace?.workspaceDirectory ?? workspace?.projectRootPath;
+        if (dir) root = dir;
       } catch {
         /* fall back to project root */
       }
@@ -725,25 +913,56 @@ export class BridgeServer {
     return root;
   }
 
-  /** Looks up the live workspace_id for a branch that already has a Herdr worktree checked out. */
-  private async findExistingWorktreeWorkspace(client: HerdrClient, cwd: string, branch: string): Promise<string | null> {
+  /**
+   * Looks up the live workspace id for a branch that already has a Paseo
+   * worktree checked out. Paseo's worktree list gives a path, not a
+   * workspace id directly, so cross-reference it against fetchWorkspaces.
+   */
+  private async findExistingWorktreeWorkspace(client: PaseoClient, cwd: string, branch: string): Promise<string | null> {
     try {
-      const result = (await client.request("worktree.list", { cwd })) as {
-        worktrees?: Array<{ branch?: string | null; open_workspace_id?: string | null }>;
-      };
-      const match = result.worktrees?.find((w) => w.branch === branch && w.open_workspace_id);
-      return match?.open_workspace_id ?? null;
+      const [{ worktrees }, { entries }] = await Promise.all([
+        client.daemon.getPaseoWorktreeList({ cwd }),
+        client.daemon.fetchWorkspaces({ page: { limit: 200 } }),
+      ]);
+      const worktree = worktrees.find((w) => w.branchName === branch);
+      if (!worktree) return null;
+      const workspace = entries.find(
+        (e) => e.workspaceDirectory === worktree.worktreePath
+          || e.projectRootPath === worktree.worktreePath,
+      );
+      return workspace?.id ?? null;
     } catch {
       return null;
     }
   }
 
-  /** Resolves "local" or a connected remote machine id to its HerdrClient, throwing a user-facing message otherwise. */
-  private async herdrClientFor(machineId: string): Promise<HerdrClient> {
+  /** Full worktree list for a repo, cross-referenced against fetchWorkspaces for each one's live workspace id (spec §26, worktree.list). */
+  private async listWorktrees(
+    client: PaseoClient,
+    cwd: string,
+  ): Promise<Array<{ path: string; branch: string | null; openWorkspaceId: string | null }>> {
+    const [{ worktrees }, { entries }] = await Promise.all([
+      client.daemon.getPaseoWorktreeList({ cwd }),
+      client.daemon.fetchWorkspaces({ page: { limit: 200 } }),
+    ]);
+    return worktrees.map((w) => {
+      const workspace = entries.find(
+        (e) => e.workspaceDirectory === w.worktreePath || e.projectRootPath === w.worktreePath,
+      );
+      return {
+        path: w.worktreePath,
+        branch: w.branchName ?? null,
+        openWorkspaceId: workspace?.id ?? null,
+      };
+    });
+  }
+
+  /** Resolves "local" or a connected remote machine id to its PaseoClient, throwing a user-facing message otherwise. */
+  private async paseoClientFor(machineId: string): Promise<PaseoClient> {
     if (machineId === "local") {
-      await this.ensureHerdr();
-      if (!this.herdr.connected) throw new Error("Herdr is not running on this machine.");
-      return this.herdr;
+      await this.ensurePaseo();
+      if (!this.paseo.connected) throw new Error("Paseo is not running on this machine.");
+      return this.paseo;
     }
     const client = this.remote.clientFor(machineId);
     if (!client) throw new Error(`Not connected to ${machineId} — connect to it first.`);
@@ -766,7 +985,7 @@ export class BridgeServer {
   ): Promise<void> {
     const message = String(error);
     if (worktreeConflictPath(message)) {
-      const client = await this.herdrClientFor(machineId).catch(() => null);
+      const client = await this.paseoClientFor(machineId).catch(() => null);
       const existing = client ? await this.findExistingWorktreeWorkspace(client, cwd, target) : null;
       if (existing) {
         this.send(ws, {
@@ -779,19 +998,36 @@ export class BridgeServer {
     this.send(ws, { id, error: err("internal", `Could not switch to ${target}.`, true, message) });
   }
 
-  private async ensureHerdr(): Promise<void> {
-    if (this.herdr.connected) return;
+  /**
+   * Shared guard for the local-only `agent.*`/`permission.*`/`provider.*`
+   * handlers (docs/paseo-migration-plan.md, Phase 2 — no remote-agent story
+   * yet, unlike terminal.* which already routes per machineId). Sends the
+   * structured error itself and returns false when the backend isn't up.
+   */
+  private async requireBackend(ws: WebSocket, id: string): Promise<boolean> {
+    await this.ensurePaseo();
+    if (!this.paseo.connected) {
+      this.send(ws, {
+        id,
+        error: err("backend_unavailable", "Paseo is not running on this machine.", true),
+      });
+      return false;
+    }
+    return true;
+  }
+
+  private async ensurePaseo(): Promise<void> {
+    if (this.paseo.connected) return;
     try {
-      await this.herdr.connect();
-      await this.herdr.subscribeEvents();
-      this.broadcastEvent("connection", "herdr_connected", {});
+      await this.paseo.connect();
+      this.broadcastEvent("connection", "backend_connected", {});
     } catch {
       /* stays disconnected; callers check .connected */
     }
   }
 
-  private broadcastHerdrEvent(ev: { event: string; data: unknown }): void {
-    this.broadcastEvent("herdr", ev.event, ev.data);
+  private broadcastPaseoEvent(ev: { type: string; [key: string]: unknown }): void {
+    this.broadcastEvent("backend", ev.type, ev);
   }
 
   private broadcastEvent(topic: XrEvent["topic"], event: string, data: unknown): void {
@@ -815,7 +1051,7 @@ export class BridgeServer {
     for (const ws of this.clients) ws.terminate();
     this.wss.close();
     this.httpServer.close();
-    this.herdr.close();
+    this.paseo.close();
     this.remote.disconnectAll();
   }
 }

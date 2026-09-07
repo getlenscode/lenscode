@@ -36,7 +36,7 @@ async function connect(): Promise<WebSocket> {
 const hello = (deviceToken?: string) => ({
   id: "h1",
   type: "hello",
-  protocolVersion: 1,
+  protocolVersion: 3,
   deviceId: "xr-glasses-1",
   ...(deviceToken ? { deviceToken } : {}),
   clientInfo: { app: "test", version: "0", platform: "node" },
@@ -101,7 +101,7 @@ test("full pairing flow: begin, wrong code, right code, authorized", async () =>
   const ws2 = await connect();
   const res = await rpc(ws2, hello(token));
   assert.equal(res.result.authenticated, true);
-  const sub = await rpc(ws2, { id: "s2", type: "events.subscribe", topics: ["herdr"] });
+  const sub = await rpc(ws2, { id: "s2", type: "events.subscribe", topics: ["backend"] });
   assert.ok(sub.result);
 
   // Revocation locks the device out again (spec §55).

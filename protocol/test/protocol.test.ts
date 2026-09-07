@@ -18,14 +18,14 @@ test("hello request round-trips", () => {
   assert.equal(parsed.type, "hello");
 });
 
-test("herdr proxy request validates native envelope", () => {
+test("terminal.close addresses a terminal by id", () => {
   const msg = {
     id: "r2",
-    type: "herdr.request",
-    request: { id: "52", method: "agent.list", params: {} },
+    type: "terminal.close",
+    terminalId: "term-52",
   };
   const parsed = XrRequest.parse(msg);
-  assert.equal(parsed.type, "herdr.request");
+  assert.equal(parsed.type, "terminal.close");
 });
 
 test("unknown request type is rejected", () => {
@@ -49,20 +49,45 @@ test("server error message is structured", () => {
   const parsed = XrServerMessage.parse({
     id: "r5",
     error: {
-      code: "herdr_unavailable",
-      message: "Herdr is not running on this machine.",
+      code: "backend_unavailable",
+      message: "Paseo is not running on this machine.",
       retryable: true,
     },
   });
   assert.ok("error" in parsed);
 });
 
+test("agent.create requires provider and cwd", () => {
+  const parsed = XrRequest.parse({
+    id: "r6",
+    type: "agent.create",
+    provider: "claude",
+    cwd: "/Users/me/dev/storefront",
+    prompt: "Review the checkout flow.",
+  });
+  assert.equal(parsed.type, "agent.create");
+  assert.throws(() =>
+    XrRequest.parse({ id: "r7", type: "agent.create", cwd: "/tmp" }),
+  );
+});
+
+test("permission.respond carries the answered request id", () => {
+  const parsed = XrRequest.parse({
+    id: "r8",
+    type: "permission.respond",
+    agentId: "agent-1",
+    permissionRequestId: "perm-1",
+    behavior: "allow",
+  });
+  assert.equal(parsed.type, "permission.respond");
+});
+
 test("event envelope carries topic and seq", () => {
   const parsed = XrServerMessage.parse({
     type: "event",
-    topic: "herdr",
-    event: "pane_created",
-    data: { pane_id: "p1" },
+    topic: "backend",
+    event: "terminals_changed",
+    data: { terminalId: "term-1" },
     seq: 7,
   });
   assert.ok("seq" in parsed);

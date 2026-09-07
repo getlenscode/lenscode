@@ -9,7 +9,10 @@ export interface BridgeConfig {
   /** Paths to TLS key/cert (required in prod). */
   tlsKeyPath?: string;
   tlsCertPath?: string;
-  herdrSocketPath: string;
+  /** Paseo daemon WebSocket URL, e.g. ws://127.0.0.1:6767/ws (docs/paseo-migration-plan.md). */
+  paseoUrl: string;
+  /** Set when the Paseo daemon has a password configured. */
+  paseoPassword?: string;
   /** Persistent store for paired devices. */
   pairingStorePath: string;
   /** Test-only: prod pairing enforcement without TLS (AURA_INSECURE_PROD=1). */
@@ -20,13 +23,22 @@ export interface BridgeConfig {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
   const mode = env.AURA_MODE === "prod" ? "prod" : "dev";
+  if (env.AURA_HERDR_SOCKET) {
+    // COMPAT: pre-Paseo config key. Warn once and ignore it rather than fail
+    // startup, since it no longer maps to anything (docs/paseo-migration-plan.md).
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[aura-bridge] AURA_HERDR_SOCKET is no longer used — aura-bridge now talks to a Paseo daemon. " +
+        "Set AURA_PASEO_URL instead (default ws://127.0.0.1:6767/ws).",
+    );
+  }
   const cfg: BridgeConfig = {
     port: Number(env.AURA_PORT ?? 8137),
     mode,
     tlsKeyPath: env.AURA_TLS_KEY,
     tlsCertPath: env.AURA_TLS_CERT,
-    herdrSocketPath:
-      env.AURA_HERDR_SOCKET ?? join(homedir(), ".config", "herdr", "herdr.sock"),
+    paseoUrl: env.AURA_PASEO_URL ?? "ws://127.0.0.1:6767/ws",
+    paseoPassword: env.AURA_PASEO_PASSWORD,
     pairingStorePath:
       env.AURA_PAIRING_STORE ?? join(homedir(), ".config", "aura-bridge", "devices.json"),
     projectRoot: env.AURA_PROJECT_ROOT ?? process.cwd(),

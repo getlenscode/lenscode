@@ -196,10 +196,10 @@ fun PrimaryPanelContent(
                     Spacer(Modifier.width(6.dp))
                     Text("bridge connected", color = AuraColors.Text, fontSize = 16.sp)
                     Spacer(Modifier.width(20.dp))
-                    StatusDot(if (state.herdrConnected) AuraColors.Green else AuraColors.Red)
+                    StatusDot(if (state.backendConnected) AuraColors.Green else AuraColors.Red)
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (state.herdrConnected) "herdr connected" else "herdr offline",
+                        if (state.backendConnected) "paseo connected" else "paseo offline",
                         color = AuraColors.Text,
                         fontSize = 16.sp,
                     )
@@ -272,7 +272,7 @@ fun PrimaryPanelContent(
  */
 @Composable
 fun WalkingModeContent(
-    herdrConnected: Boolean,
+    backendConnected: Boolean,
     onExit: () -> Unit,
     onVoice: () -> Unit,
     isListening: Boolean,
@@ -284,7 +284,7 @@ fun WalkingModeContent(
             verticalArrangement = Arrangement.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(if (herdrConnected) AuraColors.Green else AuraColors.Red)
+                StatusDot(if (backendConnected) AuraColors.Green else AuraColors.Red)
                 Spacer(Modifier.width(8.dp))
                 Text("🚶 Walking Mode", color = AuraColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
@@ -474,7 +474,7 @@ data class StopConfirmState(
     val onCancel: () -> Unit,
 )
 
-/** Terminal view: real Herdr panes on the left, selected pane's scrollback on the right. */
+/** Terminal view: real Paseo terminals on the left, selected terminal's scrollback on the right. */
 @Composable
 fun TerminalPanelContent(
     terminals: List<PaneInfo>,
@@ -511,7 +511,7 @@ fun TerminalPanelContent(
                 } else {
                     LazyColumn {
                         items(terminals) { pane ->
-                            val isSelected = pane.paneId == selected?.paneId
+                            val isSelected = pane.terminalId == selected?.terminalId
                             Box(
                                 Modifier
                                     .fillMaxWidth()
@@ -523,7 +523,7 @@ fun TerminalPanelContent(
                             ) {
                                 Column {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        StatusDot(if (pane.focused) AuraColors.Green else AuraColors.Idle, size = 6.dp)
+                                        StatusDot(terminalActivityColor(pane.agentStatus), size = 6.dp)
                                         Spacer(Modifier.width(6.dp))
                                         Text(pane.title, color = AuraColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -1095,9 +1095,63 @@ fun FilesPanelContent(
     }
 }
 
-/** Agents view: real herdr agent.list — honestly empty until an agent process is started. */
+/**
+ * Which Paseo permission mode voice's ask_agent creates new agents with
+ * (docs/paseo-migration-plan.md follow-up — confirmed live: an agent left on
+ * Paseo's own "default" mode blocks forever on its first tool call's
+ * permission request, since nothing in a hands-free voice flow ever answers
+ * it). "manual" keeps that default deliberately — see the app's Permissions
+ * queue and AskAgentRespondPermission for how to answer one when picked.
+ */
+private val VoiceAgentModes = listOf(
+    "auto" to "Auto",
+    "bypass" to "Bypass",
+    "manual" to "Manual",
+)
+
 @Composable
-fun AgentsPanelContent(agents: List<AgentInfo>, onSelect: (AgentInfo) -> Unit) {
+private fun VoiceAgentModeSelector(selected: String, onSelect: (String) -> Unit) {
+    Column {
+        Text("NEW AGENT PERMISSIONS (VOICE)", color = AuraColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((id, label) in VoiceAgentModes) {
+                val active = id == selected
+                Text(
+                    label,
+                    color = if (active) AuraColors.Text else AuraColors.Muted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (active) AuraColors.DockActiveGradTop else AuraColors.CardBg)
+                        .border(1.dp, if (active) AuraColors.DockActiveBorder else AuraColors.CardBorder, RoundedCornerShape(8.dp))
+                        .clickable { onSelect(id) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            when (selected) {
+                "auto" -> "Paseo's classifier auto-approves low-risk tool calls, still asks about risky ones."
+                "bypass" -> "No approval prompts at all — fully hands-free, use with caution."
+                else -> "Every tool call waits for you — approve in Permissions, or by voice (\"allow\"/\"deny\")."
+            },
+            color = AuraColors.Muted,
+            fontSize = 11.sp,
+        )
+    }
+}
+
+/** Agents view: real Paseo agent.list — honestly empty until an agent is started. */
+@Composable
+fun AgentsPanelContent(
+    agents: List<AgentInfo>,
+    onSelect: (AgentInfo) -> Unit,
+    voiceAgentModeId: String = "auto",
+    onVoiceAgentModeChange: (String) -> Unit = {},
+) {
     GlassSurface {
         Column(Modifier.fillMaxSize().padding(24.dp)) {
             Eyebrow("AGENTS")
@@ -1105,7 +1159,9 @@ fun AgentsPanelContent(agents: List<AgentInfo>, onSelect: (AgentInfo) -> Unit) {
             if (agents.isNotEmpty()) {
                 Text("Tap an agent to see status and respond.", color = AuraColors.Muted, fontSize = 12.sp)
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(14.dp))
+            VoiceAgentModeSelector(voiceAgentModeId, onVoiceAgentModeChange)
+            Spacer(Modifier.height(14.dp))
             if (agents.isEmpty()) {
                 Text(
                     "No agents running.",
@@ -1115,7 +1171,7 @@ fun AgentsPanelContent(agents: List<AgentInfo>, onSelect: (AgentInfo) -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Herdr reports zero active agent sessions right now — start one\nwith `herdr agent start` to see it appear here.",
+                    "Paseo reports zero active agents right now — start one\nwith `paseo run` to see it appear here.",
                     color = AuraColors.Muted,
                     fontSize = 13.sp,
                 )
@@ -1134,9 +1190,102 @@ fun AgentsPanelContent(agents: List<AgentInfo>, onSelect: (AgentInfo) -> Unit) {
                             Spacer(Modifier.width(8.dp))
                             Text(agent.label, color = AuraColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.width(8.dp))
-                            Text("(${agent.kind})", color = AuraColors.Eyebrow, fontSize = 12.sp)
+                            Text("(${agent.provider})", color = AuraColors.Eyebrow, fontSize = 12.sp)
                             Spacer(Modifier.width(10.dp))
                             Text(agent.status, color = AuraColors.Muted, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Permissions queue (docs/paseo-migration-plan.md, Phase 3) — the spatial
+ * "approve this tool call" card. This is the single highest-value new
+ * affordance the Paseo migration adds: heads-up approval from a glasses card
+ * beats reaching for a phone. Every pending request across every local agent,
+ * flattened into one list (`permission.list` already spans all agents).
+ */
+@Composable
+fun PermissionsPanelContent(
+    permissions: List<dev.aura.xr.net.PermissionInfo>,
+    agents: List<AgentInfo>,
+    onRespond: (dev.aura.xr.net.PermissionInfo, String, String?) -> Unit,
+) {
+    GlassSurface {
+        Column(Modifier.fillMaxSize().padding(24.dp)) {
+            Eyebrow("PERMISSIONS")
+            Spacer(Modifier.height(4.dp))
+            if (permissions.isEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text("Nothing waiting on you.", color = AuraColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Tool calls and other approvals an agent needs from you show up here.",
+                    color = AuraColors.Muted,
+                    fontSize = 13.sp,
+                )
+            } else {
+                Text("Tap Allow or Deny to answer — never sent without your say.", color = AuraColors.Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(14.dp))
+                LazyColumn {
+                    items(permissions, key = { it.permissionRequestId }) { permission ->
+                        val agentLabel = agents.find { it.agentId == permission.agentId }?.label ?: permission.agentId
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AuraColors.CardBg)
+                                .border(1.dp, AuraColors.CardBorder, RoundedCornerShape(10.dp))
+                                .padding(14.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(agentLabel, color = AuraColors.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.width(8.dp))
+                                Text("(${permission.kind})", color = AuraColors.Eyebrow, fontSize = 11.sp)
+                            }
+                            if (permission.title != null) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(permission.title, color = AuraColors.Text, fontSize = 13.sp)
+                            }
+                            if (permission.description != null) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(permission.description, color = AuraColors.Muted, fontSize = 12.sp)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Row {
+                                if (permission.actions.isEmpty()) {
+                                    Text(
+                                        "Allow",
+                                        color = AuraColors.Green,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { onRespond(permission, "allow", null) }.padding(end = 20.dp),
+                                    )
+                                    Text(
+                                        "Deny",
+                                        color = AuraColors.Red,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable { onRespond(permission, "deny", null) },
+                                    )
+                                } else {
+                                    for (action in permission.actions) {
+                                        Text(
+                                            action.label,
+                                            color = if (action.behavior == "allow") AuraColors.Green else AuraColors.Red,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .clickable { onRespond(permission, action.behavior, action.id) }
+                                                .padding(end = 20.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1165,7 +1314,7 @@ data class DeleteConfirmState(
     val onCancel: () -> Unit,
 )
 
-/** Git / Worktrees view: branch switcher up top, real Herdr worktree.list below. */
+/** Git / Worktrees view: branch switcher up top, real Paseo worktree.list below. */
 @Composable
 fun GitPanelContent(
     worktrees: List<dev.aura.xr.net.WorktreeInfo>,
@@ -1237,7 +1386,7 @@ fun GitPanelContent(
                 Text("No worktrees found.", color = AuraColors.Muted, fontSize = 14.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Create one with `herdr worktree create --branch <name>`.",
+                    "Create one with `paseo` or the desktop app's worktree picker.",
                     color = AuraColors.Muted,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
@@ -1253,7 +1402,10 @@ fun GitPanelContent(
                                 .padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            StatusDot(if (wt.isLinked) AuraColors.Cyan else AuraColors.Green, size = 7.dp)
+                            // Paseo's worktree list is Paseo-owned linked worktrees only —
+                            // it never includes the repo's main checkout (docs/paseo-migration-plan.md,
+                            // Phase 3), so every entry here is removable.
+                            StatusDot(AuraColors.Cyan, size = 7.dp)
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.width(220.dp)) {
                                 Text(
@@ -1263,7 +1415,7 @@ fun GitPanelContent(
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Text(
-                                    if (wt.isLinked) "linked worktree" else "main checkout",
+                                    "linked worktree",
                                     color = AuraColors.Muted,
                                     fontSize = 11.sp,
                                 )
@@ -1276,14 +1428,11 @@ fun GitPanelContent(
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.weight(1f),
                             )
-                            // The main checkout isn't a worktree to remove — only linked ones are.
-                            if (wt.isLinked) {
-                                Text(
-                                    "🗑",
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.clickable { onRemoveWorktree(wt) }.padding(4.dp),
-                                )
-                            }
+                            Text(
+                                "🗑",
+                                fontSize = 13.sp,
+                                modifier = Modifier.clickable { onRemoveWorktree(wt) }.padding(4.dp),
+                            )
                         }
                     }
                 }
@@ -1387,6 +1536,17 @@ fun GitPanelContent(
         }
     }
     }
+}
+
+/**
+ * Terminal list status dot (docs/paseo-migration-plan.md, Phase 1) — Paseo's
+ * per-terminal activity state (idle/working/attention), not the old Herdr
+ * "focused" flag, which has no server-side equivalent anymore.
+ */
+private fun terminalActivityColor(activity: String?): Color = when (activity) {
+    "working" -> AuraColors.Green
+    "attention" -> AuraColors.Amber
+    else -> AuraColors.Idle
 }
 
 /** Badge color per `GitFileStatus.status` (added/modified/deleted/renamed/untracked). */
@@ -1893,33 +2053,234 @@ fun VoiceOverlay(
     }
 }
 
-/** What the agent detail card shows — [preview] is null while its terminal snippet is still loading. */
-data class AgentDetailState(val agent: AgentInfo, val preview: String?, val promptError: String? = null)
+/**
+ * Global voice command overlay — record, then review the transcript before
+ * anything happens. Four mutually exclusive states: listening (live partial
+ * text), an error, the review step (final transcript + Submit/Cancel), or
+ * routing (Gemini classifying the confirmed transcript). Submit hands the
+ * transcript to [dev.aura.xr.voice.KoogVoiceRouter] (MainActivity owns
+ * dispatch); Cancel discards it — nothing is ever acted on without this
+ * explicit confirmation, same discipline as every other destructive-action
+ * card in the app (spec §57).
+ */
+@Composable
+fun VoiceCommandOverlay(
+    isListening: Boolean,
+    partial: String,
+    error: String?,
+    reviewText: String?,
+    isRouting: Boolean,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit,
+    onDismissError: () -> Unit,
+) {
+    if (!isListening && error == null && reviewText == null) return
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xAA000000))
+            .clickable(onClick = if (reviewText != null) onCancel else onDismissError),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .width(420.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(AuraColors.PanelGradTop)
+                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                // Swallow clicks so tapping inside the card doesn't dismiss it.
+                .clickable(enabled = false) {}
+                .padding(20.dp),
+        ) {
+            Column {
+                when {
+                    reviewText != null && isRouting -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusDot(AuraColors.Cyan, size = 8.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Thinking…", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("\"$reviewText\"", color = AuraColors.Muted, fontSize = 14.sp)
+                    }
+                    reviewText != null -> {
+                        Text("Did I get that right?", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(10.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(VsCodeColors.EditorBg)
+                                .padding(12.dp),
+                        ) {
+                            Text(reviewText, color = AuraColors.Text, fontSize = 15.sp)
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                "✕ Cancel",
+                                color = AuraColors.Muted,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable(onClick = onCancel).padding(10.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "✓ Submit",
+                                color = AuraColors.Green,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable(onClick = onSubmit).padding(10.dp),
+                            )
+                        }
+                    }
+                    isListening -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusDot(AuraColors.Red, size = 8.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Listening…", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            partial.ifBlank { "Say a command — \"open diff\", \"accept changes\", \"kill terminal\"…" },
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                        )
+                    }
+                    error != null -> {
+                        Text("Voice command", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(10.dp))
+                        Text(error, color = AuraColors.Amber, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** What the agent detail card shows (docs/paseo-migration-plan.md, Phase 3). */
+data class AgentDetailState(val agent: AgentInfo, val promptError: String? = null)
 
 /**
  * Agent detail card (spec §10 — a chip "expands to a detail card" rather than
- * navigating away). What it offers depends on the agent's real status:
- * a prompt box only makes sense when the agent can accept one — Herdr
- * rejects `agent.prompt` outright with `agent_blocked` if the agent is
- * sitting at a raw prompt (e.g. a "trust this folder?" choice), so a blocked
- * agent gets "Open Terminal" instead, which is the only thing that can
- * actually unblock it (real keystrokes, not a chat turn).
+ * navigating away). Paseo agents are first-class objects, not a scraped
+ * terminal pane (see AgentInfo's doc), so unlike the Herdr-era version this
+ * shows real agent metadata (model, cwd, cost, last error) instead of a raw
+ * terminal snippet, and offers "Open Workspace" (the agent's own cwd/
+ * workspace in Files+Terminal) rather than a fake "its terminal". A prompt
+ * box only makes sense once the agent isn't closed — Paseo's own attention/
+ * permission flow (see the Permissions queue) is the sanctioned way to
+ * unblock one that's waiting on something, not a raw terminal keystroke.
  */
+/**
+ * What the agent is actually doing — every message and tool call, oldest
+ * first (docs/paseo-migration-plan.md follow-up). Before this existed the
+ * only way to see an agent's shell commands/output was querying the Paseo
+ * daemon directly from outside the app.
+ */
+@Composable
+private fun AgentActivityFeed(timeline: List<dev.aura.xr.net.AgentTimelineEntry>) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(timeline.size) {
+        if (timeline.isNotEmpty()) listState.animateScrollToItem(timeline.size - 1)
+    }
+    Column {
+        Text("ACTIVITY", color = AuraColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 60.dp, max = 220.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(VsCodeColors.EditorBg)
+                .padding(10.dp),
+        ) {
+            if (timeline.isEmpty()) {
+                Text("No activity yet.", color = AuraColors.Muted, fontSize = 12.sp)
+            } else {
+                LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(timeline) { entry -> AgentActivityRow(entry) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentActivityRow(entry: dev.aura.xr.net.AgentTimelineEntry) {
+    when (entry.kind) {
+        "user_message" -> Text(
+            "you: ${entry.text ?: ""}",
+            color = AuraColors.Text,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        "assistant_message" -> Text(
+            entry.text ?: "",
+            color = AuraColors.Cyan,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        "tool_call" -> Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val statusColor = when (entry.status) {
+                    "completed" -> AuraColors.Green
+                    "error" -> AuraColors.Red
+                    "running" -> AuraColors.Amber
+                    else -> AuraColors.Muted
+                }
+                StatusDot(statusColor, size = 6.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    entry.toolName ?: "tool",
+                    color = AuraColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (entry.command != null) {
+                Text(
+                    "$ ${entry.command}",
+                    color = AuraColors.Text,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (entry.output != null) {
+                Text(
+                    entry.output.take(500),
+                    color = AuraColors.Muted,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 8,
+                )
+            }
+        }
+        else -> Text(
+            entry.text ?: entry.kind,
+            color = AuraColors.Muted,
+            fontSize = 11.sp,
+        )
+    }
+}
+
 @Composable
 fun AgentDetailOverlay(
     state: AgentDetailState?,
+    timeline: List<dev.aura.xr.net.AgentTimelineEntry> = emptyList(),
     promptText: String,
     onPromptChange: (String) -> Unit,
     onSendPrompt: () -> Unit,
-    onInterrupt: () -> Unit,
-    onOpenTerminal: () -> Unit,
+    onArchive: () -> Unit,
+    onOpenWorkspace: () -> Unit,
     onDismiss: () -> Unit,
     isListeningForPrompt: Boolean = false,
     onVoiceInput: () -> Unit = {},
 ) {
     if (state == null) return
     val agent = state.agent
-    val canPrompt = agent.status != "blocked"
+    val canPrompt = agent.status != "closed"
 
     Box(
         Modifier.fillMaxSize().background(Color(0xAA000000)).clickable(onClick = onDismiss),
@@ -1943,7 +2304,7 @@ fun AgentDetailOverlay(
                     ) {
                         Text(
                             agent.label.take(1),
-                            color = AuraColors.agentAccent(agent.kind),
+                            color = AuraColors.agentAccent(agent.provider),
                             fontWeight = FontWeight.Black,
                             fontSize = 13.sp,
                         )
@@ -1954,7 +2315,7 @@ fun AgentDetailOverlay(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusDot(AuraColors.agentStatusColor(agent.status), size = 6.dp)
                             Spacer(Modifier.width(4.dp))
-                            Text("${agent.kind} · ${agent.status}", color = AuraColors.Muted, fontSize = 12.sp)
+                            Text("${agent.provider} · ${agent.status}", color = AuraColors.Muted, fontSize = 12.sp)
                         }
                     }
                 }
@@ -1962,18 +2323,32 @@ fun AgentDetailOverlay(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 60.dp, max = 140.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(VsCodeColors.EditorBg)
                         .padding(10.dp),
                 ) {
-                    Text(
-                        state.preview?.takeLast(600) ?: "Loading…",
-                        color = VsCodeColors.Plain,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    Column {
+                        Text(agent.cwd, color = VsCodeColors.Plain, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        if (agent.model != null) {
+                            Text("model ${agent.model}", color = AuraColors.Muted, fontSize = 11.sp)
+                        }
+                        if (agent.costUsd != null) {
+                            Text("cost \$${"%.4f".format(agent.costUsd)}", color = AuraColors.Muted, fontSize = 11.sp)
+                        }
+                        if (agent.pendingPermissionCount > 0) {
+                            Text(
+                                "⚠ ${agent.pendingPermissionCount} permission request(s) pending — see Permissions",
+                                color = AuraColors.Amber,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        if (agent.lastError != null) {
+                            Text(agent.lastError, color = AuraColors.Red, fontSize = 11.sp)
+                        }
+                    }
                 }
+                Spacer(Modifier.height(14.dp))
+                AgentActivityFeed(timeline)
                 Spacer(Modifier.height(14.dp))
                 if (canPrompt) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2027,7 +2402,7 @@ fun AgentDetailOverlay(
                     Spacer(Modifier.height(10.dp))
                 } else {
                     Text(
-                        "This agent is waiting on a raw response it can't take as a chat message — open its terminal to answer directly.",
+                        "This agent is closed — open its workspace to start a new one there.",
                         color = AuraColors.Amber,
                         fontSize = 12.sp,
                     )
@@ -2035,18 +2410,18 @@ fun AgentDetailOverlay(
                 }
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "Open Terminal",
+                        "Open Workspace",
                         color = AuraColors.Cyan,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable(onClick = onOpenTerminal),
+                        modifier = Modifier.clickable(onClick = onOpenWorkspace),
                     )
                     Text(
-                        "Interrupt",
+                        "Archive",
                         color = AuraColors.Amber,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable(onClick = onInterrupt),
+                        modifier = Modifier.clickable(onClick = onArchive),
                     )
                     Text(
                         "Close",

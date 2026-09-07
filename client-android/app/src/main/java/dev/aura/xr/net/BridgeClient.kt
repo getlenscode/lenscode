@@ -16,14 +16,17 @@ import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicLong
 
 data class PaneInfo(
-    val paneId: String,
-    val tabId: String,
-    val workspaceId: String,
+    val terminalId: String,
+    val workspaceId: String?,
     val cwd: String,
     val title: String,
-    val focused: Boolean,
-    /** "local" or a connected remote machine id (spec §37) — carried per-pane so
-     * pane-scoped actions (read/close/interrupt) always target the right
+    /** Paseo's terminal activity state (idle/working/attention), or null if unknown.
+     * Replaces the old Herdr "focused" flag — Paseo has no server-side terminal
+     * focus (docs/paseo-migration-plan.md, Phase 1), so this is what the status
+     * dot actually reflects now. */
+    val agentStatus: String?,
+    /** "local" or a connected remote machine id (spec §37) — carried per-terminal so
+     * terminal-scoped actions (read/close/interrupt) always target the right
      * machine, regardless of which machine's terminal list is on screen. */
     val machineId: String = "local",
 )
@@ -32,12 +35,63 @@ data class DirEntry(val name: String, val isDir: Boolean, val language: String?)
 
 data class FileContent(val path: String, val content: String, val language: String?, val truncated: Boolean)
 
-data class AgentInfo(val id: String, val label: String, val status: String, val kind: String, val paneId: String)
+/**
+ * A first-class Paseo agent (docs/paseo-migration-plan.md, Phase 2/3) — not a
+ * terminal pane. Herdr had no agent model at all; Aura used to infer one by
+ * scraping terminal output for a pane Herdr flagged as agent-shaped
+ * (`AgentInfo` used to carry a `paneId` for exactly that reason). Paseo
+ * tracks agents as their own objects instead.
+ */
+data class AgentInfo(
+    val agentId: String,
+    val provider: String,
+    val model: String?,
+    val title: String?,
+    val status: String,
+    val cwd: String,
+    val workspaceId: String?,
+    val requiresAttention: Boolean,
+    val attentionReason: String?,
+    val pendingPermissionCount: Int,
+    val lastError: String?,
+    val costUsd: Double?,
+) {
+    /** Chip/card label — falls back to the provider name when the agent has no title. */
+    val label: String get() = title?.takeIf { it.isNotBlank() } ?: provider
+}
+
+/**
+ * One entry in an agent's own activity feed (docs/paseo-migration-plan.md
+ * follow-up) — a message it sent/received, or a tool call it made. Until
+ * this existed, the only way to see what an agent was actually doing (e.g.
+ * which shell commands a voice-created agent ran) was querying the Paseo
+ * daemon directly from a shell — there was no in-app view of it at all.
+ */
+data class AgentTimelineEntry(
+    val kind: String,
+    val text: String?,
+    val toolName: String?,
+    val command: String?,
+    val output: String?,
+    val status: String?,
+    val timestamp: String,
+)
+
+/** One pending "approve this tool call" request (docs/paseo-migration-plan.md, Phase 3). */
+data class PermissionAction(val id: String, val label: String, val behavior: String)
+
+data class PermissionInfo(
+    val permissionRequestId: String,
+    val agentId: String,
+    val kind: String,
+    val title: String?,
+    val description: String?,
+    val actions: List<PermissionAction>,
+)
 
 data class WorktreeInfo(
     val path: String,
     val branch: String?,
-    val isLinked: Boolean,
     val openWorkspaceId: String?,
 )
 
@@ -66,7 +120,7 @@ sealed class PairingState {
 }
 
 /**
- * WebSocket client for aura-bridge speaking XR protocol v1 (see ../protocol).
+ * WebSocket client for aura-bridge speaking XR protocol v3 (see ../protocol).
  * Runs the initial-sync sequence (spec §7): hello → snapshot → subscribe, and
  * resyncs on every reconnect because backend state wins (spec §58–59).
  *
@@ -84,7 +138,7 @@ class BridgeClient(
     val pairingState: StateFlow<PairingState> = _pairingState
     data class UiState(
         val bridgeConnected: Boolean = false,
-        val herdrConnected: Boolean = false,
+        val backendConnected: Boolean = false,
         val workspaces: Int = 0,
         val panes: Int = 0,
         val agents: Int = 0,
@@ -117,6 +171,15 @@ class BridgeClient(
 
     private val _agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val agents: StateFlow<List<AgentInfo>> = _agents
+
+    private val _agentTimeline = MutableStateFlow<List<AgentTimelineEntry>>(emptyList())
+    val agentTimeline: StateFlow<List<AgentTimelineEntry>> = _agentTimeline
+
+    /** Which agent's timeline to keep live — set by the agent detail card while it's open, null while closed. */
+    private var trackedAgentId: String? = null
+
+    private val _permissions = MutableStateFlow<List<PermissionInfo>>(emptyList())
+    val permissions: StateFlow<List<PermissionInfo>> = _permissions
 
     private val _worktrees = MutableStateFlow<List<WorktreeInfo>>(emptyList())
     val worktrees: StateFlow<List<WorktreeInfo>> = _worktrees
@@ -153,7 +216,7 @@ class BridgeClient(
 
     private fun sendHello() {
         val fields = JSONObject()
-            .put("protocolVersion", 1)
+            .put("protocolVersion", 3)
             .put("deviceId", deviceId)
             .put(
                 "clientInfo",
@@ -170,7 +233,7 @@ class BridgeClient(
                 Log.d("AuraBridge", "hello result received: $helloResult")
                 _state.value = _state.value.copy(
                     bridgeConnected = true,
-                    herdrConnected = helloResult.optBoolean("herdrConnected", false),
+                    backendConnected = helloResult.optBoolean("backendConnected", false),
                 )
                 if (helloResult.optBoolean("authenticated", false)) {
                     _pairingState.value = PairingState.Authenticated
@@ -186,9 +249,10 @@ class BridgeClient(
 
     private fun onAuthenticated() {
         send("snapshot.request", onResult = { snapshotResult -> applySnapshot(snapshotResult) })
-        send("events.subscribe", JSONObject().put("topics", JSONArray().put("herdr")))
+        send("events.subscribe", JSONObject().put("topics", JSONArray().put("backend")))
         refreshTerminals()
         refreshAgents()
+        refreshPermissions()
     }
 
     /** Starts pairing (spec §55) — the 6-digit code itself is shown on the bridge's own console. */
@@ -271,12 +335,11 @@ class BridgeClient(
                 val list = (0 until arr.length()).map { i ->
                     val t = arr.getJSONObject(i)
                     PaneInfo(
-                        paneId = t.optString("paneId"),
-                        tabId = t.optString("tabId"),
-                        workspaceId = t.optString("workspaceId"),
-                        cwd = t.optString("cwd", ""),
-                        title = t.optString("name", t.optString("paneId")),
-                        focused = t.optBoolean("focused", false),
+                        terminalId = t.optString("terminalId"),
+                        workspaceId = if (t.isNull("workspaceId")) null else t.optString("workspaceId"),
+                        cwd = if (t.isNull("cwd")) "" else t.optString("cwd", ""),
+                        title = t.optString("name", t.optString("terminalId")),
+                        agentStatus = if (t.isNull("agentStatus")) null else t.optString("agentStatus"),
                         machineId = machineId,
                     )
                 }
@@ -286,10 +349,10 @@ class BridgeClient(
         )
     }
 
-    fun readTerminal(paneId: String, machineId: String = "local") {
+    fun readTerminal(terminalId: String, machineId: String = "local") {
         send(
             "terminal.read",
-            JSONObject().put("paneId", paneId).put("machineId", machineId).put("source", "visible").put("format", "text"),
+            JSONObject().put("terminalId", terminalId).put("machineId", machineId).put("source", "visible").put("format", "text"),
             onResult = { result ->
                 _terminalOutput.value = result.optString("content", "")
             },
@@ -301,61 +364,67 @@ class BridgeClient(
      * detail card's preview, which must not clobber whatever the Terminal
      * view currently has selected.
      */
-    fun peekTerminal(paneId: String, machineId: String = "local", onResult: (String) -> Unit) {
+    fun peekTerminal(terminalId: String, machineId: String = "local", onResult: (String) -> Unit) {
         send(
             "terminal.read",
-            JSONObject().put("paneId", paneId).put("machineId", machineId).put("source", "visible").put("format", "text"),
+            JSONObject().put("terminalId", terminalId).put("machineId", machineId).put("source", "visible").put("format", "text"),
             onResult = { result -> onResult(result.optString("content", "")) },
         )
     }
 
-    fun createTerminal(name: String? = null, machineId: String = _terminalsMachineId.value, cwd: String? = null) {
+    fun createTerminal(
+        name: String? = null,
+        machineId: String = _terminalsMachineId.value,
+        cwd: String? = null,
+        onCreated: (String) -> Unit = {},
+    ) {
         val fields = JSONObject().put("machineId", machineId)
         if (name != null) fields.put("name", name)
         if (cwd != null) fields.put("cwd", cwd)
-        send("terminal.create", fields, onResult = {
+        send("terminal.create", fields, onResult = { result ->
             // Only actually switch (which clears the list first) if this created
-            // a pane on a different machine than the Terminal view is showing —
+            // a terminal on a different machine than the Terminal view is showing —
             // the common "+ New" case targets the current one and should just refresh.
             if (_terminalsMachineId.value != machineId) switchTerminalsMachine(machineId) else refreshTerminals(machineId)
+            onCreated(result.optJSONObject("terminal")?.optString("terminalId") ?: "")
         })
     }
 
-    fun closeTerminal(paneId: String, machineId: String = "local", onDone: () -> Unit = {}) {
-        send("terminal.close", JSONObject().put("paneId", paneId).put("machineId", machineId), onResult = {
+    /**
+     * Types raw text into a terminal's pty, as if typed at the keyboard —
+     * include a trailing "\n" to actually submit a command. Used to hand a
+     * terminal pane over to tmux (docs/paseo-migration-plan.md follow-up:
+     * ask_agent's tmux-bridged terminal) rather than anything a human
+     * normally does through the UI, which is why there's no dock affordance
+     * for this — it's script, not chat.
+     */
+    fun inputTerminal(terminalId: String, text: String, machineId: String = "local") {
+        send(
+            "terminal.input",
+            JSONObject().put("terminalId", terminalId).put("text", text).put("machineId", machineId),
+        )
+    }
+
+    fun closeTerminal(terminalId: String, machineId: String = "local", onDone: () -> Unit = {}) {
+        send("terminal.close", JSONObject().put("terminalId", terminalId).put("machineId", machineId), onResult = {
             refreshTerminals(machineId)
             onDone()
         })
     }
 
     /**
-     * "Stop process?" card content (spec §20) — what's actually running right
-     * now. Resolves to the foreground process's command line, e.g. "npm run
-     * dev", or a generic fallback if Herdr can't identify one.
+     * Ctrl+C — the protocol requires `confirmed:true`, so only call this after
+     * the XR confirmation card. Paseo has no per-terminal "what's running"
+     * RPC (Herdr's `terminal.process_info` has no equivalent — see
+     * docs/paseo-migration-plan.md), so unlike before, the confirmation card
+     * can't name the process being interrupted; it just confirms the action.
      */
-    fun fetchProcessInfo(paneId: String, machineId: String = "local", onResult: (String) -> Unit) {
-        send(
-            "terminal.process_info",
-            JSONObject().put("paneId", paneId).put("machineId", machineId),
-            onResult = { result ->
-                val processInfo = result.optJSONObject("process")?.optJSONObject("process_info")
-                val foreground = processInfo?.optJSONArray("foreground_processes")
-                val top = if (foreground != null && foreground.length() > 0) foreground.getJSONObject(0) else null
-                val label = top?.optString("cmdline")?.takeIf { it.isNotBlank() }
-                    ?: top?.optString("name")?.takeIf { it.isNotBlank() }
-                    ?: "the running process"
-                onResult(label)
-            },
-        )
-    }
-
-    /** Ctrl+C — the protocol requires `confirmed:true`, so only call this after the XR confirmation card. */
-    fun interruptTerminal(paneId: String, machineId: String = "local", onDone: () -> Unit = {}) {
+    fun interruptTerminal(terminalId: String, machineId: String = "local", onDone: () -> Unit = {}) {
         send(
             "terminal.interrupt",
-            JSONObject().put("paneId", paneId).put("machineId", machineId).put("confirmed", true),
+            JSONObject().put("terminalId", terminalId).put("machineId", machineId).put("confirmed", true),
             onResult = {
-                readTerminal(paneId, machineId)
+                readTerminal(terminalId, machineId)
                 onDone()
             },
         )
@@ -605,75 +674,167 @@ class BridgeClient(
         )
     }
 
+    // ── Agents (docs/paseo-migration-plan.md, Phase 2/3) ────────────────
+    // Agents are first-class in Paseo, unlike Herdr where Aura inferred an
+    // "agent" from a terminal pane's scraped output — see AgentInfo's doc.
+
+    fun refreshAgents() {
+        send("agent.list", onResult = { result ->
+            val arr = result.optJSONArray("agents") ?: JSONArray()
+            _agents.value = (0 until arr.length()).map { i -> parseAgent(arr.getJSONObject(i)) }
+        })
+    }
+
+    private fun parseAgent(a: JSONObject): AgentInfo = AgentInfo(
+        agentId = a.optString("agentId"),
+        provider = a.optString("provider", "agent"),
+        model = if (a.isNull("model")) null else a.optString("model"),
+        title = if (a.isNull("title")) null else a.optString("title"),
+        status = a.optString("status", "idle"),
+        cwd = a.optString("cwd", ""),
+        workspaceId = if (a.isNull("workspaceId")) null else a.optString("workspaceId"),
+        requiresAttention = a.optBoolean("requiresAttention", false),
+        attentionReason = if (a.isNull("attentionReason")) null else a.optString("attentionReason"),
+        pendingPermissionCount = a.optInt("pendingPermissionCount", 0),
+        lastError = if (a.isNull("lastError")) null else a.optString("lastError"),
+        costUsd = if (a.isNull("costUsd")) null else a.optDouble("costUsd"),
+    )
+
     /**
-     * Transparent proxy to a Herdr method (spec §70's `herdr.request`, allowlisted
-     * bridge-side to workspace./tab./pane./agent./worktree./layout./notification.).
-     * Unwraps the bridge's `{response: {id, result}}` envelope down to Herdr's own
-     * result object. Two independent failure modes both route to [onError]: a
-     * bridge-level error (unauthorized method, Herdr unreachable — arrives as the
-     * message's own `error`), and a Herdr-level error from the proxied call itself
-     * (arrives as `response.error` alongside a message-level `result`).
+     * Starts (or stops, with null) keeping [agentTimeline] live for one agent —
+     * called when the agent detail card opens/closes. Refetches immediately
+     * and again on every backend event while tracked (see handleEvent); no
+     * incremental agent_stream parsing, just re-pull the tail, same pattern
+     * refreshAgents()/refreshTerminals() already use for everything else.
      */
-    private fun herdrRequest(
-        method: String,
-        params: JSONObject = JSONObject(),
-        machineId: String = "local",
-        onError: (() -> Unit)? = null,
-        onResult: (JSONObject) -> Unit,
-    ) {
+    fun trackAgent(agentId: String?) {
+        trackedAgentId = agentId
+        if (agentId != null) refreshAgentTimeline(agentId) else _agentTimeline.value = emptyList()
+    }
+
+    fun refreshAgentTimeline(agentId: String) {
         send(
-            "herdr.request",
-            JSONObject()
-                .put("machineId", machineId)
-                .put(
-                    "request",
-                    JSONObject().put("id", "hr${nextId.getAndIncrement()}").put("method", method).put("params", params),
-                ),
+            "agent.timeline",
+            JSONObject().put("agentId", agentId).put("limit", 200),
             onResult = { result ->
-                val response = result.optJSONObject("response")
-                val inner = response?.optJSONObject("result")
-                if (inner != null) onResult(inner) else onError?.invoke()
+                val arr = result.optJSONArray("entries") ?: JSONArray()
+                _agentTimeline.value = (0 until arr.length()).map { i ->
+                    val e = arr.getJSONObject(i)
+                    AgentTimelineEntry(
+                        kind = e.optString("kind", "other"),
+                        text = if (e.isNull("text")) null else e.optString("text"),
+                        toolName = if (e.isNull("toolName")) null else e.optString("toolName"),
+                        command = if (e.isNull("command")) null else e.optString("command"),
+                        output = if (e.isNull("output")) null else e.optString("output"),
+                        status = if (e.isNull("status")) null else e.optString("status"),
+                        timestamp = e.optString("timestamp"),
+                    )
+                }
+            },
+        )
+    }
+
+    /** Sends a chat-style turn to a running agent; fire-and-forget (watch agent_stream/refreshAgents for the reply). */
+    fun sendAgentMessage(agentId: String, text: String, onDone: () -> Unit = {}, onError: (() -> Unit)? = null) {
+        send(
+            "agent.send",
+            JSONObject().put("agentId", agentId).put("text", text),
+            onResult = {
+                refreshAgents()
+                onDone()
             },
             onError = { onError?.invoke() },
         )
     }
 
-    // ── Agents ───────────────────────────────────────────────────────────
-
-    fun refreshAgents() {
-        herdrRequest("agent.list") { inner ->
-            val arr = inner.optJSONArray("agents") ?: JSONArray()
-            val list = (0 until arr.length()).map { i ->
-                val a = arr.getJSONObject(i)
-                val kind = a.optString("agent", "agent")
-                AgentInfo(
-                    id = a.optString("pane_id", "agent$i"),
-                    label = a.optString("name").takeIf { it.isNotBlank() } ?: kind,
-                    status = a.optString("agent_status", "unknown"),
-                    kind = kind,
-                    paneId = a.optString("pane_id"),
-                )
-            }
-            _agents.value = list
-        }
+    /**
+     * Spins up a brand-new agent with an initial task (docs/paseo-migration-plan.md,
+     * Phase 2) — used by voice's `ask_agent` action ("start a http server in this
+     * project") when no agent card is currently open to hand the instruction to
+     * instead. `provider` is required by the backend (no server-side default).
+     */
+    fun createAgent(
+        provider: String,
+        cwd: String,
+        prompt: String,
+        model: String? = null,
+        title: String? = null,
+        workspaceId: String? = null,
+        /** Paseo permission mode ("auto", "bypassPermissions", …) — null keeps Paseo's own "default" (ask every time). */
+        modeId: String? = null,
+        onCreated: (AgentInfo) -> Unit = {},
+        onError: (() -> Unit)? = null,
+    ) {
+        val fields = JSONObject()
+            .put("provider", provider)
+            .put("cwd", cwd)
+            .put("prompt", prompt)
+        if (model != null) fields.put("model", model)
+        if (title != null) fields.put("title", title)
+        if (workspaceId != null) fields.put("workspaceId", workspaceId)
+        if (modeId != null) fields.put("modeId", modeId)
+        send(
+            "agent.create",
+            fields,
+            onResult = { result ->
+                refreshAgents()
+                onCreated(parseAgent(result.getJSONObject("agent")))
+            },
+            onError = { onError?.invoke() },
+        )
     }
 
-    /**
-     * Sends a chat-style turn to a running agent. Herdr rejects this outright
-     * (`agent_blocked`) if the agent is sitting at a raw prompt like a
-     * "trust this folder?" choice — that needs real keystrokes via the
-     * terminal instead, which is why the detail card only offers this input
-     * when the agent isn't blocked.
-     */
-    fun sendAgentPrompt(paneId: String, text: String, onDone: () -> Unit = {}, onError: (() -> Unit)? = null) {
-        herdrRequest(
-            "agent.prompt",
-            JSONObject().put("target", paneId).put("text", text),
-            onError = onError,
-        ) {
+    /** Soft-deletes the agent and closes its runtime (spec §57 — caller must have already shown a confirmation card). */
+    fun archiveAgent(agentId: String, onDone: () -> Unit = {}) {
+        send("agent.archive", JSONObject().put("agentId", agentId), onResult = {
             refreshAgents()
             onDone()
-        }
+        })
+    }
+
+    // ── Permissions (docs/paseo-migration-plan.md, Phase 3) ─────────────
+    // The spatial "approve this tool call" card — the highest-value new
+    // glasses affordance this phase adds; Herdr had no equivalent to migrate
+    // away from.
+
+    fun refreshPermissions() {
+        send("permission.list", onResult = { result ->
+            val arr = result.optJSONArray("permissions") ?: JSONArray()
+            _permissions.value = (0 until arr.length()).map { i ->
+                val p = arr.getJSONObject(i)
+                val actionsArr = p.optJSONArray("actions") ?: JSONArray()
+                PermissionInfo(
+                    permissionRequestId = p.optString("permissionRequestId"),
+                    agentId = p.optString("agentId"),
+                    kind = p.optString("kind", "other"),
+                    title = if (p.isNull("title")) null else p.optString("title"),
+                    description = if (p.isNull("description")) null else p.optString("description"),
+                    actions = (0 until actionsArr.length()).map { j ->
+                        val a = actionsArr.getJSONObject(j)
+                        PermissionAction(a.optString("id"), a.optString("label"), a.optString("behavior"))
+                    },
+                )
+            }
+        })
+    }
+
+    /** Approves or denies one pending permission request (spec §57 — always after an explicit XR confirmation). */
+    fun respondToPermission(
+        permission: PermissionInfo,
+        behavior: String,
+        selectedActionId: String? = null,
+        onDone: () -> Unit = {},
+    ) {
+        val fields = JSONObject()
+            .put("agentId", permission.agentId)
+            .put("permissionRequestId", permission.permissionRequestId)
+            .put("behavior", behavior)
+        if (selectedActionId != null) fields.put("selectedActionId", selectedActionId)
+        send("permission.respond", fields, onResult = {
+            refreshPermissions()
+            refreshAgents()
+            onDone()
+        })
     }
 
     // ── Remote machines (spec §36, registry only — no tunnel yet) ─────────
@@ -805,74 +966,27 @@ class BridgeClient(
     // Scoped to whichever machine the Code view is currently rooted at
     // (filesMachineId) — worktrees, like Diff and the branch switcher,
     // follow Code rather than tracking their own separate machine context.
-
-    /** Once a workspace_id is confirmed to resolve inside a Git work tree, reuse it — but only for the same machine. */
-    private var worktreeWorkspaceId: String? = null
-    private var worktreeMachineId: String? = null
+    //
+    // docs/paseo-migration-plan.md, Phase 3: worktree.list now takes the same
+    // aura workspaceId + machineId shape as git.status/git.branches — the
+    // bridge resolves it to a cwd server-side (resolveWorkspaceRoot), so
+    // unlike the old Herdr-proxy version this needs no candidate-guessing
+    // across every pane's workspace on the machine.
 
     fun refreshWorktrees() {
-        val machineId = filesMachineId
-        if (worktreeMachineId == machineId && worktreeWorkspaceId != null) {
-            fetchWorktrees(machineId, worktreeWorkspaceId!!)
-            return
-        }
-        worktreeWorkspaceId = null
-        // worktree.list requires a workspace whose cwd sits inside a Git work
-        // tree, and the client has no fixed answer for which one that is on
-        // this machine — try every pane's workspace on it until one resolves.
-        fetchPaneWorkspaceIds(machineId) { ids -> tryWorktreeCandidates(machineId, ids) }
-    }
-
-    /** Distinct workspace ids from this machine's live panes, without touching the shared Terminal-view list. */
-    private fun fetchPaneWorkspaceIds(machineId: String, onResult: (List<String>) -> Unit) {
         send(
-            "terminal.list",
-            JSONObject().put("machineId", machineId),
-            onResult = { result ->
-                val arr = result.optJSONArray("terminals") ?: JSONArray()
-                val ids = (0 until arr.length()).map { arr.getJSONObject(it).optString("workspaceId") }.distinct()
-                onResult(ids)
-            },
+            "worktree.list",
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId),
+            onResult = { result -> applyWorktrees(result) },
+            onError = { _worktrees.value = emptyList() },
         )
-    }
-
-    private fun tryWorktreeCandidates(machineId: String, remaining: List<String>) {
-        val id = remaining.firstOrNull() ?: run {
-            _worktrees.value = emptyList()
-            return
-        }
-        herdrRequest(
-            "worktree.list",
-            JSONObject().put("workspace_id", id),
-            machineId = machineId,
-            onError = { tryWorktreeCandidates(machineId, remaining.drop(1)) },
-        ) { inner ->
-            worktreeWorkspaceId = id
-            worktreeMachineId = machineId
-            applyWorktrees(inner)
-        }
-    }
-
-    private fun fetchWorktrees(machineId: String, workspaceId: String) {
-        herdrRequest(
-            "worktree.list",
-            JSONObject().put("workspace_id", workspaceId),
-            machineId = machineId,
-            onError = {
-                // Cached workspace stopped resolving (e.g. it was closed) —
-                // drop it and re-search from scratch next time.
-                worktreeWorkspaceId = null
-                _worktrees.value = emptyList()
-            },
-        ) { inner -> applyWorktrees(inner) }
     }
 
     /**
      * Opens a worktree's checkout in the Code view. Most worktrees we create
-     * already have a live Herdr workspace (`openWorkspaceId`) — reuse it
-     * directly. If one doesn't (e.g. after a Herdr restart dropped it),
-     * `worktree.open` re-attaches a workspace to that same checkout path
-     * before browsing it. Always on whatever machine the Git view is
+     * already have a live Paseo workspace (`openWorkspaceId`) — reuse it
+     * directly. If one doesn't, `worktree.open` resolves or creates one for
+     * that checkout path. Always on whatever machine the Git view is
      * currently scoped to (filesMachineId).
      */
     fun openWorktreeInCode(worktree: WorktreeInfo, onOpened: () -> Unit) {
@@ -883,16 +997,16 @@ class BridgeClient(
             onOpened()
             return
         }
-        herdrRequest(
+        send(
             "worktree.open",
-            JSONObject().put("path", worktree.path).put("focus", false),
-            machineId = filesMachineId,
+            JSONObject().put("machineId", filesMachineId).put("path", worktree.path),
+            onResult = { result ->
+                val workspaceId = if (result.isNull("workspaceId")) null else result.optString("workspaceId")
+                if (workspaceId != null) openWorkspaceInFiles(workspaceId, label, filesMachineId)
+                onOpened()
+            },
             onError = { onOpened() },
-        ) { inner ->
-            val workspaceId = inner.optJSONObject("workspace")?.optString("workspace_id")
-            if (workspaceId != null) openWorkspaceInFiles(workspaceId, label, filesMachineId)
-            onOpened()
-        }
+        )
     }
 
     /**
@@ -907,15 +1021,15 @@ class BridgeClient(
             onError("That worktree isn't currently open.")
             return
         }
-        herdrRequest(
+        send(
             "worktree.remove",
-            JSONObject().put("workspace_id", workspaceId).put("force", true),
-            machineId = filesMachineId,
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", workspaceId),
+            onResult = {
+                refreshWorktrees()
+                onDone()
+            },
             onError = { onError("Could not remove that worktree.") },
-        ) {
-            refreshWorktrees()
-            onDone()
-        }
+        )
     }
 
     /**
@@ -951,15 +1065,14 @@ class BridgeClient(
         )
     }
 
-    private fun applyWorktrees(inner: JSONObject) {
-        val arr = inner.optJSONArray("worktrees") ?: JSONArray()
+    private fun applyWorktrees(result: JSONObject) {
+        val arr = result.optJSONArray("worktrees") ?: JSONArray()
         val list = (0 until arr.length()).map { i ->
             val w = arr.getJSONObject(i)
             WorktreeInfo(
                 path = w.optString("path"),
                 branch = if (w.isNull("branch")) null else w.optString("branch"),
-                isLinked = w.optBoolean("is_linked_worktree", false),
-                openWorkspaceId = if (w.isNull("open_workspace_id")) null else w.optString("open_workspace_id"),
+                openWorkspaceId = if (w.isNull("openWorkspaceId")) null else w.optString("openWorkspaceId"),
             )
         }
         _worktrees.value = list
@@ -1013,18 +1126,24 @@ class BridgeClient(
     }
 
     private fun applySnapshot(result: JSONObject) {
-        val snapshot = result.optJSONObject("herdr")?.optJSONObject("snapshot")
+        // docs/paseo-migration-plan.md, Phase 1: the snapshot's `backend` key
+        // carries {terminals, projects} rather than Herdr's {workspaces, panes,
+        // agents} — "workspaces" here counts distinct projects instead.
+        val backend = result.optJSONObject("backend")
         _state.value = _state.value.copy(
-            workspaces = snapshot?.optJSONArray("workspaces")?.length() ?: 0,
-            panes = snapshot?.optJSONArray("panes")?.length() ?: 0,
-            agents = snapshot?.optJSONArray("agents")?.length() ?: 0,
+            workspaces = backend?.optJSONObject("projects")?.optJSONArray("projects")?.length() ?: 0,
+            panes = backend?.optJSONArray("terminals")?.length() ?: 0,
+            agents = agents.value.size,
         )
     }
 
     private fun handleEvent(msg: JSONObject) {
-        if (msg.optString("topic") != "herdr") return
+        if (msg.optString("topic") != "backend") return
         _state.value = _state.value.copy(lastEvent = msg.optString("event", "—"))
         send("snapshot.request", onResult = { snapshotResult -> applySnapshot(snapshotResult) })
         refreshTerminals()
+        refreshAgents()
+        refreshPermissions()
+        trackedAgentId?.let { refreshAgentTimeline(it) }
     }
 }

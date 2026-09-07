@@ -64,11 +64,17 @@ object AuraColors {
         else -> Text
     }
 
-    /** Herdr's real agent_status values (idle/working/blocked/done/unknown) — spec §10's 6-state strip. */
+    /**
+     * Paseo's real agent lifecycle statuses (docs/paseo-migration-plan.md,
+     * Phase 3) — initializing/idle/running/error/closed. `requiresAttention`
+     * is a separate flag on AgentSummary, not a status value; the agent strip
+     * layers its own pulse on top of this color rather than folding it in here.
+     */
     fun agentStatusColor(status: String): Color = when (status) {
-        "working" -> Green
-        "blocked" -> Amber
-        "done" -> Cyan
+        "running" -> Green
+        "error" -> Red
+        "initializing" -> Cyan
+        "closed" -> Muted
         "idle" -> Idle
         else -> Idle
     }

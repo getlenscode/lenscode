@@ -18,11 +18,13 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.xr.compose.platform.requestFullSpace
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -47,6 +49,7 @@ import dev.aura.xr.ui.DiffPanelContent
 import dev.aura.xr.ui.DockButtonContent
 import dev.aura.xr.ui.FilesPanelContent
 import dev.aura.xr.ui.GitPanelContent
+import dev.aura.xr.ui.PermissionsPanelContent
 import dev.aura.xr.ui.RemoteBrowseOverlay
 import dev.aura.xr.ui.RemotePanelContent
 import dev.aura.xr.ui.PrimaryPanelContent
@@ -76,10 +79,11 @@ class MainActivity : ComponentActivity() {
 
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
             ?: "android-xr-dev"
-        // 10.0.2.2 = host loopback from the Android emulator (aura-bridge).
+        // BuildConfig.BRIDGE_URL defaults to 10.0.2.2 (emulator host-loopback
+        // alias); pass -PbridgeUrl=ws://<lan-ip>:8137 to gradle for a real device.
         bridge = BridgeClient(
             lifecycleScope,
-            "ws://10.0.2.2:8137",
+            BuildConfig.BRIDGE_URL,
             deviceId,
             dev.aura.xr.net.PairingStore(applicationContext),
         )
@@ -209,6 +213,8 @@ fun AuraWorkspace(bridge: BridgeClient) {
     val filesRootLabel by bridge.filesRootLabel.collectAsState()
     val openFile by bridge.openFile.collectAsState()
     val agents by bridge.agents.collectAsState()
+    val agentTimeline by bridge.agentTimeline.collectAsState()
+    val permissions by bridge.permissions.collectAsState()
     val worktrees by bridge.worktrees.collectAsState()
     val machines by bridge.machines.collectAsState()
     val connectingMachineId by bridge.connectingMachineId.collectAsState()
@@ -246,6 +252,28 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var walkingMode by remember { mutableStateOf(false) }
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
+    // The one agent voice's "ask_agent" action talks to — like one running
+    // chat with Claude/Codex in a terminal, not a fresh agent per utterance.
+    // Set the first time ask_agent has to create an agent; every ask_agent
+    // after that (with no agent card explicitly open) sends into this same
+    // agent instead of spinning up another one.
+    var voiceAgentId by remember { mutableStateOf<String?>(null) }
+    // The tmux-bridged terminal pane ask_agent's server-under-test runs
+    // through (docs/paseo-migration-plan.md follow-up) — created once
+    // alongside the first voice agent, then reused. See AskAgent's handler
+    // for why: without this, agent Bash tool calls are invisible outside
+    // querying Paseo directly, and interrupting one kills the process
+    // outright rather than leaving it running the way a real terminal would.
+    var voiceAgentTerminalId by remember { mutableStateOf<String?>(null) }
+    // "auto" | "bypass" | "manual" — set via the dropdown in the Agents view
+    // (VoiceAgentModeSelector). Maps to the Paseo modeId a new voice agent is
+    // created with; see modeIdFor.
+    var voiceAgentModeId by remember { mutableStateOf("auto") }
+    fun modeIdFor(choice: String): String? = when (choice) {
+        "auto" -> "auto"
+        "bypass" -> "bypassPermissions"
+        else -> null // "manual" — Paseo's own default (ask every time)
+    }
 
     // ── Device pairing (spec §55) ────────────────────────────────────────
     val pairingState by bridge.pairingState.collectAsState()
@@ -253,27 +281,25 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var pairingCode by remember { mutableStateOf("") }
 
     fun openAgentDetail(agent: dev.aura.xr.net.AgentInfo) {
-        agentDetail = dev.aura.xr.ui.AgentDetailState(agent, preview = null)
+        agentDetail = dev.aura.xr.ui.AgentDetailState(agent)
         agentPromptText = ""
-        bridge.peekTerminal(agent.paneId) { text ->
-            // Guard against a stale response landing after the card was
-            // dismissed or reopened on a different agent in the meantime.
-            if (agentDetail?.agent?.paneId == agent.paneId) {
-                agentDetail = agentDetail?.copy(preview = text)
-            }
-        }
     }
 
-    fun openAgentTerminal(agent: dev.aura.xr.net.AgentInfo) {
-        // Agents are always local — force the Terminal view back to "local"
-        // explicitly rather than trusting whatever machine it last showed
-        // (it may currently be pointed at a connected remote).
-        val pane = terminals.find { it.paneId == agent.paneId && it.machineId == "local" }
-            ?: PaneInfo(agent.paneId, "", "", "", agent.label, focused = false, machineId = "local")
-        selectedPane = pane
-        bridge.readTerminal(agent.paneId, machineId = "local")
-        bridge.switchTerminalsMachine("local") // also updates the Terminal view's machine context/badge
-        activeView = "terminal"
+    /**
+     * Opens the agent's own directory in Files + Terminal (docs/paseo-migration-plan.md,
+     * Phase 3). Paseo agents aren't tied to a terminal pane the way Herdr's
+     * were (see AgentInfo's doc), so this opens where the agent actually
+     * works — its workspaceId if it has one, otherwise a fresh terminal at
+     * its cwd — rather than a specific pane that may not exist.
+     */
+    fun openAgentWorkspace(agent: dev.aura.xr.net.AgentInfo) {
+        val workspaceId = agent.workspaceId
+        if (workspaceId != null) {
+            bridge.openWorkspaceInFiles(workspaceId, agent.label, machineId = "local")
+        }
+        bridge.switchTerminalsMachine("local")
+        activeView = if (workspaceId != null) "code" else "terminal"
+        if (workspaceId == null) bridge.createTerminal(name = agent.label, cwd = agent.cwd)
         agentDetail = null
     }
 
@@ -290,6 +316,36 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var voiceError by remember { mutableStateOf<String?>(null) }
     var voiceMode by remember { mutableStateOf("fileSearch") }
     var pendingVoiceMode by remember { mutableStateOf("fileSearch") }
+    // Final transcript from the global voice-command mic, awaiting Submit/Cancel
+    // in VoiceCommandOverlay — see dispatchVoiceCommand below for what Submit does.
+    var voiceCommandReview by remember { mutableStateOf<String?>(null) }
+
+    // Debug-only text injection — types a transcript into the same review
+    // popup a real recognized phrase would land in (Submit/Cancel still
+    // required; nothing is bypassed), for testing without speaking out loud
+    // in a public place. Only registered in debug builds. Trigger with:
+    //   adb shell am broadcast -a dev.aura.xr.INJECT_VOICE_COMMAND --es text "open diff"
+    if (BuildConfig.DEBUG) {
+        DisposableEffect(Unit) {
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                    val text = intent?.getStringExtra("text") ?: return
+                    android.util.Log.d("AuraVoice", "injected transcript: \"$text\"")
+                    voiceMode = "command"
+                    voiceCommandReview = text
+                }
+            }
+            val filter = android.content.IntentFilter("dev.aura.xr.INJECT_VOICE_COMMAND")
+            // RECEIVER_EXPORTED, not _NOT_EXPORTED: `adb shell am broadcast` runs
+            // as the shell UID, not system, and RECEIVER_NOT_EXPORTED silently
+            // drops broadcasts from anything but the app itself or the system —
+            // confirmed live, it blocked adb entirely with no error. Acceptable
+            // for a debug-only feature that only ever populates the review card
+            // (still gated behind the user's own Submit tap, nothing auto-fires).
+            context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+            onDispose { context.unregisterReceiver(receiver) }
+        }
+    }
 
     fun startListening(mode: String) {
         voiceMode = mode
@@ -297,19 +353,28 @@ fun AuraWorkspace(bridge: BridgeClient) {
         voicePartial = ""
         isListening = true
         if (mode == "fileSearch") bridge.clearVoiceResult()
+        if (mode == "command") voiceCommandReview = null
         voiceRecognizer.listen(
             onPartial = { text ->
                 voicePartial = text
                 if (mode == "agentPrompt") agentPromptText = text // live feedback right in the field being filled
             },
             onResult = { text ->
+                android.util.Log.d("AuraVoice", "recognized ($mode): \"$text\"")
                 isListening = false
                 when (mode) {
                     "fileSearch" -> bridge.voiceSearch(text)
                     "agentPrompt" -> agentPromptText = text
+                    // Never dispatches straight from speech — always lands in
+                    // the review card first so a misheard word can't fire a
+                    // destructive command (spec §57's confirmation discipline,
+                    // applied one step earlier than usual: before the command
+                    // is even classified).
+                    "command" -> voiceCommandReview = text
                 }
             },
             onError = { message ->
+                android.util.Log.d("AuraVoice", "recognizer error ($mode): $message")
                 isListening = false
                 voiceError = message
             },
@@ -329,6 +394,274 @@ fun AuraWorkspace(bridge: BridgeClient) {
     }
 
     fun requestVoiceSearch() = requestVoice("fileSearch")
+    fun requestVoiceCommand() = requestVoice("command")
+
+    /**
+     * Executes one classified action (docs/paseo-migration-plan.md follow-up
+     * — the agentic Koog/Gemini rewrite of the original regex router).
+     * Navigation, file open, and search act immediately — they're not
+     * destructive. Everything else reuses the app's existing confirmation-card
+     * types (StopConfirmState/DeleteConfirmState) rather than acting directly,
+     * so a voice command carries exactly the same safety guarantee as its
+     * equivalent tap (spec §57) — the transcript-review step answers "did it
+     * hear me right", these cards answer "are you sure". The LLM only ever
+     * classifies; it never bypasses this confirmation layer.
+     */
+    fun executeVoiceAction(action: dev.aura.xr.voice.VoiceAction) {
+        android.util.Log.d("AuraVoice", "executing: $action")
+        when (action) {
+            is dev.aura.xr.voice.VoiceAction.Navigate -> activeView = action.view
+
+            is dev.aura.xr.voice.VoiceAction.OpenFile -> {
+                // Reuses the existing fuzzy-resolve + confidence flow
+                // (bridge.voiceSearch → LaunchedEffect(voiceResult) below
+                // opens a confident hit and switches to Code automatically).
+                // `action.line` isn't wired to anything yet — the file viewer
+                // has no scroll-to-line capability — so it's logged and
+                // otherwise dropped rather than silently pretending to honor it.
+                if (action.line != null) {
+                    android.util.Log.d("AuraVoice", "open_file requested line ${action.line} — not supported yet, ignoring")
+                }
+                bridge.voiceSearch(action.path)
+            }
+
+            dev.aura.xr.voice.VoiceAction.AcceptChanges -> {
+                val path = gitDiffPath
+                val text = gitDiffText
+                activeView = "diff"
+                if (path != null && text != null) {
+                    val (header, hunks) = dev.aura.xr.ui.parseDiffHunks(text)
+                    for (hunk in hunks) {
+                        bridge.applyHunk(path, dev.aura.xr.ui.hunkPatch(header, hunk), "stage", onDone = {}, onError = {})
+                    }
+                }
+            }
+
+            dev.aura.xr.voice.VoiceAction.DiscardChanges -> {
+                val path = gitDiffPath
+                val text = gitDiffText
+                activeView = "diff"
+                if (path != null && text != null) {
+                    val (header, hunks) = dev.aura.xr.ui.parseDiffHunks(text)
+                    diffDiscardConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                        title = "Discard all changes in $path?",
+                        message = "This reverts every uncommitted hunk in this file back to HEAD.",
+                        onConfirm = {
+                            for (hunk in hunks) {
+                                bridge.applyHunk(path, dev.aura.xr.ui.hunkPatch(header, hunk), "discard", onDone = {}, onError = {})
+                            }
+                            diffDiscardConfirm = null
+                            bridge.loadGitDiff(path)
+                        },
+                        onCancel = { diffDiscardConfirm = null },
+                    )
+                }
+            }
+
+            dev.aura.xr.voice.VoiceAction.NewTerminal -> {
+                activeView = "terminal"
+                bridge.createTerminal()
+            }
+
+            dev.aura.xr.voice.VoiceAction.KillTerminal -> {
+                activeView = "terminal"
+                val pane = selectedPane
+                if (pane != null) {
+                    stopConfirm = dev.aura.xr.ui.StopConfirmState(
+                        pane = pane,
+                        processLabel = "the running process",
+                        onConfirm = {
+                            bridge.interruptTerminal(pane.terminalId, pane.machineId)
+                            stopConfirm = null
+                        },
+                        onCancel = { stopConfirm = null },
+                    )
+                }
+            }
+
+            dev.aura.xr.voice.VoiceAction.ArchiveAgent -> {
+                val target = agentDetail?.agent
+                if (target != null) {
+                    deleteConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                        title = "Archive this agent?",
+                        message = "This closes ${target.label}'s runtime. Its history stays in Paseo, but it can't take new messages.",
+                        onConfirm = {
+                            bridge.archiveAgent(target.agentId)
+                            if (voiceAgentId == target.agentId) voiceAgentId = null
+                            deleteConfirm = null
+                            agentDetail = null
+                        },
+                        onCancel = { deleteConfirm = null },
+                    )
+                }
+            }
+
+            is dev.aura.xr.voice.VoiceAction.Search -> bridge.voiceSearch(action.query)
+
+            is dev.aura.xr.voice.VoiceAction.RespondPermission -> {
+                // Prefer the pending permission for whichever agent's card is
+                // open (matches what you're actually looking at); otherwise
+                // the oldest pending one globally — same "first in line"
+                // behavior a human tapping through the Permissions queue
+                // top-to-bottom would get.
+                val target = permissions.firstOrNull { it.agentId == agentDetail?.agent?.agentId }
+                    ?: permissions.firstOrNull()
+                if (target != null) {
+                    bridge.respondToPermission(target, action.behavior)
+                } else {
+                    android.util.Log.w("AuraVoice", "respond_permission: nothing pending to answer")
+                }
+            }
+
+            is dev.aura.xr.voice.VoiceAction.AskAgent -> {
+                // Priority: an explicitly open agent card wins (the user is
+                // clearly looking at that one) — otherwise this is one running
+                // conversation with a single agent across every voice call, the
+                // same as typing turn after turn into one Claude/Codex session,
+                // not a fresh agent per utterance. Reuse voiceAgentId as long as
+                // that agent is still alive; only create a new one the first
+                // time, or after it's gone (archived/closed elsewhere).
+                val openTarget = agentDetail?.agent?.agentId
+                val reuseTarget = voiceAgentId?.takeIf { id -> agents.any { it.agentId == id && it.status != "closed" } }
+                val target = openTarget ?: reuseTarget
+                if (target != null) {
+                    bridge.sendAgentMessage(target, action.instruction)
+                } else {
+                    activeView = "agents"
+                    // A tmux session both the agent and the Terminal view share
+                    // (docs/paseo-migration-plan.md follow-up) — created once,
+                    // then just told about in every later prompt. See the
+                    // instruction text below for exactly what this buys.
+                    fun createAgentInTmux(terminalId: String) {
+                        bridge.inputTerminal(terminalId, "tmux new -A -s aura-agent\n")
+                        val prompt = """
+                            You have a tmux session named "aura-agent" available, mirrored live
+                            in this workspace's own Terminal view. Always run shell commands
+                            through it instead of your default tool execution — that's what
+                            makes output visible there, and what lets a long-running process
+                            (a dev server, a watcher, …) keep running independently of this
+                            conversation instead of dying with whatever tool call started it:
+                              tmux send-keys -t aura-agent "<command>" Enter
+                              tmux capture-pane -t aura-agent -p     # to read output back
+                            To stop something, send a real interrupt inside the session
+                            (tmux send-keys -t aura-agent C-c, or kill its pid) rather than
+                            canceling your own tool call.
+
+                            Task: ${action.instruction}
+                        """.trimIndent()
+                        bridge.createAgent(
+                            provider = "claude",
+                            cwd = ".",
+                            prompt = prompt,
+                            modeId = modeIdFor(voiceAgentModeId),
+                            onCreated = { created ->
+                                voiceAgentId = created.agentId
+                                android.util.Log.d("AuraVoice", "ask_agent: created agent ${created.agentId} (tmux) for \"${action.instruction}\"")
+                            },
+                            onError = { android.util.Log.w("AuraVoice", "ask_agent: agent.create failed") },
+                        )
+                    }
+                    val terminalId = voiceAgentTerminalId
+                    if (terminalId != null) {
+                        createAgentInTmux(terminalId)
+                    } else {
+                        bridge.createTerminal(
+                            name = "aura-agent",
+                            onCreated = { newTerminalId ->
+                                voiceAgentTerminalId = newTerminalId
+                                createAgentInTmux(newTerminalId)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** Runs a whole plan's actions in order — see [executeVoiceAction] for what each does and why it's safe to just run them. */
+    fun executeVoicePlan(plan: dev.aura.xr.voice.VoiceCommandPlan) {
+        for (action in plan.toActions()) executeVoiceAction(action)
+    }
+
+    /** Maps the old deterministic single-intent router's output onto the new action grammar, for the no-key/offline fallback path. */
+    fun dev.aura.xr.voice.VoiceCommand.toAction(): dev.aura.xr.voice.VoiceAction = when (this) {
+        is dev.aura.xr.voice.VoiceCommand.Navigate -> dev.aura.xr.voice.VoiceAction.Navigate(view)
+        dev.aura.xr.voice.VoiceCommand.AcceptChanges -> dev.aura.xr.voice.VoiceAction.AcceptChanges
+        dev.aura.xr.voice.VoiceCommand.DiscardChanges -> dev.aura.xr.voice.VoiceAction.DiscardChanges
+        dev.aura.xr.voice.VoiceCommand.NewTerminal -> dev.aura.xr.voice.VoiceAction.NewTerminal
+        dev.aura.xr.voice.VoiceCommand.KillTerminal -> dev.aura.xr.voice.VoiceAction.KillTerminal
+        dev.aura.xr.voice.VoiceCommand.ArchiveAgent -> dev.aura.xr.voice.VoiceAction.ArchiveAgent
+        is dev.aura.xr.voice.VoiceCommand.Search -> dev.aura.xr.voice.VoiceAction.Search(query)
+    }
+
+    /**
+     * Koog/Gemini router — null (and every call skipped) when no API key is
+     * configured (BuildConfig.GEMINI_API_KEY empty), so an un-keyed build
+     * degrades straight to the deterministic local router rather than making
+     * a doomed network call. Set the key with:
+     *   ./gradlew :app:assembleDebug -PbridgeUrl=... -PgeminiApiKey=AIza...
+     */
+    val koogVoiceRouter = remember {
+        if (BuildConfig.GEMINI_API_KEY.isBlank()) {
+            null
+        } else {
+            dev.aura.xr.voice.KoogVoiceRouter(BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL)
+        }
+    }
+    var isRoutingVoiceCommand by remember { mutableStateOf(false) }
+    val voiceScope = rememberCoroutineScope()
+
+    /**
+     * Submit handler for the voice-command review card. Tries the agentic
+     * Koog/Gemini router first; on any failure (no key, network, malformed
+     * response) falls back to the deterministic local router rather than
+     * leaving the command unhandled — the fallback always succeeds (worst
+     * case it resolves to a plain file search of the raw transcript).
+     */
+    fun submitVoiceCommand(transcript: String) {
+        val router = koogVoiceRouter
+        if (router == null) {
+            android.util.Log.d("AuraVoice", "no Gemini key configured — using local router")
+            executeVoiceAction(dev.aura.xr.voice.parseVoiceCommand(transcript).toAction())
+            voiceCommandReview = null
+            return
+        }
+        val context = dev.aura.xr.voice.VoiceRouterContext(
+            activeView = activeView,
+            diffFileOpen = gitDiffPath,
+            terminalSelected = selectedPane != null,
+            agentCardOpen = agentDetail?.agent?.label,
+            hasPendingPermission = permissions.isNotEmpty(),
+        )
+        // voiceCommandReview stays set (not nulled here) so the overlay keeps
+        // showing the transcript through the "Thinking…" state below.
+        isRoutingVoiceCommand = true
+        voiceScope.launch {
+            // Confirmed live: router.route()'s Result<VoiceCommandPlan> does
+            // NOT actually guarantee every failure is caught — a raw network
+            // exception (DNS resolution failure, no connectivity) escaped
+            // Koog's own Result-wrapping and crashed the whole app via this
+            // otherwise-unhandled coroutine. A wrapping try/catch is required
+            // for the "always falls back, never crashes" guarantee this
+            // function's own doc comment already promised but didn't deliver.
+            val result = try {
+                router.route(transcript, context)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // structured concurrency — never swallow, let it propagate
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            isRoutingVoiceCommand = false
+            voiceCommandReview = null
+            result.onSuccess { plan ->
+                android.util.Log.d("AuraVoice", "Gemini plan: $plan")
+                executeVoicePlan(plan)
+            }.onFailure { e ->
+                android.util.Log.w("AuraVoice", "Gemini routing failed, falling back to local router", e)
+                executeVoiceAction(dev.aura.xr.voice.parseVoiceCommand(transcript).toAction())
+            }
+        }
+    }
 
     // A confident hit opens straight away; anything else surfaces candidates
     // (or "no match") through the overlay instead of ever guessing (spec §13).
@@ -341,6 +674,14 @@ fun AuraWorkspace(bridge: BridgeClient) {
         }
     }
 
+    // Keeps bridge.agentTimeline live for whichever agent's detail card is
+    // open, and stops (clearing it) the moment it closes — one place to get
+    // this right instead of a trackAgent() call at every site that opens or
+    // nulls agentDetail (openAgentDetail, dismiss, archive, send-and-close…).
+    LaunchedEffect(agentDetail?.agent?.agentId) {
+        bridge.trackAgent(agentDetail?.agent?.agentId)
+    }
+
     // Refresh the data a view needs the moment it becomes active, rather than
     // only at connect time — dock switches are the user's "load this" signal.
     // Code is skipped when we already have a listing: jumping here from a
@@ -351,6 +692,10 @@ fun AuraWorkspace(bridge: BridgeClient) {
             "terminal" -> bridge.refreshTerminals()
             "code" -> if (dirEntries.isEmpty()) bridge.listDir(dirPath)
             "agents" -> bridge.refreshAgents()
+            "permissions" -> {
+                bridge.refreshPermissions()
+                bridge.refreshAgents()
+            }
             "git" -> {
                 bridge.refreshWorktrees()
                 bridge.refreshBranches()
@@ -362,7 +707,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
 
     Subspace {
         SpatialColumn {
-            // ── Agent strip — real herdr agent.list, honestly empty if none ──
+            // ── Agent strip — real Paseo agent.list, honestly empty if none ──
             SpatialRow {
                 if (agents.isEmpty()) {
                     SpatialPanel(rememberPanelModifier(layoutStore, "agents.empty", 460f, 90f, 8.dp, layoutGeneration)) {
@@ -370,12 +715,12 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     }
                 } else {
                     for (agent in agents) {
-                        androidx.compose.runtime.key(agent.paneId) {
+                        androidx.compose.runtime.key(agent.agentId) {
                             SpatialPanel(
-                                rememberPanelModifier(layoutStore, "agent.${agent.paneId}", 220f, 110f, 8.dp, layoutGeneration),
+                                rememberPanelModifier(layoutStore, "agent.${agent.agentId}", 220f, 110f, 8.dp, layoutGeneration),
                             ) {
                                 Box(Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
-                                    AgentChipContent(agent.label, agent.status, AuraColors.agentStatusColor(agent.status), agent.kind)
+                                    AgentChipContent(agent.label, agent.status, AuraColors.agentStatusColor(agent.status), agent.provider)
                                 }
                             }
                         }
@@ -389,9 +734,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 Box(Modifier.fillMaxSize()) {
                 if (walkingMode) {
                     dev.aura.xr.ui.WalkingModeContent(
-                        herdrConnected = state.herdrConnected,
+                        backendConnected = state.backendConnected,
                         onExit = { walkingMode = false },
-                        onVoice = { requestVoiceSearch() },
+                        onVoice = { requestVoiceCommand() },
                         isListening = isListening,
                     )
                 } else {
@@ -403,29 +748,27 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         output = terminalOutput,
                         onSelect = { pane ->
                             selectedPane = pane
-                            bridge.readTerminal(pane.paneId, pane.machineId)
+                            bridge.readTerminal(pane.terminalId, pane.machineId)
                         },
                         onNew = { bridge.createTerminal() },
                         onClose = { pane ->
-                            bridge.closeTerminal(pane.paneId, pane.machineId) {
-                                if (selectedPane?.paneId == pane.paneId) selectedPane = null
+                            bridge.closeTerminal(pane.terminalId, pane.machineId) {
+                                if (selectedPane?.terminalId == pane.terminalId) selectedPane = null
                             }
                         },
                         onRequestStop = { pane ->
-                            // Fetch what's actually running before showing the
-                            // card — the confirmation is meaningless if it
-                            // can't say what it's about to interrupt.
-                            bridge.fetchProcessInfo(pane.paneId, pane.machineId) { label ->
-                                stopConfirm = dev.aura.xr.ui.StopConfirmState(
-                                    pane = pane,
-                                    processLabel = label,
-                                    onConfirm = {
-                                        bridge.interruptTerminal(pane.paneId, pane.machineId)
-                                        stopConfirm = null
-                                    },
-                                    onCancel = { stopConfirm = null },
-                                )
-                            }
+                            // Paseo has no per-terminal "what's running" RPC
+                            // (docs/paseo-migration-plan.md, Phase 3) — the card
+                            // can only confirm the action, not name the process.
+                            stopConfirm = dev.aura.xr.ui.StopConfirmState(
+                                pane = pane,
+                                processLabel = "the running process",
+                                onConfirm = {
+                                    bridge.interruptTerminal(pane.terminalId, pane.machineId)
+                                    stopConfirm = null
+                                },
+                                onCancel = { stopConfirm = null },
+                            )
                         },
                         stopConfirm = stopConfirm,
                     )
@@ -451,7 +794,19 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         },
                         searchResults = fileSearchResults,
                     )
-                    "agents" -> AgentsPanelContent(agents, onSelect = { openAgentDetail(it) })
+                    "agents" -> AgentsPanelContent(
+                        agents,
+                        onSelect = { openAgentDetail(it) },
+                        voiceAgentModeId = voiceAgentModeId,
+                        onVoiceAgentModeChange = { voiceAgentModeId = it },
+                    )
+                    "permissions" -> PermissionsPanelContent(
+                        permissions = permissions,
+                        agents = agents,
+                        onRespond = { permission, behavior, selectedActionId ->
+                            bridge.respondToPermission(permission, behavior, selectedActionId)
+                        },
+                    )
                     "diff" -> DiffPanelContent(
                         status = gitStatus,
                         diffPath = gitDiffPath,
@@ -658,10 +1013,35 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         bridge.clearVoiceResult()
                     },
                 )
+                // Global voice command mic (dock 🎤 / walking mode) — record,
+                // review the transcript, then Submit routes it through
+                // dispatchVoiceCommand. An unrecognized command falls back to
+                // voiceSearch(), which is what populates the VoiceOverlay
+                // above with candidates, same as before this router existed.
+                dev.aura.xr.ui.VoiceCommandOverlay(
+                    isListening = isListening && voiceMode == "command",
+                    partial = voicePartial,
+                    error = if (voiceMode == "command") voiceError else null,
+                    reviewText = voiceCommandReview,
+                    isRouting = isRoutingVoiceCommand,
+                    onSubmit = {
+                        // Don't null voiceCommandReview here — submitVoiceCommand
+                        // keeps it set through routing so the "Thinking…" state
+                        // (isRoutingVoiceCommand) has a transcript to show.
+                        val text = voiceCommandReview
+                        if (!text.isNullOrBlank()) submitVoiceCommand(text) else voiceCommandReview = null
+                    },
+                    onCancel = { voiceCommandReview = null },
+                    onDismissError = {
+                        isListening = false
+                        voiceError = null
+                    },
+                )
                 // Agent chips (strip above, or the Agents view) expand here
                 // rather than navigating away — see openAgentDetail's doc.
                 dev.aura.xr.ui.AgentDetailOverlay(
                     state = agentDetail,
+                    timeline = agentTimeline,
                     promptText = agentPromptText,
                     onPromptChange = { agentPromptText = it },
                     isListeningForPrompt = isListening && voiceMode == "agentPrompt",
@@ -669,43 +1049,38 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     onSendPrompt = {
                         val target = agentDetail?.agent
                         if (target != null && agentPromptText.isNotBlank()) {
-                            bridge.sendAgentPrompt(
-                                target.paneId,
+                            bridge.sendAgentMessage(
+                                target.agentId,
                                 agentPromptText,
                                 onDone = {
                                     agentPromptText = ""
                                     agentDetail = null
                                 },
                                 onError = {
-                                    // Most likely the agent went blocked between opening
-                                    // the card and hitting Send — surface that instead of
-                                    // failing silently.
                                     agentDetail = agentDetail?.copy(
-                                        promptError = "Couldn't send — the agent may need a direct response now.",
+                                        promptError = "Couldn't send — try again in a moment.",
                                     )
                                 },
                             )
                         }
                     },
-                    onInterrupt = {
+                    onArchive = {
                         val target = agentDetail?.agent
                         if (target != null) {
-                            bridge.fetchProcessInfo(target.paneId) { label ->
-                                stopConfirm = dev.aura.xr.ui.StopConfirmState(
-                                    pane = PaneInfo(target.paneId, "", "", "", target.label, focused = false),
-                                    processLabel = label,
-                                    onConfirm = {
-                                        bridge.interruptTerminal(target.paneId)
-                                        stopConfirm = null
-                                        agentDetail = null
-                                    },
-                                    onCancel = { stopConfirm = null },
-                                )
-                            }
+                            deleteConfirm = dev.aura.xr.ui.DeleteConfirmState(
+                                title = "Archive this agent?",
+                                message = "This closes ${target.label}'s runtime. Its history stays in Paseo, but it can't take new messages.",
+                                onConfirm = {
+                                    bridge.archiveAgent(target.agentId)
+                                    deleteConfirm = null
+                                    agentDetail = null
+                                },
+                                onCancel = { deleteConfirm = null },
+                            )
                         }
                     },
-                    onOpenTerminal = {
-                        agentDetail?.agent?.let { openAgentTerminal(it) }
+                    onOpenWorkspace = {
+                        agentDetail?.agent?.let { openAgentWorkspace(it) }
                     },
                     onDismiss = { agentDetail = null },
                 )
@@ -736,6 +1111,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     Triple("±", "Diff", "diff"),
                     Triple("⑂", "Git", "git"),
                     Triple("◎", "Agents", "agents"),
+                    Triple("!", "Permissions", "permissions"),
                     Triple("▥", "Remote", "remote"),
                     Triple("🎤", "Voice", "voice"),
                 )
@@ -744,7 +1120,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     androidx.compose.runtime.key(id) {
                         SpatialPanel(rememberPanelModifier(layoutStore, "dock.$id", 150f, 70f, 6.dp, layoutGeneration)) {
                             DockButtonContent(icon, label, active = activeView == id) {
-                                if (id == "voice") requestVoiceSearch() else activeView = id
+                                if (id == "voice") requestVoiceCommand() else activeView = id
                             }
                         }
                     }

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import WebSocket from "ws";
 import { BridgeServer } from "../src/server.ts";
-import { isHerdrMethodAllowed } from "../src/allowlist.ts";
 import { loadConfig } from "../src/config.ts";
 
 const PORT = 18137;
@@ -32,27 +31,18 @@ before(async () => {
 
 after(() => server.close());
 
-test("allowlist blocks server control and permits pane ops", () => {
-  assert.equal(isHerdrMethodAllowed("server.stop"), false);
-  assert.equal(isHerdrMethodAllowed("plugin.action.invoke"), false);
-  assert.equal(isHerdrMethodAllowed("integration.install"), false);
-  assert.equal(isHerdrMethodAllowed("pane.send_keys"), true);
-  assert.equal(isHerdrMethodAllowed("agent.list"), true);
-  assert.equal(isHerdrMethodAllowed("session.snapshot"), true);
-});
-
-test("hello round-trip reports protocol and herdr state", async () => {
+test("hello round-trip reports protocol and backend state", async () => {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
   await once(ws, "open");
   const res = await rpc(ws, {
     id: "t1",
     type: "hello",
-    protocolVersion: 1,
+    protocolVersion: 3,
     deviceId: "test-device",
     clientInfo: { app: "test", version: "0", platform: "node" },
   });
-  assert.equal(res.result.protocolVersion, 1);
-  assert.equal(typeof res.result.herdrConnected, "boolean");
+  assert.equal(res.result.protocolVersion, 3);
+  assert.equal(typeof res.result.backendConnected, "boolean");
   ws.close();
 });
 
@@ -65,111 +55,78 @@ test("malformed request gets structured error", async () => {
   ws.close();
 });
 
-test("herdr proxy rejects blocked method with unauthorized", async () => {
+test("terminal op against an unreachable backend reports backend_unavailable", async () => {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
   await once(ws, "open");
-  const res = await rpc(ws, {
-    id: "t3",
-    type: "herdr.request",
-    request: { id: "1", method: "server.stop", params: {} },
+  const hello = await rpc(ws, {
+    id: "t3a",
+    type: "hello",
+    protocolVersion: 3,
+    deviceId: "test-device",
+    clientInfo: { app: "test", version: "0", platform: "node" },
   });
-  assert.equal(res.error.code, "unauthorized");
+  if (hello.result.backendConnected) {
+    ws.close();
+    return; // a live daemon happens to be reachable — nothing to assert here
+  }
+  const res = await rpc(ws, { id: "t3", type: "terminal.list" });
+  assert.equal(res.error.code, "backend_unavailable");
   ws.close();
 });
 
-// The following tests require a live local Herdr server; they self-skip otherwise.
-test("snapshot mirrors live Herdr session", async (t) => {
+// The following tests require a live local Paseo daemon (ws://127.0.0.1:6767/ws
+// by default, or AURA_PASEO_URL); they self-skip otherwise. See
+// docs/paseo-migration-plan.md Phase 0 for a manual smoke-test script.
+test("snapshot mirrors a live Paseo daemon", async (t) => {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
   await once(ws, "open");
   const hello = await rpc(ws, {
     id: "t4a",
     type: "hello",
-    protocolVersion: 1,
+    protocolVersion: 3,
     deviceId: "test-device",
     clientInfo: { app: "test", version: "0", platform: "node" },
   });
-  if (!hello.result.herdrConnected) {
+  if (!hello.result.backendConnected) {
     ws.close();
-    return t.skip("herdr not running");
+    return t.skip("paseo daemon not running");
   }
   const res = await rpc(ws, { id: "t4", type: "snapshot.request" });
-  assert.ok(res.result.herdr, "snapshot payload present");
+  assert.ok(res.result.backend, "snapshot payload present");
   assert.equal(res.result.machines[0].kind, "local");
   ws.close();
 });
 
-test("herdr proxy forwards agent.list verbatim", async (t) => {
+test("terminal.create + terminal.list round-trip against a live Paseo daemon", async (t) => {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
   await once(ws, "open");
   const hello = await rpc(ws, {
     id: "t5a",
     type: "hello",
-    protocolVersion: 1,
+    protocolVersion: 3,
     deviceId: "test-device",
     clientInfo: { app: "test", version: "0", platform: "node" },
   });
-  if (!hello.result.herdrConnected) {
+  if (!hello.result.backendConnected) {
     ws.close();
-    return t.skip("herdr not running");
+    return t.skip("paseo daemon not running");
   }
-  const res = await rpc(ws, {
-    id: "t5",
-    type: "herdr.request",
-    request: { id: "77", method: "agent.list", params: {} },
-  });
-  assert.equal(res.result.response.id, "77");
-  assert.ok("result" in res.result.response || "error" in res.result.response);
-  ws.close();
-});
-
-test("herdr events fan out to XR clients", async (t) => {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}`);
-  await once(ws, "open");
-  const hello = await rpc(ws, {
-    id: "t6a",
-    type: "hello",
-    protocolVersion: 1,
-    deviceId: "test-device",
-    clientInfo: { app: "test", version: "0", platform: "node" },
-  });
-  if (!hello.result.herdrConnected) {
-    ws.close();
-    return t.skip("herdr not running");
-  }
-
-  // Subscribers may receive catch-up events for pre-existing workspaces, so
-  // match on the id of the workspace this test creates.
-  const events: any[] = [];
-  let matchId: string | null = null;
-  let resolveMatch: (msg: any) => void;
-  const gotEvent = new Promise<any>((resolve) => (resolveMatch = resolve));
-  ws.on("message", (raw) => {
-    const msg = JSON.parse(raw.toString());
-    if (msg.type === "event" && msg.topic === "herdr" && msg.event === "workspace_created") {
-      events.push(msg);
-      if (matchId && msg.data.workspace.workspace_id === matchId) resolveMatch(msg);
-    }
-  });
-
   const created = await rpc(ws, {
-    id: "t6",
-    type: "herdr.request",
-    request: { id: "c1", method: "workspace.create", params: {} },
+    id: "t5",
+    type: "terminal.create",
+    cwd: process.cwd(),
+    name: "aura-bridge-test",
   });
-  assert.ok(created.result.response.result, "workspace.create succeeded");
-  const wsId = created.result.response.result.workspace.workspace_id;
-  matchId = wsId;
-  const already = events.find((e) => e.data.workspace.workspace_id === wsId);
-  const ev = already ?? (await gotEvent);
-  assert.equal(typeof ev.seq, "number");
-  assert.equal(ev.data.workspace.workspace_id, wsId);
-
-  // Clean up the workspace we created in the live Herdr session.
+  assert.ok(created.result.terminal.terminalId, "terminal created");
+  const list = await rpc(ws, { id: "t5b", type: "terminal.list" });
+  assert.ok(
+    list.result.terminals.some((t: any) => t.terminalId === created.result.terminal.terminalId),
+  );
   const closed = await rpc(ws, {
-    id: "t7",
-    type: "herdr.request",
-    request: { id: "c2", method: "workspace.close", params: { workspace_id: wsId } },
+    id: "t5c",
+    type: "terminal.close",
+    terminalId: created.result.terminal.terminalId,
   });
-  assert.ok(closed.result.response.result, "workspace.close succeeded");
+  assert.equal(closed.result.closed, created.result.terminal.terminalId);
   ws.close();
 });
