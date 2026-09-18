@@ -13,7 +13,8 @@ sealed class VoiceCommand {
     object DiscardChanges : VoiceCommand()
     object NewTerminal : VoiceCommand()
     object KillTerminal : VoiceCommand()
-    object ArchiveAgent : VoiceCommand()
+    /** target: "current" (whichever agent card is open), "all", or a name/label to match. */
+    data class ArchiveAgent(val target: String = "current") : VoiceCommand()
     data class Search(val query: String) : VoiceCommand()
 }
 
@@ -52,10 +53,36 @@ fun parseVoiceCommand(rawText: String): VoiceCommand {
             VoiceCommand.KillTerminal
         Regex("\\b(new|create|start)\\b.*\\bterminal\\b").containsMatchIn(text) ->
             VoiceCommand.NewTerminal
-        Regex("\\b(archive|close|stop)\\b.*\\bagent\\b").containsMatchIn(text) ->
-            VoiceCommand.ArchiveAgent
+        Regex("\\b(archive|close|stop|kill)\\b.*\\bagents?\\b").containsMatchIn(text) ->
+            VoiceCommand.ArchiveAgent(extractArchiveTarget(text))
         else -> matchNavigation(text)?.let { VoiceCommand.Navigate(it) } ?: VoiceCommand.Search(rawText.trim())
     }
+}
+
+private val ARCHIVE_VERBS = listOf("archive", "close", "stop", "kill")
+
+/**
+ * Best-effort target extraction for the offline/no-key fallback router —
+ * "all" for every agent, otherwise whatever name sits before/after the word
+ * "agent(s)" (e.g. "kill the terminal test agent" → "terminal test",
+ * "archive agent B" → "B"), or "current" when nothing more specific is said.
+ * The Gemini router (KoogVoiceRouter) does this extraction properly when a
+ * key is configured — this is only the no-key degraded path.
+ */
+private fun extractArchiveTarget(text: String): String {
+    if (Regex("\\ball\\b").containsMatchIn(text)) return "all"
+    Regex("\\bagents?\\b\\s+(?:named|called)\\s+(.+)").find(text)?.groupValues?.get(1)
+        ?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+    // "kill the terminal test agent" → words before "agent" minus the leading
+    // verb ("kill") and article ("the") → "terminal test".
+    Regex("(.+?)\\s+agents?\\b").find(text)?.groupValues?.get(1)?.let { prefix ->
+        val words = prefix.trim().split(Regex("\\s+")).toMutableList()
+        while (words.isNotEmpty() && (words.first() in ARCHIVE_VERBS || words.first() == "the")) {
+            words.removeAt(0)
+        }
+        words.joinToString(" ").trim().takeIf { it.isNotBlank() }?.let { return it }
+    }
+    return "current"
 }
 
 /**

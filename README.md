@@ -32,6 +32,8 @@ the retired Herdr integration this replaced.
 
 ## References
 
+- [Try it: remote projects, AI coding, and switching machines](docs/try-it-workflows.md) — click-by-click exercises and example prompts.
+- [Remote setup and current limits](docs/remote-setup-and-limits.md) — prerequisites, supported paths, and troubleshooting.
 - `../Project Specifications Herdr XR.md` — full product specification
 - `../MR App Ideas for Productivity.html` — visual mockup of the six primary views
 - `docs/paseo-migration-plan.md` — Herdr → Paseo migration plan and phase status

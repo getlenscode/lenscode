@@ -1,7 +1,9 @@
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import { readFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
+import { hostname, homedir } from "node:os";
+import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import {
   PROTOCOL_VERSION,
@@ -249,6 +251,21 @@ export class BridgeServer {
           this.send(ws, {
             id: req.id,
             error: err("not_found", "That file could not be opened.", false, String(e)),
+          });
+        }
+        return;
+      }
+      case "snip.upload": {
+        try {
+          const dir = join(homedir(), ".aura", "snips");
+          await mkdir(dir, { recursive: true });
+          const path = join(dir, `snip-${Date.now()}.png`);
+          await writeFile(path, Buffer.from(req.pngBase64, "base64"));
+          this.send(ws, { id: req.id, result: { path } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", "Could not save that screenshot.", true, String(e)),
           });
         }
         return;
@@ -558,6 +575,23 @@ export class BridgeServer {
           this.send(ws, {
             id: req.id,
             error: err("backend_error", "Could not list agents.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "agent.history": {
+        if (!(await this.requireBackend(ws, req.id))) return;
+        try {
+          const result = await this.agents.history({
+            search: req.search,
+            limit: req.limit,
+            cursor: req.cursor,
+          });
+          this.send(ws, { id: req.id, result });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", "Could not load agent history.", true, String(e)),
           });
         }
         return;

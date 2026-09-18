@@ -74,10 +74,19 @@ sealed class VoiceAction {
     @Serializable
     @SerialName("archive_agent")
     @LLMDescription(
-        "Archive the agent whose detail card is currently open. " +
-            "Destructive — the app always confirms with the user first.",
+        "Archive (kill/stop/close) one or more agents. Destructive — the app always " +
+            "confirms with the user first (one confirm card, or one 'archive all N' card " +
+            "for target=all).",
     )
-    data object ArchiveAgent : VoiceAction()
+    data class ArchiveAgent(
+        @property:LLMDescription(
+            "\"current\" when no specific agent is named (archives whichever agent's " +
+                "detail card is currently open) — the default. \"all\" for \"kill all agents\"/" +
+                "\"stop every agent\". Otherwise the agent's name/label as heard (e.g. \"the " +
+                "terminal test agent\", \"agent B\") to archive that one specifically.",
+        )
+        val target: String = "current",
+    ) : VoiceAction()
 
     @Serializable
     @SerialName("search")
@@ -87,6 +96,16 @@ sealed class VoiceAction {
             "than a specific filename or command.",
     )
     data class Search(@property:LLMDescription("the search query") val query: String) : VoiceAction()
+
+    @Serializable
+    @SerialName("new_agent")
+    @LLMDescription(
+        "Open/start/spawn a new coding agent with no task yet — e.g. \"open a cloud agent\", " +
+            "\"start a new agent\", \"spawn an agent\". Use this instead of navigate when the " +
+            "transcript is about creating an agent, not just looking at the agents list. Use " +
+            "ask_agent instead whenever the transcript also names actual work to do.",
+    )
+    data object NewAgent : VoiceAction()
 
     @Serializable
     @SerialName("ask_agent")
@@ -133,7 +152,7 @@ sealed class VoiceAction {
 data class VoiceStep(
     @property:LLMDescription(
         "one of: navigate, open_file, accept_changes, discard_changes, new_terminal, " +
-            "kill_terminal, archive_agent, search, ask_agent, respond_permission",
+            "kill_terminal, archive_agent, search, new_agent, ask_agent, respond_permission",
     )
     val type: String,
     @property:LLMDescription(
@@ -151,6 +170,11 @@ data class VoiceStep(
     val instruction: String? = null,
     @property:LLMDescription("required when type=respond_permission: \"allow\" or \"deny\". Null otherwise.")
     val behavior: String? = null,
+    @property:LLMDescription(
+        "optional, only for type=archive_agent: \"current\" (default), \"all\", or the " +
+            "named agent to archive, as heard. Null means \"current\".",
+    )
+    val target: String? = null,
 ) {
     fun toVoiceAction(): VoiceAction? = when (type) {
         "navigate" -> view?.let { VoiceAction.Navigate(it) }
@@ -159,7 +183,8 @@ data class VoiceStep(
         "discard_changes" -> VoiceAction.DiscardChanges
         "new_terminal" -> VoiceAction.NewTerminal
         "kill_terminal" -> VoiceAction.KillTerminal
-        "archive_agent" -> VoiceAction.ArchiveAgent
+        "archive_agent" -> VoiceAction.ArchiveAgent(target ?: "current")
+        "new_agent" -> VoiceAction.NewAgent
         "search" -> query?.let { VoiceAction.Search(it) }
         "ask_agent" -> instruction?.let { VoiceAction.AskAgent(it) }
         "respond_permission" -> behavior?.let { VoiceAction.RespondPermission(it) }
@@ -198,12 +223,21 @@ an ordered list of actions from the fixed grammar. Rules:
   anything a coding agent would need to act on rather than just a UI action — use
   "ask_agent" with the instruction, not "search". "search" is for finding something
   that already exists; "ask_agent" is for making something happen.
+- If the transcript is about creating/opening/starting/spawning an agent but names no
+  actual task ("open a cloud agent", "start a new agent", "spawn an agent"), use
+  "new_agent" — not "navigate" to the agents view. "navigate" is for just looking at
+  a view; "new_agent" actually creates the agent. If a task is also named, use
+  "ask_agent" instead (it creates the agent too, with that task as its first message).
 - Only if the transcript doesn't match any specific action AND isn't a task for the
   coding agent, use "search" with the transcript (or the relevant part of it) as the
   query — this is the last-resort fallback, not the default for anything ambiguous.
 - Destructive actions (discard_changes, kill_terminal, archive_agent) are fine to return;
   the app itself always shows the user a confirmation card before actually doing anything
   destructive, so you don't need to hedge or ask for confirmation yourself.
+- archive_agent's target: use "all" for "kill/stop/archive all agents" or "every agent".
+  Use the agent's name/label as heard when one is named ("kill the terminal test agent",
+  "archive agent B", "stop the one called Snip test agent A"). Use "current" (or omit
+  target) only when no agent is named and the intent is "archive whatever I'm looking at".
 - Speech-to-text transcripts can be rough (dropped words, filenames spoken oddly, e.g.
   "package json" for "package.json") — use judgment.
 - Only use respond_permission when the context line says a permission is pending. A bare
@@ -260,12 +294,16 @@ class KoogVoiceRouter(apiKey: String, modelId: String) {
             VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "diff"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "accept_changes"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "open_file", path = "auth.ts"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "new_agent"))),
             VoiceCommandPlan(
                 listOf(VoiceStep(type = "ask_agent", instruction = "start a http server in this project")),
             ),
             VoiceCommandPlan(listOf(VoiceStep(type = "ask_agent", instruction = "add a test for the login route"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "allow"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "deny"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "current"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "all"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "terminal test agent"))),
         )
     }
 }

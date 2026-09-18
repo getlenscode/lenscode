@@ -61,6 +61,42 @@ data class AgentInfo(
 }
 
 /**
+ * One archived/closed agent (docs/snip-and-agent-management-plan.md) — read
+ * only, so it carries none of AgentInfo's live-only fields (pending
+ * permissions, cost, attention). [toAgentInfo] adapts it into an [AgentInfo]
+ * with `status = "closed"` so it can be shown through the existing
+ * [dev.aura.xr.ui.AgentDetailOverlay] without a second card implementation —
+ * that overlay already hides its prompt box for a closed agent.
+ */
+data class AgentHistoryEntry(
+    val agentId: String,
+    val provider: String,
+    val model: String?,
+    val title: String?,
+    val status: String,
+    val cwd: String,
+    val createdAt: String,
+    val archivedAt: String?,
+) {
+    val label: String get() = title?.takeIf { it.isNotBlank() } ?: provider
+
+    fun toAgentInfo(): AgentInfo = AgentInfo(
+        agentId = agentId,
+        provider = provider,
+        model = model,
+        title = title,
+        status = "closed",
+        cwd = cwd,
+        workspaceId = null,
+        requiresAttention = false,
+        attentionReason = null,
+        pendingPermissionCount = 0,
+        lastError = null,
+        costUsd = null,
+    )
+}
+
+/**
  * One entry in an agent's own activity feed (docs/paseo-migration-plan.md
  * follow-up) — a message it sent/received, or a tool call it made. Until
  * this existed, the only way to see what an agent was actually doing (e.g.
@@ -171,6 +207,14 @@ class BridgeClient(
 
     private val _agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val agents: StateFlow<List<AgentInfo>> = _agents
+
+    private val _agentHistory = MutableStateFlow<List<AgentHistoryEntry>>(emptyList())
+    val agentHistory: StateFlow<List<AgentHistoryEntry>> = _agentHistory
+
+    private val _agentHistoryHasMore = MutableStateFlow(false)
+    val agentHistoryHasMore: StateFlow<Boolean> = _agentHistoryHasMore
+
+    private var agentHistoryCursor: String? = null
 
     private val _agentTimeline = MutableStateFlow<List<AgentTimelineEntry>>(emptyList())
     val agentTimeline: StateFlow<List<AgentTimelineEntry>> = _agentTimeline
@@ -377,17 +421,30 @@ class BridgeClient(
         machineId: String = _terminalsMachineId.value,
         cwd: String? = null,
         onCreated: (String) -> Unit = {},
+        // No-op default kept for existing call sites — but a silently swallowed
+        // failure here means an entire caller chain (e.g. ask_agent's
+        // create-terminal-then-create-agent flow) just goes quiet with zero
+        // trace anywhere (not logged server-side either — see server.ts's
+        // terminal.* case, which only logs on an unexpected exception, not a
+        // normal backend_unavailable response). Pass a real handler for any
+        // flow where "it did nothing" would otherwise be undiagnosable.
+        onError: (JSONObject) -> Unit = {},
     ) {
         val fields = JSONObject().put("machineId", machineId)
         if (name != null) fields.put("name", name)
         if (cwd != null) fields.put("cwd", cwd)
-        send("terminal.create", fields, onResult = { result ->
-            // Only actually switch (which clears the list first) if this created
-            // a terminal on a different machine than the Terminal view is showing —
-            // the common "+ New" case targets the current one and should just refresh.
-            if (_terminalsMachineId.value != machineId) switchTerminalsMachine(machineId) else refreshTerminals(machineId)
-            onCreated(result.optJSONObject("terminal")?.optString("terminalId") ?: "")
-        })
+        send(
+            "terminal.create",
+            fields,
+            onResult = { result ->
+                // Only actually switch (which clears the list first) if this created
+                // a terminal on a different machine than the Terminal view is showing —
+                // the common "+ New" case targets the current one and should just refresh.
+                if (_terminalsMachineId.value != machineId) switchTerminalsMachine(machineId) else refreshTerminals(machineId)
+                onCreated(result.optJSONObject("terminal")?.optString("terminalId") ?: "")
+            },
+            onError = onError,
+        )
     }
 
     /**
@@ -685,6 +742,50 @@ class BridgeClient(
         })
     }
 
+    private fun parseHistoryEntry(e: JSONObject): AgentHistoryEntry = AgentHistoryEntry(
+        agentId = e.optString("agentId"),
+        provider = e.optString("provider", "agent"),
+        model = if (e.isNull("model")) null else e.optString("model"),
+        title = if (e.isNull("title")) null else e.optString("title"),
+        status = e.optString("status", "closed"),
+        cwd = e.optString("cwd", ""),
+        createdAt = e.optString("createdAt"),
+        archivedAt = if (e.isNull("archivedAt")) null else e.optString("archivedAt"),
+    )
+
+    /** First page of agent history (docs/snip-and-agent-management-plan.md) — replaces whatever was there before. */
+    fun refreshAgentHistory(search: String? = null) {
+        agentHistoryCursor = null
+        val fields = JSONObject()
+        if (!search.isNullOrBlank()) fields.put("search", search)
+        send(
+            "agent.history",
+            fields,
+            onResult = { result ->
+                val arr = result.optJSONArray("entries") ?: JSONArray()
+                _agentHistory.value = (0 until arr.length()).map { i -> parseHistoryEntry(arr.getJSONObject(i)) }
+                agentHistoryCursor = if (result.isNull("nextCursor")) null else result.optString("nextCursor")
+                _agentHistoryHasMore.value = result.optBoolean("hasMore", false)
+            },
+        )
+    }
+
+    /** Appends the next page onto [agentHistory]; no-op once [agentHistoryHasMore] is false. */
+    fun loadMoreAgentHistory() {
+        val cursor = agentHistoryCursor ?: return
+        send(
+            "agent.history",
+            JSONObject().put("cursor", cursor),
+            onResult = { result ->
+                val arr = result.optJSONArray("entries") ?: JSONArray()
+                val more = (0 until arr.length()).map { i -> parseHistoryEntry(arr.getJSONObject(i)) }
+                _agentHistory.value = _agentHistory.value + more
+                agentHistoryCursor = if (result.isNull("nextCursor")) null else result.optString("nextCursor")
+                _agentHistoryHasMore.value = result.optBoolean("hasMore", false)
+            },
+        )
+    }
+
     private fun parseAgent(a: JSONObject): AgentInfo = AgentInfo(
         agentId = a.optString("agentId"),
         provider = a.optString("provider", "agent"),
@@ -960,6 +1061,20 @@ class BridgeClient(
 
     fun clearMachineConnectError() {
         _machineConnectError.value = null
+    }
+
+    // ── Snip tool ────────────────────────────────────────────────────────
+    // agent.send has no image field (see protocol's snip.upload doc) — the
+    // cropped PNG is written to disk on the bridge's own machine instead,
+    // and the caller sends the returned path as a normal text prompt.
+
+    fun uploadSnip(pngBase64: String, onResult: (String) -> Unit, onError: () -> Unit = {}) {
+        send(
+            "snip.upload",
+            JSONObject().put("pngBase64", pngBase64),
+            onResult = { result -> onResult(result.optString("path")) },
+            onError = { onError() },
+        )
     }
 
     // ── Git worktrees & branches ─────────────────────────────────────────

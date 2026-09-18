@@ -1,59 +1,54 @@
 package dev.aura.xr.ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
+/** Match Compose clipping to the XR compositor so neither adds extra rounding. */
+object AuraCorners {
+    val Panel = 10.dp
+    val Card = 8.dp
+    val Control = 6.dp
+}
 
 /**
- * Palette and gradient stops ported 1:1 from the mockup's CSS
- * (MR App Ideas for Productivity.html :root tokens + .panel/.dock/.node rules).
+ * Smoked optical glass: cool neutral surfaces, luminous edges and ice accents.
+ * Keep a dark base for legibility in bright XR environments. These layers
+ * simulate glass reflections; they do not blur the passthrough behind a panel.
  */
 object AuraColors {
     // --text / --muted / accents
     val Text = Color(0xFFEEF7FF)
-    val Muted = Color(0xFF99ABC0)
-    val Blue = Color(0xFF5BA6FF)
+    val Muted = Color(0xFFB0C1D0)
+    val Blue = Color(0xFF91CFFF)
     val Green = Color(0xFF59E58C)
     val Red = Color(0xFFFF7F95)
     val Amber = Color(0xFFFFD166)
     val Purple = Color(0xFFB494FF)
     val Cyan = Color(0xFF7DE9FF)
-    val Eyebrow = Color(0xFF6D8BAD)
-    val Idle = Color(0xFF64748B)
-    val ActiveDock = Color(0xFF8FC6FF)
+    val Eyebrow = Color(0xFF9EB8CC)
+    val Idle = Color(0xFF8B9DAD)
+    val ActiveDock = Color(0xFFE0F7FF)
 
-    // .panel background: linear-gradient(180deg, rgba(32,49,69,.48), rgba(8,18,28,.30)).
-    // The CSS pairs this with backdrop-filter: blur(26px), which is what actually
-    // makes a ~40% fill read as solid dark glass — Compose can't sample/blur
-    // whatever is behind a spatial panel, so the same alpha here just blends
-    // straight through into a bright passthrough/Home background. Raised well
-    // above the literal CSS values to compensate for the missing blur.
-    val PanelGradTop = Color(0xE8203145)
-    val PanelGradBottom = Color(0xD608121C)
-    // .panel radial-gradient(circle at 15% 0%, rgba(110,170,255,.06), transparent 34%)
-    val PanelGlow = Color(0x1A6EAAFF)
-    // .panel border / border-top-color
-    val PanelBorder = Color(0x2EA5D3F4)
-    val PanelBorderTop = Color(0x3DE1EFFF)
-    // .panel::before diagonal sheen (drawn with BlendMode.Screen)
-    val SheenWhite = Color(0x0BFFFFFF)
-    val SheenBlue = Color(0x096EA0FF)
+    val PanelGradTop = Color(0xD0223342)
+    val PanelGradBottom = Color(0xE6101B26)
+    val PanelGlow = Color(0x187DDFFF)
+    val PanelBorder = Color(0x246DA3BD)
+    val PanelBorderTop = Color(0x65E0F4FF)
+    val SheenWhite = Color(0x12FFFFFF)
+    val SheenBlue = Color(0x0C86D8EF)
 
-    // .node (floating card style used for agent chips): border #2a3d50, bg
-    // rgba(7,17,27,.32) — same no-blur-to-compensate-for issue as .panel above.
-    val CardBorder = Color(0xFF2A3D50)
-    val CardBg = Color(0xD2070F17)
+    val CardBorder = Color(0x386F96AB)
+    val CardBg = Color(0xBA101F2C)
+    val CardGradTop = Color(0xCC263947)
 
-    // .dock button: default color #8191a4; active bg linear-gradient(180deg,
-    // rgba(50,127,220,.25), rgba(37,90,155,.14)), border rgba(100,170,250,.18) —
-    // opacity raised for the same reason.
-    val DockIdle = Color(0xFF8191A4)
-    val DockActiveGradTop = Color(0x8C327FDC)
-    val DockActiveGradBottom = Color(0x66255A9B)
-    val DockActiveBorder = Color(0x2E64AAFA)
-    val DockBg = Color(0xB0141E2A) // dock button resting fill
+    val DockIdle = Color(0xFFB0C3D1)
+    val DockActiveGradTop = Color(0xD03B687E)
+    val DockActiveGradBottom = Color(0xD01A344A)
+    val DockActiveBorder = Color(0xB09BDEFA)
+    val DockBg = Color(0xCF132330)
 
-    // .logo circular badge: bg #0b1119, border #2c3b4a
-    val LogoBg = Color(0xFF0B1119)
-    val LogoBorder = Color(0xFF2C3B4A)
+    val LogoBg = Color(0xB3192A37)
+    val LogoBorder = Color(0x527C9CAD)
 
     /** Per-agent accent, matching .logo.claude/.codex/.hermes/.pi. */
     fun agentAccent(provider: String): Color = when (provider.lowercase()) {

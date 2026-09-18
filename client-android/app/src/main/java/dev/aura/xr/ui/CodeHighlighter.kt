@@ -14,16 +14,17 @@ import androidx.compose.ui.text.withStyle
  * all the Code view does today.
  */
 object VsCodeColors {
-    val EditorBg = Color(0xFF1E1E1E)
-    val SidebarBg = Color(0xFF252526)
-    val TabBarBg = Color(0xFF252526)
-    val ActiveTabBg = Color(0xFF1E1E1E)
-    val ActiveTabAccent = Color(0xFF007ACC)
-    val LineNumber = Color(0xFF858585)
-    val LineNumberActive = Color(0xFFC6C6C6)
-    val Border = Color(0xFF3C3C3C)
-    val HoverRow = Color(0xFF2A2D2E)
-    val Breadcrumb = Color(0xFF9D9D9D)
+    // Editor chrome follows the spatial glass; retain familiar syntax hues.
+    val EditorBg = Color(0xE6101A24)
+    val SidebarBg = Color(0x9C172733)
+    val TabBarBg = Color(0xAD1C2D3A)
+    val ActiveTabBg = Color(0xC52D4454)
+    val ActiveTabAccent = AuraColors.Cyan
+    val LineNumber = Color(0xFF8A9FAF)
+    val LineNumberActive = AuraColors.Text
+    val Border = AuraColors.CardBorder
+    val HoverRow = Color(0x553D6278)
+    val Breadcrumb = AuraColors.Muted
     val Keyword = Color(0xFF569CD6)
     val StringLit = Color(0xFFCE9178)
     val Comment = Color(0xFF6A9955)

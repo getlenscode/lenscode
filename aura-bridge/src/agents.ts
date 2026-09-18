@@ -6,7 +6,13 @@
  * into `DaemonClient` agent RPCs and normalizing the results for the client.
  */
 import type { PaseoClient } from "./paseo.ts";
-import type { AgentSummary, AgentTimelineEntry, PermissionRequestSummary, ProviderSummary } from "@aura/protocol";
+import type {
+  AgentHistorySummary,
+  AgentSummary,
+  AgentTimelineEntry,
+  PermissionRequestSummary,
+  ProviderSummary,
+} from "@aura/protocol";
 
 /**
  * The subset of Paseo's timeline item union the client actually renders
@@ -48,6 +54,8 @@ interface PaseoAgentSnapshot {
   }>;
   lastError?: string;
   lastUsage?: { totalCostUsd?: number | null };
+  createdAt?: string;
+  archivedAt?: string | null;
 }
 
 /**
@@ -96,6 +104,19 @@ function toAgentSummary(a: PaseoAgentSnapshot): AgentSummary {
   };
 }
 
+function toAgentHistorySummary(a: PaseoAgentSnapshot): AgentHistorySummary {
+  return {
+    agentId: a.id,
+    provider: a.provider,
+    model: a.model,
+    title: a.title,
+    status: a.status,
+    cwd: a.cwd,
+    createdAt: a.createdAt ?? "",
+    archivedAt: a.archivedAt ?? null,
+  };
+}
+
 export class Agents {
   private paseo: PaseoClient;
 
@@ -106,6 +127,29 @@ export class Agents {
   async list(): Promise<AgentSummary[]> {
     const { entries } = await this.paseo.daemon.fetchAgents();
     return entries.map((e) => toAgentSummary(e.agent as PaseoAgentSnapshot));
+  }
+
+  /**
+   * Archived/closed agents (docs/snip-and-agent-management-plan.md) — Paseo
+   * Desktop's own History view is built on this same daemon RPC;
+   * `includeArchived: true` is required or it returns the same live-only set
+   * `list()` already does.
+   */
+  async history(opts: {
+    search?: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ entries: AgentHistorySummary[]; nextCursor: string | null; hasMore: boolean }> {
+    const { entries, pageInfo } = await this.paseo.daemon.fetchAgentHistory({
+      filter: { includeArchived: true },
+      ...(opts.search ? { search: opts.search } : {}),
+      page: { limit: opts.limit ?? 50, ...(opts.cursor ? { cursor: opts.cursor } : {}) },
+    });
+    return {
+      entries: entries.map((e) => toAgentHistorySummary(e.agent as PaseoAgentSnapshot)),
+      nextCursor: pageInfo.nextCursor,
+      hasMore: pageInfo.hasMore,
+    };
   }
 
   async create(opts: {

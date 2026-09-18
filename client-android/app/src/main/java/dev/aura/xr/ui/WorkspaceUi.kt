@@ -37,7 +37,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
@@ -52,6 +52,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.mutableIntStateOf
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
 import androidx.compose.foundation.text.KeyboardOptions
 import dev.aura.xr.net.AgentInfo
 import dev.aura.xr.net.BridgeClient
@@ -62,73 +67,71 @@ import dev.aura.xr.net.PairingState
 import dev.aura.xr.net.VoiceResolution
 
 /**
- * 2D content composables for the spatial panels — ported from the mockup's
- * .panel/.node/.dock/.agent CSS. Compose has no backdrop-filter, so the glass
- * look is built from the same *other* layers the CSS uses on top of the blur:
- * a two-stop gradient fill, a corner radial highlight, a brighter top border
- * edge, and a diagonal white/blue sheen composited with BlendMode.Screen
- * (the mockup's `.panel::before { mix-blend-mode:screen }`).
+ * Spatial glass surfaces share restrained corners and reflective edge lighting.
+ * Reflections sit behind content so text and syntax colors stay crisp.
  */
 
-private val PanelCorner = 20.dp
-private val CardCorner = 13.dp
-private val DockCorner = 11.dp
+private val PanelCorner = AuraCorners.Panel
+private val CardCorner = AuraCorners.Card
+private val DockCorner = AuraCorners.Control
+
+/** Cache reflection brushes at the panel's size instead of allocating each frame. */
+private fun Modifier.glassFinish(corner: Dp, compact: Boolean = false): Modifier {
+    val shape = RoundedCornerShape(corner)
+    return clip(shape)
+        .background(Brush.verticalGradient(
+            if (compact) listOf(AuraColors.CardGradTop, AuraColors.CardBg)
+            else listOf(AuraColors.PanelGradTop, AuraColors.PanelGradBottom),
+        ))
+        .drawWithCache {
+            val glow = Brush.radialGradient(
+                colors = listOf(AuraColors.PanelGlow, Color.Transparent),
+                center = Offset(size.width * 0.12f, 0f),
+                radius = (size.width * 0.65f).coerceAtLeast(1f),
+            )
+            val sheen = Brush.linearGradient(
+                colorStops = arrayOf(
+                    0f to AuraColors.SheenWhite,
+                    0.34f to Color.Transparent,
+                    0.76f to Color.Transparent,
+                    1f to AuraColors.SheenBlue,
+                ),
+                start = Offset.Zero,
+                end = Offset(size.width, size.height),
+            )
+            onDrawBehind {
+                drawRect(glow)
+                drawRect(sheen, blendMode = BlendMode.Screen)
+            }
+        }
+        .border(
+            1.dp,
+            Brush.linearGradient(
+                0f to AuraColors.PanelBorderTop,
+                0.4f to AuraColors.CardBorder,
+                0.75f to AuraColors.PanelBorder,
+                1f to AuraColors.CardBorder,
+            ),
+            shape,
+        )
+}
 
 /** The .panel style: gradient fill + corner glow + screen-blend sheen + top-bright border. */
 @Composable
 fun GlassSurface(corner: Dp = PanelCorner, content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(corner)
     Box(
-        Modifier
-            .fillMaxSize()
-            .clip(shape)
-            .background(Brush.verticalGradient(listOf(AuraColors.PanelGradTop, AuraColors.PanelGradBottom)))
-            .drawWithContent {
-                drawContent()
-                // .panel radial-gradient(circle at 15% 0%, rgba(110,170,255,.06), transparent 34%)
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(AuraColors.PanelGlow, Color.Transparent),
-                        center = Offset(size.width * 0.15f, 0f),
-                        radius = size.width * 0.5f,
-                    ),
-                )
-                // .panel::before diagonal sheen, mix-blend-mode:screen
-                drawRect(
-                    brush = Brush.linearGradient(
-                        colorStops = arrayOf(
-                            0f to AuraColors.SheenWhite,
-                            0.28f to Color.Transparent,
-                            0.72f to Color.Transparent,
-                            1f to AuraColors.SheenBlue,
-                        ),
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, size.height),
-                    ),
-                    blendMode = BlendMode.Screen,
-                )
-            }
-            .border(
-                width = 1.dp,
-                brush = Brush.verticalGradient(listOf(AuraColors.PanelBorderTop, AuraColors.PanelBorder)),
-                shape = shape,
-            ),
+        Modifier.fillMaxSize().glassFinish(corner),
         contentAlignment = Alignment.Center,
     ) {
         content()
     }
 }
 
-/** The .node/.tcard style: a smaller flat floating card, no gradient fill. */
+/** Compact glass for floating agent cards. */
 @Composable
 fun CardSurface(corner: Dp = CardCorner, content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(corner)
     Box(
-        Modifier
-            .fillMaxSize()
-            .clip(shape)
-            .background(AuraColors.CardBg)
-            .border(1.dp, AuraColors.CardBorder, shape),
+        Modifier.fillMaxSize().glassFinish(corner, compact = true),
         contentAlignment = Alignment.Center,
     ) {
         content()
@@ -153,7 +156,9 @@ fun PrimaryPanelContent(
     onTogglePin: () -> Unit = {},
     onBringCloser: () -> Unit = {},
     onPushFarther: () -> Unit = {},
-    onEnterWalkingMode: () -> Unit = {},
+    followMeEnabled: Boolean = false,
+    onToggleFollowMe: () -> Unit = {},
+    onEnterPip: () -> Unit = {},
     pairingState: PairingState = PairingState.Authenticated,
     deviceName: String = "",
     onDeviceNameChange: (String) -> Unit = {},
@@ -203,6 +208,9 @@ fun PrimaryPanelContent(
                         color = AuraColors.Text,
                         fontSize = 16.sp,
                     )
+                    Spacer(Modifier.width(20.dp))
+                    // This XR device's own battery — not any Paseo host's.
+                    BatteryIndicator()
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
@@ -249,67 +257,32 @@ fun PrimaryPanelContent(
                         modifier = Modifier.clickable(onClick = onResetLayout),
                     )
                     Spacer(Modifier.width(16.dp))
-                    // Manual toggle (spec §50, §78) — no locomotion sensor here to
-                    // drive it automatically; suppresses the dock + dense panels
-                    // down to agent strip + voice while active.
+                    // Jetpack XR's app-side equivalent of the pin-to-headset
+                    // button a Home Space window (e.g. Chrome) gets from the OS —
+                    // this is a full-space app rendering its own panels, so it
+                    // never gets that system button automatically. Requires the
+                    // HEAD_TRACKING runtime permission — first tap prompts for it.
                     Text(
-                        "🚶 Walking Mode",
+                        if (followMeEnabled) "🧭 Following" else "🧭 Follow Me",
+                        color = if (followMeEnabled) AuraColors.Green else AuraColors.Eyebrow,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onToggleFollowMe),
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    // Experiment: standard Android picture-in-picture — confirmed
+                    // live it has no visible effect for this app (see MainActivity's
+                    // onEnterPip doc comment) — kept only in case a future Android
+                    // XR revision changes how PiP interacts with Full Space.
+                    Text(
+                        "📺 PiP",
                         color = AuraColors.Eyebrow,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable(onClick = onEnterWalkingMode),
+                        modifier = Modifier.clickable(onClick = onEnterPip),
                     )
                 }
             }
-        }
-    }
-}
-
-/**
- * Walking mode's primary panel content (spec §50, §78) — deliberately just
- * this: a status dot, a mic, and the way back. Everything else (dock, Code/
- * Diff/Git/Agents detail) is suppressed at the call site while active.
- */
-@Composable
-fun WalkingModeContent(
-    backendConnected: Boolean,
-    onExit: () -> Unit,
-    onVoice: () -> Unit,
-    isListening: Boolean,
-) {
-    GlassSurface {
-        Column(
-            Modifier.fillMaxSize().padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(if (backendConnected) AuraColors.Green else AuraColors.Red)
-                Spacer(Modifier.width(8.dp))
-                Text("🚶 Walking Mode", color = AuraColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(20.dp))
-            if (isListening) {
-                StatusDot(AuraColors.Red, size = 14.dp)
-                Spacer(Modifier.height(8.dp))
-                Text("Listening…", color = AuraColors.Muted, fontSize = 14.sp)
-            } else {
-                Text(
-                    "🎤",
-                    fontSize = 40.sp,
-                    modifier = Modifier.clickable(onClick = onVoice),
-                )
-                Spacer(Modifier.height(8.dp))
-                Text("Tap to speak", color = AuraColors.Muted, fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(28.dp))
-            Text(
-                "🧍 Exit Walking Mode",
-                color = AuraColors.Eyebrow,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(onClick = onExit),
-            )
         }
     }
 }
@@ -351,7 +324,7 @@ private fun PairingFlowContent(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(3.dp))
                     .clickable(onClick = onBeginPairing)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
@@ -371,7 +344,7 @@ private fun PairingFlowContent(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(3.dp))
                     .clickable(onClick = onSubmitPairingCode)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
@@ -388,7 +361,7 @@ private fun PairingFlowContent(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(3.dp))
                         .clickable(onClick = onSubmitPairingCode)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -398,7 +371,7 @@ private fun PairingFlowContent(
                     color = AuraColors.Muted,
                     fontSize = 15.sp,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(3.dp))
                         .clickable(onClick = onRetryPairing)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -413,7 +386,7 @@ private fun PairingTextField(value: String, onValueChange: (String) -> Unit, pla
     Box(
         Modifier
             .width(220.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(3.dp))
             .background(VsCodeColors.EditorBg)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
@@ -447,9 +420,9 @@ fun AgentChipContent(name: String, stateLabel: String, dotColor: Color, kind: St
             Box(
                 Modifier
                     .size(30.dp)
-                    .clip(CircleShape)
+                    .clip(RoundedCornerShape(DockCorner))
                     .background(AuraColors.LogoBg)
-                    .border(1.dp, AuraColors.LogoBorder, CircleShape),
+                    .border(1.dp, AuraColors.LogoBorder, RoundedCornerShape(DockCorner)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(name.take(1), color = AuraColors.agentAccent(kind), fontWeight = FontWeight.Black, fontSize = 14.sp)
@@ -516,7 +489,7 @@ fun TerminalPanelContent(
                                 Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(3.dp))
                                     .background(if (isSelected) AuraColors.DockActiveGradTop else Color.Transparent)
                                     .clickable { onSelect(pane) }
                                     .padding(8.dp),
@@ -565,7 +538,7 @@ fun TerminalPanelContent(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(3.dp))
                         .background(AuraColors.CardBg)
                         .padding(14.dp),
                 ) {
@@ -597,9 +570,7 @@ fun TerminalPanelContent(
             Box(
                 Modifier
                     .width(360.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(AuraColors.PanelGradTop)
-                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .glassFinish(PanelCorner)
                     .padding(20.dp),
             ) {
                 Column {
@@ -653,13 +624,8 @@ fun FilesPanelContent(
     onSearchQueryChange: (String) -> Unit = {},
     searchResults: List<dev.aura.xr.net.FileSearchHit> = emptyList(),
 ) {
-    val shape = RoundedCornerShape(PanelCorner)
     Box(
-        Modifier
-            .fillMaxSize()
-            .clip(shape)
-            .background(VsCodeColors.EditorBg)
-            .border(1.dp, VsCodeColors.Border, shape),
+        Modifier.fillMaxSize().glassFinish(PanelCorner),
     ) {
         Row(Modifier.fillMaxSize()) {
             // ── Explorer sidebar ─────────────────────────────────────────
@@ -693,7 +659,7 @@ fun FilesPanelContent(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(3.dp))
                         .background(VsCodeColors.EditorBg)
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
@@ -890,7 +856,7 @@ fun FilesPanelContent(
                         Box(
                             Modifier
                                 .width(200.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(3.dp))
                                 .background(VsCodeColors.SidebarBg)
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                         ) {
@@ -966,9 +932,9 @@ fun FilesPanelContent(
                                     .padding(top = 4.dp, end = 8.dp)
                                     .width(260.dp)
                                     .heightIn(max = 320.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(3.dp))
                                     .background(VsCodeColors.SidebarBg)
-                                    .border(1.dp, VsCodeColors.Border, RoundedCornerShape(10.dp))
+                                    .border(1.dp, VsCodeColors.Border, RoundedCornerShape(3.dp))
                                     .padding(vertical = 6.dp),
                             ) {
                                 LazyColumn {
@@ -1031,9 +997,9 @@ fun FilesPanelContent(
                                     Modifier
                                         .fillMaxWidth(0.92f)
                                         .fillMaxHeight(0.88f)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .clip(RoundedCornerShape(3.dp))
                                         .background(VsCodeColors.EditorBg)
-                                        .border(1.dp, VsCodeColors.Border, RoundedCornerShape(12.dp))
+                                        .border(1.dp, VsCodeColors.Border, RoundedCornerShape(3.dp))
                                         .padding(16.dp),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1123,9 +1089,9 @@ private fun VoiceAgentModeSelector(selected: String, onSelect: (String) -> Unit)
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(3.dp))
                         .background(if (active) AuraColors.DockActiveGradTop else AuraColors.CardBg)
-                        .border(1.dp, if (active) AuraColors.DockActiveBorder else AuraColors.CardBorder, RoundedCornerShape(8.dp))
+                        .border(1.dp, if (active) AuraColors.DockActiveBorder else AuraColors.CardBorder, RoundedCornerShape(3.dp))
                         .clickable { onSelect(id) }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 )
@@ -1144,18 +1110,159 @@ private fun VoiceAgentModeSelector(selected: String, onSelect: (String) -> Unit)
     }
 }
 
+/** One row in the grouped agent-history list — a date divider or an entry under it. */
+private sealed class HistoryRow(val rowKey: String) {
+    class DateHeader(val label: String) : HistoryRow("header-$label")
+    class Entry(val entry: dev.aura.xr.net.AgentHistoryEntry) : HistoryRow(entry.agentId)
+}
+
+/** "Today" / "Yesterday" / "September 18, 2026" — the session's local creation date. */
+private fun formatHistoryDateLabel(createdAtIso: String): String {
+    return try {
+        val date = java.time.Instant.parse(createdAtIso).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        val today = java.time.LocalDate.now()
+        when (date) {
+            today -> "Today"
+            today.minusDays(1) -> "Yesterday"
+            else -> date.format(java.time.format.DateTimeFormatter.ofPattern("MMMM d, yyyy"))
+        }
+    } catch (e: Exception) {
+        "Unknown date"
+    }
+}
+
+/**
+ * Groups already-sorted history entries under a date header per distinct day
+ * (by creation date), inserting a new header only when the date changes from
+ * the entry immediately before it — matches how the backend already orders
+ * the list rather than re-sorting client-side.
+ */
+private fun buildHistoryRows(history: List<dev.aura.xr.net.AgentHistoryEntry>): List<HistoryRow> {
+    val rows = mutableListOf<HistoryRow>()
+    var lastLabel: String? = null
+    for (entry in history) {
+        val label = formatHistoryDateLabel(entry.createdAt)
+        if (label != lastLabel) {
+            rows.add(HistoryRow.DateHeader(label))
+            lastLabel = label
+        }
+        rows.add(HistoryRow.Entry(entry))
+    }
+    return rows
+}
+
 /** Agents view: real Paseo agent.list — honestly empty until an agent is started. */
 @Composable
 fun AgentsPanelContent(
     agents: List<AgentInfo>,
     onSelect: (AgentInfo) -> Unit,
+    onArchive: (AgentInfo) -> Unit = {},
     voiceAgentModeId: String = "auto",
     onVoiceAgentModeChange: (String) -> Unit = {},
+    // Archived/closed agents (docs/snip-and-agent-management-plan.md) — Paseo
+    // still has their full record even after agent.list drops them; this is
+    // Aura's equivalent of Paseo Desktop's own History view.
+    history: List<dev.aura.xr.net.AgentHistoryEntry> = emptyList(),
+    historyHasMore: Boolean = false,
+    onShowHistory: () -> Unit = {},
+    onLoadMoreHistory: () -> Unit = {},
+    onSelectHistory: (dev.aura.xr.net.AgentHistoryEntry) -> Unit = {},
 ) {
+    // Local, not lifted to the caller — this list's own close button is the
+    // only thing that can open it, same as TerminalPanelContent's stopConfirm.
+    var archiveTarget by remember { mutableStateOf<AgentInfo?>(null) }
+    var showingHistory by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize()) {
     GlassSurface {
         Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Eyebrow("AGENTS")
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Eyebrow(if (showingHistory) "AGENT HISTORY" else "AGENTS")
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(1.dp, AuraColors.Cyan.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        .clickable {
+                            showingHistory = !showingHistory
+                            if (showingHistory) onShowHistory()
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        if (showingHistory) "Live" else "History",
+                        color = AuraColors.Cyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
             Spacer(Modifier.height(4.dp))
+            if (showingHistory) {
+                Text(
+                    "Archived and closed agents — read only.",
+                    color = AuraColors.Muted,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(14.dp))
+                if (history.isEmpty()) {
+                    Text("No agent history yet.", color = AuraColors.Muted, fontSize = 13.sp)
+                } else {
+                    val rows = remember(history) { buildHistoryRows(history) }
+                    LazyColumn(Modifier.fillMaxWidth()) {
+                        itemsIndexed(rows, key = { index, row -> "$index-${row.rowKey}" }) { _, row ->
+                            when (row) {
+                                is HistoryRow.DateHeader -> Text(
+                                    row.label,
+                                    color = AuraColors.Amber,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
+                                )
+                                is HistoryRow.Entry -> {
+                                    val entry = row.entry
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .clickable { onSelectHistory(entry) }
+                                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        StatusDot(AuraColors.Muted, size = 8.dp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(entry.label, color = AuraColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("(${entry.provider})", color = AuraColors.Eyebrow, fontSize = 12.sp)
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            entry.archivedAt?.let { "archived" } ?: entry.status,
+                                            color = AuraColors.Muted,
+                                            fontSize = 13.sp,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (historyHasMore) {
+                            item {
+                                Text(
+                                    "Load more",
+                                    color = AuraColors.Cyan,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(onClick = onLoadMoreHistory)
+                                        .padding(vertical = 10.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                return@Column
+            }
             if (agents.isNotEmpty()) {
                 Text("Tap an agent to see status and respond.", color = AuraColors.Muted, fontSize = 12.sp)
             }
@@ -1181,7 +1288,7 @@ fun AgentsPanelContent(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(3.dp))
                                 .clickable { onSelect(agent) }
                                 .padding(vertical = 6.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1192,12 +1299,70 @@ fun AgentsPanelContent(
                             Spacer(Modifier.width(8.dp))
                             Text("(${agent.provider})", color = AuraColors.Eyebrow, fontSize = 12.sp)
                             Spacer(Modifier.width(10.dp))
-                            Text(agent.status, color = AuraColors.Muted, fontSize = 13.sp)
+                            Text(agent.status, color = AuraColors.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                "×",
+                                color = AuraColors.Muted,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { archiveTarget = agent }.padding(horizontal = 8.dp),
+                            )
                         }
                     }
                 }
             }
         }
+    }
+    // Closes the agent's runtime — its history stays in Paseo, it just can't
+    // take new messages, same guarantee as the detail card's Archive action
+    // (spec §57: destructive actions always confirm first).
+    if (archiveTarget != null) {
+        val target = archiveTarget!!
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xAA000000)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .width(360.dp)
+                    .glassFinish(PanelCorner)
+                    .padding(20.dp),
+            ) {
+                Column {
+                    Text("Archive this agent?", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "This closes ${target.label}'s runtime. Its history stays in Paseo, but it can't take new messages.",
+                        color = AuraColors.Muted,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Cancel",
+                            color = AuraColors.Muted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { archiveTarget = null }.padding(8.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "Archive",
+                            color = AuraColors.Amber,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable {
+                                onArchive(target)
+                                archiveTarget = null
+                            }.padding(8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
     }
 }
 
@@ -1237,9 +1402,9 @@ fun PermissionsPanelContent(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 6.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(3.dp))
                                 .background(AuraColors.CardBg)
-                                .border(1.dp, AuraColors.CardBorder, RoundedCornerShape(10.dp))
+                                .border(1.dp, AuraColors.CardBorder, RoundedCornerShape(3.dp))
                                 .padding(14.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1341,12 +1506,12 @@ fun GitPanelContent(
                         Row(
                             Modifier
                                 .padding(end = 8.dp)
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(CardCorner))
                                 .background(if (isCurrent) AuraColors.DockActiveGradTop else AuraColors.CardBg)
                                 .border(
                                     1.dp,
                                     if (isCurrent) AuraColors.DockActiveBorder else AuraColors.CardBorder,
-                                    RoundedCornerShape(20.dp),
+                                    RoundedCornerShape(CardCorner),
                                 )
                                 .clickable(enabled = !isCurrent) { onSwitchBranch(branch) }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1397,7 +1562,7 @@ fun GitPanelContent(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(3.dp))
                                 .clickable { onOpenInCode(wt) }
                                 .padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1449,9 +1614,7 @@ fun GitPanelContent(
             Box(
                 Modifier
                     .width(380.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(AuraColors.PanelGradTop)
-                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .glassFinish(PanelCorner)
                     .padding(20.dp),
             ) {
                 Column {
@@ -1504,9 +1667,7 @@ fun GitPanelContent(
             Box(
                 Modifier
                     .width(380.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(AuraColors.PanelGradTop)
-                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .glassFinish(PanelCorner)
                     .padding(20.dp),
             ) {
                 Column {
@@ -1647,7 +1808,7 @@ fun DiffPanelContent(
                             Row(
                                 Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(3.dp))
                                     .background(if (isSelected) AuraColors.DockActiveGradTop else Color.Transparent)
                                     .clickable { onSelectFile(f.path) }
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1676,7 +1837,7 @@ fun DiffPanelContent(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(3.dp))
                     .background(VsCodeColors.EditorBg)
                     .padding(14.dp),
             ) {
@@ -1763,9 +1924,7 @@ fun DiffPanelContent(
             Box(
                 Modifier
                     .width(380.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(AuraColors.PanelGradTop)
-                    .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                    .glassFinish(PanelCorner)
                     .padding(20.dp),
             ) {
                 Column {
@@ -1915,7 +2074,7 @@ fun PlaceholderPanelContent(title: String, note: String) {
 }
 
 @Composable
-fun DockButtonContent(icon: String, label: String, active: Boolean, onClick: () -> Unit) {
+fun DockButtonContent(id: String, label: String, active: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(DockCorner)
     Box(
         Modifier
@@ -1928,18 +2087,33 @@ fun DockButtonContent(icon: String, label: String, active: Boolean, onClick: () 
                     Brush.verticalGradient(listOf(AuraColors.DockBg, AuraColors.DockBg))
                 },
             )
-            .border(1.dp, if (active) AuraColors.DockActiveBorder else Color.Transparent, shape)
+            .border(
+                1.dp,
+                Brush.verticalGradient(listOf(
+                    if (active) AuraColors.DockActiveBorder else AuraColors.CardBorder,
+                    AuraColors.CardBorder,
+                )),
+                shape,
+            )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(icon, color = if (active) AuraColors.ActiveDock else AuraColors.DockIdle, fontSize = 18.sp)
-            Spacer(Modifier.height(2.dp))
+            DockIcon(id, color = if (active) AuraColors.ActiveDock else AuraColors.DockIdle)
+            Spacer(Modifier.height(6.dp))
             Text(
                 label,
                 color = if (active) AuraColors.ActiveDock else AuraColors.DockIdle,
                 fontSize = 11.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                letterSpacing = 0.3.sp,
+            )
+        }
+        if (active) {
+            Box(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
+                    .width(16.dp).height(2.dp)
+                    .background(AuraColors.Cyan, RoundedCornerShape(1.dp)),
             )
         }
     }
@@ -1971,9 +2145,7 @@ fun VoiceOverlay(
         Box(
             Modifier
                 .width(420.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(AuraColors.PanelGradTop)
-                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                .glassFinish(PanelCorner)
                 // Swallow clicks so tapping inside the card doesn't dismiss it.
                 .clickable(enabled = false) {}
                 .padding(20.dp),
@@ -2017,7 +2189,7 @@ fun VoiceOverlay(
                                 Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(3.dp))
                                         .clickable { onSelectCandidate(candidate.path) }
                                         .padding(vertical = 8.dp, horizontal = 6.dp),
                                 ) {
@@ -2086,9 +2258,7 @@ fun VoiceCommandOverlay(
         Box(
             Modifier
                 .width(420.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(AuraColors.PanelGradTop)
-                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                .glassFinish(PanelCorner)
                 // Swallow clicks so tapping inside the card doesn't dismiss it.
                 .clickable(enabled = false) {}
                 .padding(20.dp),
@@ -2110,7 +2280,7 @@ fun VoiceCommandOverlay(
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(3.dp))
                                 .background(VsCodeColors.EditorBg)
                                 .padding(12.dp),
                         ) {
@@ -2192,7 +2362,7 @@ private fun AgentActivityFeed(timeline: List<dev.aura.xr.net.AgentTimelineEntry>
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 60.dp, max = 220.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(3.dp))
                 .background(VsCodeColors.EditorBg)
                 .padding(10.dp),
         ) {
@@ -2289,17 +2459,15 @@ fun AgentDetailOverlay(
         Box(
             Modifier
                 .width(440.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(AuraColors.PanelGradTop)
-                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                .glassFinish(PanelCorner)
                 .clickable(enabled = false) {} // swallow taps so the card itself doesn't dismiss
                 .padding(20.dp),
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
-                        Modifier.size(28.dp).clip(CircleShape).background(AuraColors.LogoBg)
-                            .border(1.dp, AuraColors.LogoBorder, CircleShape),
+                        Modifier.size(28.dp).clip(RoundedCornerShape(DockCorner)).background(AuraColors.LogoBg)
+                            .border(1.dp, AuraColors.LogoBorder, RoundedCornerShape(DockCorner)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -2323,7 +2491,7 @@ fun AgentDetailOverlay(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(3.dp))
                         .background(VsCodeColors.EditorBg)
                         .padding(10.dp),
                 ) {
@@ -2355,7 +2523,7 @@ fun AgentDetailOverlay(
                         Box(
                             Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(3.dp))
                                 .background(VsCodeColors.EditorBg)
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                         ) {
@@ -2459,9 +2627,7 @@ fun RemoteBrowseOverlay(
             Modifier
                 .width(460.dp)
                 .heightIn(max = 420.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(AuraColors.PanelGradTop)
-                .border(1.dp, AuraColors.PanelBorderTop, RoundedCornerShape(16.dp))
+                .glassFinish(PanelCorner)
                 .clickable(enabled = false) {}
                 .padding(20.dp),
         ) {
@@ -2530,5 +2696,224 @@ fun RemoteBrowseOverlay(
                 }
             }
         }
+    }
+}
+
+/**
+ * Browser dock button's prompt (docs/remote-setup-and-limits.md's "Web
+ * preview" row: Code has no embedded live preview, so this is the app's only
+ * way to open one). Launches as a normal Android activity — in XR that means
+ * the system opens Chrome as its own separate spatial window in Home Space,
+ * not something this app can dock beside itself or pin to a side; the user
+ * repositions it like any other XR window once it appears.
+ */
+@Composable
+fun BrowserLaunchOverlay(
+    visible: Boolean,
+    url: String,
+    onUrlChange: (String) -> Unit,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+    isListeningForUrl: Boolean = false,
+    onVoiceInput: () -> Unit = {},
+) {
+    if (!visible) return
+    Box(
+        Modifier.fillMaxSize().background(Color(0xAA000000)).clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .width(420.dp)
+                .glassFinish(PanelCorner)
+                .clickable(enabled = false) {}
+                .padding(20.dp),
+        ) {
+            Column {
+                Text("Open in Chrome", color = AuraColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Opens as its own window, requested docked to the right — reposition it if it lands somewhere else.",
+                    color = AuraColors.Muted,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        PairingTextField(url, onUrlChange, "http://192.168.1.x:3000", onSubmit = onOpen)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isListeningForUrl) "…" else "🎤",
+                        fontSize = 18.sp,
+                        modifier = Modifier.clickable(enabled = !isListeningForUrl, onClick = onVoiceInput).padding(6.dp),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Cancel",
+                        color = AuraColors.Muted,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable(onClick = onDismiss),
+                    )
+                    Text(
+                        "Open",
+                        color = AuraColors.Blue,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable(enabled = url.isNotBlank(), onClick = onOpen),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Embedded browser panel — renders inside this app's own window via
+ * [WebView] instead of launching Chrome as a separate Android activity.
+ * Added because a separate Chrome window occludes/hides this app's other
+ * panels (Terminal in particular) in Home Space rather than sitting beside
+ * them; see BrowserLaunchOverlay's doc comment for why external Chrome was
+ * the original approach and docs/remote-setup-and-limits.md's "Web preview"
+ * row for the limitation this closes.
+ */
+@Composable
+fun BrowserPanelContent(
+    url: String,
+    onChangeUrl: () -> Unit,
+    onOpenInChrome: () -> Unit,
+) {
+    var displayedUrl by remember(url) { mutableStateOf(url) }
+    var canGoBack by remember { mutableStateOf(false) }
+    var reloadKey by remember { mutableIntStateOf(0) }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    Box(Modifier.fillMaxSize()) {
+    GlassSurface {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (canGoBack) {
+                    Text(
+                        "←",
+                        color = AuraColors.Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { webViewRef?.goBack() }.padding(end = 10.dp),
+                    )
+                }
+                Text(
+                    "↻",
+                    color = AuraColors.Muted,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable { reloadKey++ }.padding(end = 10.dp),
+                )
+                Text(
+                    displayedUrl,
+                    color = AuraColors.Muted,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "Change",
+                    color = AuraColors.Cyan,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(onClick = onChangeUrl).padding(start = 10.dp),
+                )
+                Text(
+                    "Open in Chrome",
+                    color = AuraColors.Blue,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(onClick = onOpenInChrome).padding(start = 14.dp),
+                )
+            }
+            if (isLoading || loadError != null) {
+                Text(
+                    loadError?.let { "Couldn't load this page — $it" } ?: "Loading…",
+                    color = if (loadError != null) AuraColors.Amber else AuraColors.Muted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+            AndroidView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                factory = { context ->
+                    WebView(context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        // LAN dev servers are almost always same-origin http — mixed
+                        // content only comes up if the page itself pulls an https
+                        // sub-resource, but default-block would silently blank it.
+                        settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView, startedUrl: String, favicon: android.graphics.Bitmap?) {
+                                isLoading = true
+                                loadError = null
+                            }
+
+                            override fun onPageFinished(view: WebView, finishedUrl: String) {
+                                isLoading = false
+                                displayedUrl = finishedUrl
+                                canGoBack = view.canGoBack()
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView,
+                                request: android.webkit.WebResourceRequest,
+                                error: android.webkit.WebResourceError,
+                            ) {
+                                if (!request.isForMainFrame) return
+                                isLoading = false
+                                loadError = "${error.description} (${error.errorCode})"
+                                android.util.Log.w("AuraBrowser", "load failed for ${request.url}: ${error.description} (${error.errorCode})")
+                            }
+
+                            override fun onReceivedHttpError(
+                                view: WebView,
+                                request: android.webkit.WebResourceRequest,
+                                errorResponse: android.webkit.WebResourceResponse,
+                            ) {
+                                if (!request.isForMainFrame) return
+                                isLoading = false
+                                loadError = "HTTP ${errorResponse.statusCode}"
+                                android.util.Log.w("AuraBrowser", "load failed for ${request.url}: HTTP ${errorResponse.statusCode}")
+                            }
+
+                            override fun onReceivedSslError(
+                                view: WebView,
+                                handler: android.webkit.SslErrorHandler,
+                                error: android.net.http.SslError,
+                            ) {
+                                isLoading = false
+                                loadError = "SSL error (${error.primaryError})"
+                                android.util.Log.w("AuraBrowser", "SSL error for ${error.url}: ${error.primaryError}")
+                                handler.cancel() // never silently trust an untrusted cert
+                            }
+                        }
+                        webChromeClient = WebChromeClient()
+                        webViewRef = this
+                        loadUrl(url)
+                    }
+                },
+                update = { view ->
+                    // reloadKey bump is the only signal to actually reload — a
+                    // recomposition from e.g. displayedUrl changing shouldn't
+                    // also re-navigate and stomp forward/back history.
+                    if (reloadKey > 0) view.reload()
+                },
+            )
+        }
+    }
     }
 }

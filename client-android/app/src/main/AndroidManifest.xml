@@ -4,6 +4,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Voice file search (spec §13, §63) — Android SpeechRecognizer. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Follow Me: Config.DeviceTrackingMode.SPATIAL (ArDevice pose) requires
+         this runtime permission on immersive devices — see
+         developer.android.com/develop/xr/jetpack-xr-sdk/arcore/device-pose. -->
+    <uses-permission android:name="android.permission.HEAD_TRACKING" />
 
     <!-- XR-only app: request the immersive feature. -->
     <uses-feature android:name="android.software.xr.immersive" android:required="true" />
@@ -14,6 +18,10 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!-- Browser dock button — explicitly targeting Chrome needs visibility
+             into that package even though we fall back to a package-less
+             ACTION_VIEW (which needs no <queries> entry) if it's absent. -->
+        <package android:name="com.android.chrome" />
     </queries>
 
     <application
@@ -30,7 +38,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:enableOnBackInvokedCallback="true">
+            android:enableOnBackInvokedCallback="true"
+            android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

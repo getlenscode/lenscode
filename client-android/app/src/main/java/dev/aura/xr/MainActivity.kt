@@ -11,7 +11,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -29,11 +32,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import androidx.xr.compose.spatial.ExperimentalFollowingSubspaceApi
+import androidx.xr.compose.spatial.FollowingSubspace
 import androidx.xr.compose.spatial.Subspace
-import androidx.xr.compose.subspace.SpatialColumn
+import androidx.xr.compose.platform.LocalSession
+import androidx.xr.compose.subspace.FollowBehavior
+import androidx.xr.compose.subspace.FollowTarget
+import androidx.xr.compose.subspace.SpatialBox
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialRow
 import androidx.xr.compose.subspace.layout.SubspaceModifier
+import androidx.xr.compose.subspace.layout.SpatialRoundedCornerShape
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.offset
@@ -45,6 +54,7 @@ import dev.aura.xr.net.PaneInfo
 import dev.aura.xr.ui.AgentChipContent
 import dev.aura.xr.ui.AgentsPanelContent
 import dev.aura.xr.ui.AuraColors
+import dev.aura.xr.ui.AuraCorners
 import dev.aura.xr.ui.DiffPanelContent
 import dev.aura.xr.ui.DockButtonContent
 import dev.aura.xr.ui.FilesPanelContent
@@ -53,8 +63,11 @@ import dev.aura.xr.ui.PermissionsPanelContent
 import dev.aura.xr.ui.RemoteBrowseOverlay
 import dev.aura.xr.ui.RemotePanelContent
 import dev.aura.xr.ui.PrimaryPanelContent
+import dev.aura.xr.ui.SnipCropOverlay
+import dev.aura.xr.ui.SnipRegion
 import dev.aura.xr.ui.TerminalPanelContent
 import dev.aura.xr.ui.VoiceOverlay
+import dev.aura.xr.ui.rememberSnipCaptureController
 import dev.aura.xr.voice.VoiceRecognizer
 
 class MainActivity : ComponentActivity() {
@@ -89,7 +102,19 @@ class MainActivity : ComponentActivity() {
         )
         bridge.connect()
 
-        setContent { AuraWorkspace(bridge) }
+        setContent {
+            AuraWorkspace(
+                bridge,
+                // Confirmed live: entering PiP does change the Activity's own
+                // window (dumpsys shows mIsInPictureInPictureMode=true), but
+                // has no visible effect — every visible panel renders through
+                // SceneCore's spatial compositor, not this transparent 2D
+                // Activity window, so shrinking it changes nothing on screen.
+                onEnterPip = {
+                    enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build())
+                },
+            )
+        }
 
         // The manifest's FULL_SPACE_MANAGED start mode only sets the default
         // launch mode — actually entering full space (so SpatialPanel content
@@ -171,40 +196,21 @@ private fun rememberPanelLayoutState(
     PanelLayoutState(
         layoutStore,
         id,
-        layoutStore.loadOffset(id) ?: dev.aura.xr.layout.SavedOffset(0f, 0f, 0f),
-        layoutStore.loadSize(id) ?: dev.aura.xr.layout.SavedSize(defaultWidth, defaultHeight),
+        // Always launch centered at a readable size. Transforms remain live
+        // for this session, but old scattered layouts are not restored.
+        dev.aura.xr.layout.SavedOffset(0f, 0f, 0f),
+        dev.aura.xr.layout.SavedSize(defaultWidth, defaultHeight),
         layoutStore.loadPinned(id),
     )
-}
-
-/**
- * Builds the width/height/offset/movable/resizable chain for one panel,
- * loading its saved position/size/pin (if any) and persisting on every move/
- * resize/pin change (spec §52) — shared by every panel so "move it, it stays
- * moved" isn't just the primary panel's behavior. Panels that also want pin/
- * depth controls (primary panel only, for now) should use
- * [rememberPanelLayoutState] directly instead.
- */
-@Composable
-private fun rememberPanelModifier(
-    layoutStore: dev.aura.xr.layout.LayoutStore,
-    id: String,
-    defaultWidth: Float,
-    defaultHeight: Float,
-    padding: androidx.compose.ui.unit.Dp,
-    /** Bumped by "Reset Layout" to force every panel to re-read (now-cleared) saved state. */
-    generation: Int = 0,
-): SubspaceModifier {
-    val layoutState = rememberPanelLayoutState(layoutStore, id, defaultWidth, defaultHeight, generation)
-    return layoutState.toModifier(padding)
 }
 
 /**
  * Spatial layout mirroring the mockup (spec §71): agent strip on top, one
  * dominant primary panel, quick dock underneath.
  */
+@OptIn(ExperimentalFollowingSubspaceApi::class)
 @Composable
-fun AuraWorkspace(bridge: BridgeClient) {
+fun AuraWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     val state by bridge.state.collectAsState()
     val terminals by bridge.terminals.collectAsState()
     val terminalOutput by bridge.terminalOutput.collectAsState()
@@ -213,6 +219,8 @@ fun AuraWorkspace(bridge: BridgeClient) {
     val filesRootLabel by bridge.filesRootLabel.collectAsState()
     val openFile by bridge.openFile.collectAsState()
     val agents by bridge.agents.collectAsState()
+    val agentHistory by bridge.agentHistory.collectAsState()
+    val agentHistoryHasMore by bridge.agentHistoryHasMore.collectAsState()
     val agentTimeline by bridge.agentTimeline.collectAsState()
     val permissions by bridge.permissions.collectAsState()
     val worktrees by bridge.worktrees.collectAsState()
@@ -227,7 +235,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var layoutGeneration by remember { mutableStateOf(0) }
     fun resetLayout() {
         layoutStore.resetAll()
-        layoutGeneration++ // forces every rememberPanelModifier call to re-read (now default) state
+        layoutGeneration++ // re-center the main panel and its attached rows
     }
     val gitStatus by bridge.gitStatus.collectAsState()
     val gitDiffPath by bridge.gitDiffPath.collectAsState()
@@ -244,12 +252,99 @@ fun AuraWorkspace(bridge: BridgeClient) {
     var stagedHunks by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var fileSearchQuery by remember { mutableStateOf("") }
     val fileSearchResults by bridge.searchResults.collectAsState()
+    val context = LocalContext.current
 
-    // ── Walking mode (spec §50, §78) ─────────────────────────────────────
-    // Manual toggle, not sensor-driven (no locomotion sensing available here):
-    // suppresses the dense dock + full panel content down to agent strip +
-    // voice, per spec's "readability over density" walking-mode discipline.
-    var walkingMode by remember { mutableStateOf(false) }
+    // ── Snip tool (screenshot → crop → attach to the tmux voice agent) ────
+    val snipController = rememberSnipCaptureController()
+    var snipBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var snipUploading by remember { mutableStateOf(false) }
+    // Set once the crop is uploaded, while the user is being asked which of
+    // several active agents to attach it to — cleared on pick or dismiss.
+    var snipPendingMessage by remember { mutableStateOf<String?>(null) }
+    var snipPickerAgents by remember { mutableStateOf<List<dev.aura.xr.net.AgentInfo>>(emptyList()) }
+    val snipScope = rememberCoroutineScope()
+    fun showToast(message: String) {
+        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    // ── Browser dock button ──────────────────────────────────────────────
+    // No embedded live preview in Code (docs/remote-setup-and-limits.md), so
+    // this is the app's only way to see a change actually running — it opens
+    // Chrome as a separate Android activity rather than anything drawn inside
+    // this app's own panel. In XR that surfaces as its own spatial window in
+    // Home Space; positioning it beside this panel is the user's/XR shell's
+    // job, not something startActivity lets the launching app dictate.
+    val browserUrlStore = remember { dev.aura.xr.net.BrowserUrlStore(context) }
+    var browserOverlayOpen by remember { mutableStateOf(false) }
+    var browserUrl by remember { mutableStateOf(browserUrlStore.load() ?: "") }
+
+    // A bare "192.168.1.x:3000" is the common case (a LAN dev server, almost
+    // never with a cert for its raw IP) — default those to http. Everything
+    // else (a real hostname like "youtube.com") defaults to https instead:
+    // the app's network_security_config.xml only allow-lists cleartext for a
+    // couple of dev hosts, so http to anything else is silently blocked
+    // (ERR_CLEARTEXT_NOT_PERMITTED) before any connection is even attempted —
+    // confirmed live, this is why "youtube.com" looked like "no internet".
+    fun normalizeBrowserUrl(rawUrl: String): String? {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) return null
+        if (Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://").containsMatchIn(trimmed)) return trimmed
+        val host = trimmed.substringBefore('/').substringBefore(':')
+        val looksLikeLan = host == "localhost" || host.endsWith(".local") ||
+            Regex("^\\d{1,3}(\\.\\d{1,3}){3}$").matches(host)
+        return if (looksLikeLan) "http://$trimmed" else "https://$trimmed"
+    }
+
+    // Renders in this app's own window (BrowserPanelContent's WebView) rather
+    // than launching Chrome as a separate Android activity — a separate
+    // Chrome window occludes/hides this app's other panels (Terminal in
+    // particular) in Home Space instead of sitting beside them.
+    fun openInAppBrowser(rawUrl: String) {
+        val normalized = normalizeBrowserUrl(rawUrl) ?: return
+        browserUrlStore.save(normalized)
+        browserUrl = normalized
+        browserOverlayOpen = false
+        activeView = "browser"
+    }
+
+    fun openInChrome(rawUrl: String) {
+        val normalized = normalizeBrowserUrl(rawUrl) ?: return
+        browserUrlStore.save(normalized)
+        browserUrl = normalized
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(normalized))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Right-half launch bounds — the standard Android freeform-windowing
+        // hint (setLaunchBounds), same mechanism Chromebooks/large-screen
+        // Android use for "open this app docked to a side". Home Space's
+        // multi-window layer honors it the same way any freeform host does;
+        // it's a request the launched activity/window manager can override
+        // (e.g. Chrome restoring its last size), not a placement guarantee —
+        // there's no Android API that gives the launcher a hard guarantee
+        // over another app's window.
+        val metrics = context.resources.displayMetrics
+        val bounds = android.graphics.Rect(metrics.widthPixels / 2, 0, metrics.widthPixels, metrics.heightPixels)
+        val options = android.app.ActivityOptions.makeBasic().apply { launchBounds = bounds }
+        try {
+            context.startActivity(intent.setPackage("com.android.chrome"), options.toBundle())
+        } catch (e: android.content.ActivityNotFoundException) {
+            // Chrome specifically isn't installed — fall back to whatever the
+            // system's default handler for http(s) is, rather than failing.
+            try {
+                context.startActivity(intent.setPackage(null), options.toBundle())
+            } catch (e2: android.content.ActivityNotFoundException) {
+                android.util.Log.w("AuraBridge", "openInChrome: no app can handle $normalized", e2)
+            }
+        }
+        browserOverlayOpen = false
+    }
+
+    // "Follow me" — Jetpack XR's app-side equivalent of the pin-to-headset
+    // button a Home Space window gets from the OS; this Full Space app renders
+    // its own panels instead of a system-managed window, so it never gets
+    // that automatically. Off by default: it re-poses the *entire* subspace
+    // root as one rigid block on every head move, fighting manual
+    // reposition/pin/resize — an opt-in for walking, not the default.
+    var followMeEnabled by remember { mutableStateOf(false) }
     var agentDetail by remember { mutableStateOf<dev.aura.xr.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
     // The one agent voice's "ask_agent" action talks to — like one running
@@ -270,7 +365,12 @@ fun AuraWorkspace(bridge: BridgeClient) {
     // created with; see modeIdFor.
     var voiceAgentModeId by remember { mutableStateOf("auto") }
     fun modeIdFor(choice: String): String? = when (choice) {
-        "auto" -> "auto"
+        // Claude Code's --permission-mode only accepts acceptEdits,
+        // bypassPermissions, default, plan (confirmed live — "auto" made every
+        // agent's first turn fail with "argument 'auto' is invalid"). acceptEdits
+        // is the closest real mode to the "auto-approve low-risk" copy this
+        // choice shows in VoiceAgentModeSelector.
+        "auto" -> "acceptEdits"
         "bypass" -> "bypassPermissions"
         else -> null // "manual" — Paseo's own default (ask every time)
     }
@@ -309,7 +409,6 @@ fun AuraWorkspace(bridge: BridgeClient) {
     // file search still goes through candidates/confidence, and a voice
     // agent-prompt lands in the text field for you to review and hit Send,
     // never fires straight into agent.prompt on its own.
-    val context = LocalContext.current
     val voiceRecognizer = remember { VoiceRecognizer(context) }
     var isListening by remember { mutableStateOf(false) }
     var voicePartial by remember { mutableStateOf("") }
@@ -358,6 +457,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
             onPartial = { text ->
                 voicePartial = text
                 if (mode == "agentPrompt") agentPromptText = text // live feedback right in the field being filled
+                if (mode == "browserUrl") browserUrl = dev.aura.xr.voice.normalizeSpokenAddress(text)
             },
             onResult = { text ->
                 android.util.Log.d("AuraVoice", "recognized ($mode): \"$text\"")
@@ -365,6 +465,10 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 when (mode) {
                     "fileSearch" -> bridge.voiceSearch(text)
                     "agentPrompt" -> agentPromptText = text
+                    // An address, not a sentence — "one nine two dot one six
+                    // eight..." needs the digit/symbol-word collapsing, not
+                    // the raw transcript.
+                    "browserUrl" -> browserUrl = dev.aura.xr.voice.normalizeSpokenAddress(text)
                     // Never dispatches straight from speech — always lands in
                     // the review card first so a misheard word can't fire a
                     // destructive command (spec §57's confirmation discipline,
@@ -407,6 +511,125 @@ fun AuraWorkspace(bridge: BridgeClient) {
      * hear me right", these cards answer "are you sure". The LLM only ever
      * classifies; it never bypasses this confirmation layer.
      */
+    /**
+     * Shared by ask_agent (with a task) and new_agent (without one) — both end up
+     * creating the same tmux-backed agent, just with a different first prompt.
+     */
+    fun startVoiceAgent(instruction: String?) {
+        activeView = "agents"
+        // A tmux session both the agent and the Terminal view share
+        // (docs/paseo-migration-plan.md follow-up) — created once,
+        // then just told about in every later prompt. See the
+        // instruction text below for exactly what this buys.
+        fun createAgentInTmux(terminalId: String) {
+            bridge.inputTerminal(terminalId, "tmux new -A -s aura-agent\n")
+            val prompt = """
+                You have a tmux session named "aura-agent" available, mirrored live
+                in this workspace's own Terminal view. Always run shell commands
+                through it instead of your default tool execution — that's what
+                makes output visible there, and what lets a long-running process
+                (a dev server, a watcher, …) keep running independently of this
+                conversation instead of dying with whatever tool call started it:
+                  tmux send-keys -t aura-agent "<command>" Enter
+                  tmux capture-pane -t aura-agent -p     # to read output back
+                To stop something, send a real interrupt inside the session
+                (tmux send-keys -t aura-agent C-c, or kill its pid) rather than
+                canceling your own tool call.
+
+                ${if (instruction != null) "Task: $instruction" else "No task yet — say a brief hello and wait for the next instruction."}
+            """.trimIndent()
+            bridge.createAgent(
+                provider = "claude",
+                cwd = ".",
+                prompt = prompt,
+                modeId = modeIdFor(voiceAgentModeId),
+                onCreated = { created ->
+                    voiceAgentId = created.agentId
+                    android.util.Log.d("AuraVoice", "started agent ${created.agentId} (tmux)${instruction?.let { " for \"$it\"" } ?: ""}")
+                },
+                onError = { android.util.Log.w("AuraVoice", "agent.create failed") },
+            )
+        }
+        val terminalId = voiceAgentTerminalId
+        if (terminalId != null) {
+            createAgentInTmux(terminalId)
+        } else {
+            bridge.createTerminal(
+                name = "aura-agent",
+                onCreated = { newTerminalId ->
+                    voiceAgentTerminalId = newTerminalId
+                    createAgentInTmux(newTerminalId)
+                },
+                onError = { error ->
+                    val message = error.optString("message", "Couldn't start the agent's terminal.")
+                    android.util.Log.w("AuraVoice", "terminal.create failed: $message (${error.optString("detail")})")
+                    voiceError = message
+                },
+            )
+        }
+    }
+
+    // ── Snip tool ────────────────────────────────────────────────────────
+    // "Snip" dock button: flatten the workspace into a screenshot, let the
+    // user crop it (two-hand pinch on the corner handles, or one hand on
+    // either), then hand it to whichever agent voice's ask_agent would talk
+    // to — same "one running conversation" target, so a snip is just another
+    // turn in that chat.
+    fun startSnip() {
+        snipScope.launch {
+            val bitmap = snipController.captureComposite()
+            if (bitmap == null) showToast("Nothing on screen to capture yet.") else snipBitmap = bitmap
+        }
+    }
+
+    // Opens an existing agent's card with the screenshot path sitting in the
+    // prompt box, unsent — same "review before it goes anywhere" rule every
+    // other voice-filled prompt in this app already follows, rather than
+    // firing a bare "look at this" turn with no actual instruction attached.
+    fun attachSnipToAgent(agent: dev.aura.xr.net.AgentInfo, message: String) {
+        voiceAgentId = agent.agentId
+        openAgentDetail(agent)
+        agentPromptText = message
+        activeView = "agents"
+    }
+
+    fun confirmSnip(cropRect: androidx.compose.ui.geometry.Rect) {
+        val source = snipBitmap ?: return
+        val left = cropRect.left.toInt().coerceIn(0, source.width - 1)
+        val top = cropRect.top.toInt().coerceIn(0, source.height - 1)
+        val right = cropRect.right.toInt().coerceIn(left + 1, source.width)
+        val bottom = cropRect.bottom.toInt().coerceIn(top + 1, source.height)
+        val cropped = android.graphics.Bitmap.createBitmap(source, left, top, right - left, bottom - top)
+        snipBitmap = null
+        snipUploading = true
+        val stream = java.io.ByteArrayOutputStream()
+        cropped.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+        val base64 = android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+        bridge.uploadSnip(
+            base64,
+            onResult = { path ->
+                snipUploading = false
+                val message = "Screenshot attached: $path"
+                // Never guess which of several running conversations a snip
+                // belongs to (spec §13's "never silently guess" discipline) —
+                // only auto-pick when there's exactly one candidate.
+                val active = agents.filter { it.status != "closed" }
+                when {
+                    active.isEmpty() -> startVoiceAgent(instruction = message)
+                    active.size == 1 -> attachSnipToAgent(active[0], message)
+                    else -> {
+                        snipPendingMessage = message
+                        snipPickerAgents = active
+                    }
+                }
+            },
+            onError = {
+                snipUploading = false
+                showToast("Could not upload that screenshot — check the bridge connection.")
+            },
+        )
+    }
+
     fun executeVoiceAction(action: dev.aura.xr.voice.VoiceAction) {
         android.util.Log.d("AuraVoice", "executing: $action")
         when (action) {
@@ -496,6 +719,20 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 }
             }
 
+            dev.aura.xr.voice.VoiceAction.NewAgent -> {
+                // Only actually spawn a fresh one when there's nothing already
+                // running — same "one voice agent conversation" model as
+                // ask_agent below; otherwise just surface the existing one.
+                val openTarget = agentDetail?.agent?.agentId
+                val reuseTarget = voiceAgentId?.takeIf { id -> agents.any { it.agentId == id && it.status != "closed" } }
+                val target = openTarget ?: reuseTarget
+                if (target != null) {
+                    activeView = "agents"
+                } else {
+                    startVoiceAgent(instruction = null)
+                }
+            }
+
             is dev.aura.xr.voice.VoiceAction.Search -> bridge.voiceSearch(action.query)
 
             is dev.aura.xr.voice.VoiceAction.RespondPermission -> {
@@ -527,52 +764,7 @@ fun AuraWorkspace(bridge: BridgeClient) {
                 if (target != null) {
                     bridge.sendAgentMessage(target, action.instruction)
                 } else {
-                    activeView = "agents"
-                    // A tmux session both the agent and the Terminal view share
-                    // (docs/paseo-migration-plan.md follow-up) — created once,
-                    // then just told about in every later prompt. See the
-                    // instruction text below for exactly what this buys.
-                    fun createAgentInTmux(terminalId: String) {
-                        bridge.inputTerminal(terminalId, "tmux new -A -s aura-agent\n")
-                        val prompt = """
-                            You have a tmux session named "aura-agent" available, mirrored live
-                            in this workspace's own Terminal view. Always run shell commands
-                            through it instead of your default tool execution — that's what
-                            makes output visible there, and what lets a long-running process
-                            (a dev server, a watcher, …) keep running independently of this
-                            conversation instead of dying with whatever tool call started it:
-                              tmux send-keys -t aura-agent "<command>" Enter
-                              tmux capture-pane -t aura-agent -p     # to read output back
-                            To stop something, send a real interrupt inside the session
-                            (tmux send-keys -t aura-agent C-c, or kill its pid) rather than
-                            canceling your own tool call.
-
-                            Task: ${action.instruction}
-                        """.trimIndent()
-                        bridge.createAgent(
-                            provider = "claude",
-                            cwd = ".",
-                            prompt = prompt,
-                            modeId = modeIdFor(voiceAgentModeId),
-                            onCreated = { created ->
-                                voiceAgentId = created.agentId
-                                android.util.Log.d("AuraVoice", "ask_agent: created agent ${created.agentId} (tmux) for \"${action.instruction}\"")
-                            },
-                            onError = { android.util.Log.w("AuraVoice", "ask_agent: agent.create failed") },
-                        )
-                    }
-                    val terminalId = voiceAgentTerminalId
-                    if (terminalId != null) {
-                        createAgentInTmux(terminalId)
-                    } else {
-                        bridge.createTerminal(
-                            name = "aura-agent",
-                            onCreated = { newTerminalId ->
-                                voiceAgentTerminalId = newTerminalId
-                                createAgentInTmux(newTerminalId)
-                            },
-                        )
-                    }
+                    startVoiceAgent(instruction = action.instruction)
                 }
             }
         }
@@ -590,23 +782,31 @@ fun AuraWorkspace(bridge: BridgeClient) {
         dev.aura.xr.voice.VoiceCommand.DiscardChanges -> dev.aura.xr.voice.VoiceAction.DiscardChanges
         dev.aura.xr.voice.VoiceCommand.NewTerminal -> dev.aura.xr.voice.VoiceAction.NewTerminal
         dev.aura.xr.voice.VoiceCommand.KillTerminal -> dev.aura.xr.voice.VoiceAction.KillTerminal
-        dev.aura.xr.voice.VoiceCommand.ArchiveAgent -> dev.aura.xr.voice.VoiceAction.ArchiveAgent
+        is dev.aura.xr.voice.VoiceCommand.ArchiveAgent -> dev.aura.xr.voice.VoiceAction.ArchiveAgent(target)
         is dev.aura.xr.voice.VoiceCommand.Search -> dev.aura.xr.voice.VoiceAction.Search(query)
+    }
+
+    // Bumped by the Settings panel's Reload button to force geminiConfigResult
+    // (and koogVoiceRouter below) to re-read aura-config.json — see
+    // net/GeminiConfigStore.kt and ui/SettingsPanelContent.kt.
+    var geminiConfigReloadKey by remember { mutableStateOf(0) }
+    val geminiConfigResult = remember(geminiConfigReloadKey) {
+        dev.aura.xr.net.GeminiConfigStore.load(context)
     }
 
     /**
      * Koog/Gemini router — null (and every call skipped) when no API key is
-     * configured (BuildConfig.GEMINI_API_KEY empty), so an un-keyed build
-     * degrades straight to the deterministic local router rather than making
-     * a doomed network call. Set the key with:
-     *   ./gradlew :app:assembleDebug -PbridgeUrl=... -PgeminiApiKey=AIza...
+     * configured, so an un-keyed build/device degrades straight to the
+     * deterministic local router rather than making a doomed network call.
+     * A key can come from either place, config file wins:
+     *   - on-device: Settings panel → aura-config.json (no rebuild needed)
+     *   - build-time: ./gradlew :app:assembleDebug -PgeminiApiKey=AIza...
      */
-    val koogVoiceRouter = remember {
-        if (BuildConfig.GEMINI_API_KEY.isBlank()) {
-            null
-        } else {
-            dev.aura.xr.voice.KoogVoiceRouter(BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL)
-        }
+    val koogVoiceRouter = remember(geminiConfigReloadKey) {
+        val fileConfig = (geminiConfigResult as? dev.aura.xr.net.GeminiConfigResult.Loaded)?.config
+        val apiKey = fileConfig?.apiKey?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_API_KEY
+        val model = fileConfig?.model?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_MODEL
+        if (apiKey.isBlank()) null else dev.aura.xr.voice.KoogVoiceRouter(apiKey, model)
     }
     var isRoutingVoiceCommand by remember { mutableStateOf(false) }
     val voiceScope = rememberCoroutineScope()
@@ -705,21 +905,78 @@ fun AuraWorkspace(bridge: BridgeClient) {
         }
     }
 
-    Subspace {
-        SpatialColumn {
+    val primaryLayout = rememberPanelLayoutState(layoutStore, "primary", 900f, 520f, layoutGeneration)
+    val panelOffset = primaryLayout.offset
+    val panelSize = primaryLayout.size
+
+    val xrSession = LocalSession.current
+    // FollowTarget.ArDevice needs Config.DeviceTrackingMode.SPATIAL enabled on
+    // the session — DISABLED by default (confirmed live: constructing it threw
+    // IllegalStateException before this). SPATIAL also needs the HEAD_TRACKING
+    // runtime permission on immersive devices (developer.android.com/develop/
+    // xr/jetpack-xr-sdk/arcore/device-pose) — request that first, then
+    // configure once permission is granted. FollowingSubspace below only ever
+    // fires once this has actually succeeded, so there's no race with the toggle.
+    var deviceTrackingReady by remember { mutableStateOf(false) }
+    // Bumped after a permission grant to retry configure() — LaunchedEffect
+    // below is keyed on this too, since granting permission doesn't otherwise
+    // change xrSession's identity and so wouldn't trigger a re-run on its own.
+    var headTrackingPermissionAttempt by remember { mutableStateOf(0) }
+    val headTrackingPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            headTrackingPermissionAttempt++
+        } else {
+            android.util.Log.w("AuraFollowMe", "HEAD_TRACKING permission denied — Follow Me can't work")
+        }
+    }
+    LaunchedEffect(xrSession, headTrackingPermissionAttempt) {
+        if (xrSession == null) return@LaunchedEffect
+        val granted = ContextCompat.checkSelfPermission(context, "android.permission.HEAD_TRACKING") ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            headTrackingPermission.launch("android.permission.HEAD_TRACKING")
+            return@LaunchedEffect
+        }
+        val result = xrSession.configure(
+            androidx.xr.runtime.Config.Builder(xrSession.config)
+                .setDeviceTracking(androidx.xr.runtime.DeviceTrackingMode.SPATIAL)
+                .build(),
+        )
+        deviceTrackingReady = result is androidx.xr.runtime.SessionConfigureSuccess
+        if (!deviceTrackingReady) {
+            android.util.Log.w("AuraFollowMe", "device tracking configure failed: $result")
+        }
+    }
+
+    // Factored out so both the plain Subspace and the "Follow me" FollowingSubspace
+    // below can render identical content — only the root wrapper differs.
+    @Composable
+    fun androidx.xr.compose.subspace.SpatialBoxScope.spatialContent() {
             // ── Agent strip — real Paseo agent.list, honestly empty if none ──
-            SpatialRow {
+            // All three rows share the main panel's horizontal/depth anchor.
+            // A 12 dp gap separates each accessory row from its visible edge.
+            SpatialRow(SubspaceModifier.offset(
+                x = panelOffset.x.dp,
+                y = (panelOffset.y + panelSize.height / 2f + 12f + 55f).dp,
+                z = panelOffset.z.dp,
+            )) {
                 if (agents.isEmpty()) {
-                    SpatialPanel(rememberPanelModifier(layoutStore, "agents.empty", 460f, 90f, 8.dp, layoutGeneration)) {
-                        AgentChipContent("—", "No agents running", AuraColors.Idle)
+                    SpatialPanel(
+                        SubspaceModifier.width(460.dp).height(110.dp).padding(horizontal = 8.dp),
+                        shape = SpatialRoundedCornerShape(CornerSize(AuraCorners.Card)),
+                    ) {
+                        SnipRegion(snipController, "agents", "empty") {
+                            AgentChipContent("—", "No agents running", AuraColors.Idle)
+                        }
                     }
                 } else {
                     for (agent in agents) {
                         androidx.compose.runtime.key(agent.agentId) {
                             SpatialPanel(
-                                rememberPanelModifier(layoutStore, "agent.${agent.agentId}", 220f, 110f, 8.dp, layoutGeneration),
+                                SubspaceModifier.width(220.dp).height(110.dp).padding(horizontal = 8.dp),
+                                shape = SpatialRoundedCornerShape(CornerSize(AuraCorners.Card)),
                             ) {
-                                Box(Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
+                                SnipRegion(snipController, "agents", agent.agentId, Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
                                     AgentChipContent(agent.label, agent.status, AuraColors.agentStatusColor(agent.status), agent.provider)
                                 }
                             }
@@ -729,17 +986,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
             }
 
             // ── Primary panel ──────────────────────────────────────────────
-            val primaryLayout = rememberPanelLayoutState(layoutStore, "primary", 900f, 520f, layoutGeneration)
-            SpatialPanel(primaryLayout.toModifier(12.dp)) {
+            SpatialPanel(primaryLayout.toModifier(0.dp), shape = SpatialRoundedCornerShape(CornerSize(AuraCorners.Panel))) {
+                SnipRegion(snipController, "primary", "main", Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
-                if (walkingMode) {
-                    dev.aura.xr.ui.WalkingModeContent(
-                        backendConnected = state.backendConnected,
-                        onExit = { walkingMode = false },
-                        onVoice = { requestVoiceCommand() },
-                        isListening = isListening,
-                    )
-                } else {
                 when (activeView) {
                     "terminal" -> TerminalPanelContent(
                         terminals = terminals,
@@ -797,8 +1046,18 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     "agents" -> AgentsPanelContent(
                         agents,
                         onSelect = { openAgentDetail(it) },
+                        onArchive = { agent ->
+                            bridge.archiveAgent(agent.agentId)
+                            if (voiceAgentId == agent.agentId) voiceAgentId = null
+                            if (agentDetail?.agent?.agentId == agent.agentId) agentDetail = null
+                        },
                         voiceAgentModeId = voiceAgentModeId,
                         onVoiceAgentModeChange = { voiceAgentModeId = it },
+                        history = agentHistory,
+                        historyHasMore = agentHistoryHasMore,
+                        onShowHistory = { bridge.refreshAgentHistory() },
+                        onLoadMoreHistory = { bridge.loadMoreAgentHistory() },
+                        onSelectHistory = { entry -> openAgentDetail(entry.toAgentInfo()) },
                     )
                     "permissions" -> PermissionsPanelContent(
                         permissions = permissions,
@@ -806,6 +1065,12 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         onRespond = { permission, behavior, selectedActionId ->
                             bridge.respondToPermission(permission, behavior, selectedActionId)
                         },
+                    )
+                    "settings" -> dev.aura.xr.ui.SettingsPanelContent(
+                        geminiResult = geminiConfigResult,
+                        buildKeyPresent = BuildConfig.GEMINI_API_KEY.isNotBlank(),
+                        configPath = dev.aura.xr.net.GeminiConfigStore.configFile(context).absolutePath,
+                        onReload = { geminiConfigReloadKey++ },
                     )
                     "diff" -> DiffPanelContent(
                         status = gitStatus,
@@ -945,6 +1210,11 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         conflict = branchConflict,
                         deleteConfirm = deleteConfirm,
                     )
+                    "browser" -> dev.aura.xr.ui.BrowserPanelContent(
+                        url = browserUrl,
+                        onChangeUrl = { browserOverlayOpen = true },
+                        onOpenInChrome = { openInChrome(browserUrl) },
+                    )
                     "remote" -> RemotePanelContent(
                         machines = machines,
                         connectingMachineId = connectingMachineId,
@@ -977,7 +1247,9 @@ fun AuraWorkspace(bridge: BridgeClient) {
                         onTogglePin = { primaryLayout.togglePinned() },
                         onBringCloser = { primaryLayout.nudgeDepth(-40f) },
                         onPushFarther = { primaryLayout.nudgeDepth(40f) },
-                        onEnterWalkingMode = { walkingMode = true },
+                        followMeEnabled = followMeEnabled,
+                        onToggleFollowMe = { followMeEnabled = !followMeEnabled },
+                        onEnterPip = onEnterPip,
                         pairingState = pairingState,
                         deviceName = pairingDeviceName,
                         onDeviceNameChange = { pairingDeviceName = it },
@@ -992,7 +1264,6 @@ fun AuraWorkspace(bridge: BridgeClient) {
                             bridge.beginPairing(pairingDeviceName)
                         },
                     )
-                }
                 }
                 // Voice search is reachable from any view (dock mic button
                 // below), so its overlay lives here rather than inside one
@@ -1096,36 +1367,112 @@ fun AuraWorkspace(bridge: BridgeClient) {
                     },
                     onDismiss = { bridge.closeRemoteBrowse() },
                 )
+                dev.aura.xr.ui.BrowserLaunchOverlay(
+                    visible = browserOverlayOpen,
+                    url = browserUrl,
+                    onUrlChange = { browserUrl = it },
+                    onOpen = { openInAppBrowser(browserUrl) },
+                    onDismiss = { browserOverlayOpen = false },
+                    isListeningForUrl = isListening && voiceMode == "browserUrl",
+                    onVoiceInput = { requestVoice("browserUrl") },
+                )
+                snipBitmap?.let { bitmap ->
+                    SnipCropOverlay(
+                        bitmap = bitmap,
+                        uploading = snipUploading,
+                        onConfirm = { rect -> confirmSnip(rect) },
+                        onCancel = { snipBitmap = null },
+                    )
+                }
+                snipPendingMessage?.let { message ->
+                    dev.aura.xr.ui.SnipAgentPickerOverlay(
+                        agents = snipPickerAgents,
+                        onSelect = { agent ->
+                            attachSnipToAgent(agent, message)
+                            snipPendingMessage = null
+                            snipPickerAgents = emptyList()
+                        },
+                        onDismiss = {
+                            snipPendingMessage = null
+                            snipPickerAgents = emptyList()
+                            showToast("Screenshot discarded — no agent selected.")
+                        },
+                    )
+                }
+                }
                 }
             }
 
-            // ── Quick dock (icons match the mockup's dock glyphs) ───────────
-            // Hidden in walking mode (spec §50) — the primary panel's own
-            // exit/voice controls are the only way back while it's active.
-            if (!walkingMode) {
-            SpatialRow {
-                for (
-                dock in listOf(
-                    Triple("▣", "Code", "code"),
-                    Triple("▤", "Terminal", "terminal"),
-                    Triple("±", "Diff", "diff"),
-                    Triple("⑂", "Git", "git"),
-                    Triple("◎", "Agents", "agents"),
-                    Triple("!", "Permissions", "permissions"),
-                    Triple("▥", "Remote", "remote"),
-                    Triple("🎤", "Voice", "voice"),
-                )
+            // ── Quick dock ────────────────────────────────────────────────
+            run {
+                // Follow the main panel's bottom edge, including live moves
+                // and resizes, rather than anchoring to a separate world pose.
+                SpatialPanel(
+                    SubspaceModifier.width(panelSize.width.dp).height(76.dp)
+                        .offset(
+                            x = panelOffset.x.dp,
+                            y = (panelOffset.y - panelSize.height / 2f - 12f - 38f).dp,
+                            z = panelOffset.z.dp,
+                        ),
+                    shape = SpatialRoundedCornerShape(CornerSize(AuraCorners.Control)),
                 ) {
-                    val (icon, label, id) = dock
-                    androidx.compose.runtime.key(id) {
-                        SpatialPanel(rememberPanelModifier(layoutStore, "dock.$id", 150f, 70f, 6.dp, layoutGeneration)) {
-                            DockButtonContent(icon, label, active = activeView == id) {
-                                if (id == "voice") requestVoiceCommand() else activeView = id
+                    SnipRegion(snipController, "dock", "main", Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((id, label) in listOf(
+                            // Only way back to the primary panel once you've
+                            // navigated elsewhere — that's where Follow Me,
+                            // Walking Mode, Pin, and pairing status all live,
+                            // and there was previously no dock entry back to it.
+                            "home" to "Home",
+                            "code" to "Code",
+                            "terminal" to "Terminal",
+                            "diff" to "Diff",
+                            "git" to "Git",
+                            "agents" to "Agents",
+                            "permissions" to "Permissions",
+                            "remote" to "Remote",
+                            "voice" to "Voice",
+                            "snip" to "Snip",
+                            "browser" to "Browser",
+                            "settings" to "Settings",
+                        )) {
+                            androidx.compose.runtime.key(id) {
+                                Box(Modifier.weight(1f)) {
+                                    DockButtonContent(id, label, active = activeView == id) {
+                                        when (id) {
+                                            "voice" -> requestVoiceCommand()
+                                            "snip" -> startSnip()
+                                            "browser" -> browserOverlayOpen = true
+                                            else -> activeView = id
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                    }
                 }
             }
+    }
+
+    if (followMeEnabled && xrSession != null && deviceTrackingReady) {
+        // Positional args, not named — androidx.xr.compose's public parameter
+        // names for this experimental alpha API aren't available offline.
+        // TrackedDimensions.All (full 6 DOF) explicitly, not the default —
+        // confirmed live that a translation-only default followed you walking
+        // forward but never re-faced you after a turn.
+        FollowingSubspace(
+            FollowTarget.ArDevice(xrSession),
+            FollowBehavior.Tight,
+            SubspaceModifier,
+            androidx.xr.compose.subspace.TrackedDimensions.All,
+        ) {
+            spatialContent()
+        }
+    } else {
+        Subspace {
+            SpatialBox {
+                spatialContent()
             }
         }
     }

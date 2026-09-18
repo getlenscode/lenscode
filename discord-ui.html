@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura — #general</title>
+<style>
+  :root {
+    --rail: #1e1f22;
+    --sidebar: #2b2d31;
+    --chat: #313338;
+    --members: #2b2d31;
+    --input: #383a40;
+    --hover: #35373c;
+    --active: #404249;
+    --text: #dbdee1;
+    --text-muted: #949ba4;
+    --text-bright: #f2f3f5;
+    --brand: #5865f2;
+    --green: #23a55a;
+    --yellow: #f0b232;
+    --red: #f23f43;
+    --link: #00a8fc;
+    --divider: #3f4147;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    display: flex;
+    font-family: "gg sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--chat);
+    overflow: hidden;
+  }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; }
+
+  /* ---------- server rail ---------- */
+
+  .rail {
+    width: 72px;
+    flex: 0 0 72px;
+    background: var(--rail);
+    padding: 12px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .rail::-webkit-scrollbar { display: none; }
+
+  .server {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--sidebar);
+    color: var(--text-bright);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-radius .15s ease, background .15s ease;
+    user-select: none;
+  }
+  .server:hover { border-radius: 16px; background: var(--brand); }
+  .server.active { border-radius: 16px; background: var(--brand); }
+
+  /* the white pill on the left edge */
+  .server::before {
+    content: "";
+    position: absolute;
+    left: -16px;
+    width: 4px;
+    height: 8px;
+    border-radius: 0 4px 4px 0;
+    background: var(--text-bright);
+    opacity: 0;
+    transform: scaleY(.4);
+    transition: opacity .15s ease, transform .15s ease, height .15s ease;
+  }
+  .server:hover::before { opacity: 1; height: 20px; transform: scaleY(1); }
+  .server.active::before { opacity: 1; height: 40px; transform: scaleY(1); }
+
+  .server.home { background: var(--brand); border-radius: 16px; }
+  .server.add { color: var(--green); font-size: 24px; font-weight: 400; }
+  .server.add:hover { background: var(--green); color: #fff; }
+
+  .rail-divider {
+    width: 32px;
+    height: 2px;
+    background: var(--divider);
+    border-radius: 1px;
+    margin: 4px 0;
+    flex: none;
+  }
+
+  /* ---------- channel sidebar ---------- */
+
+  .sidebar {
+    width: 240px;
+    flex: 0 0 240px;
+    background: var(--sidebar);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .guild-header {
+    height: 48px;
+    flex: none;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-bright);
+    box-shadow: 0 1px 0 rgba(0,0,0,.2), 0 1.5px 0 rgba(0,0,0,.05);
+    cursor: pointer;
+  }
+  .guild-header:hover { background: var(--hover); }
+  .guild-header .chevron { color: var(--text-muted); font-size: 12px; }
+
+  .channels {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .category {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 16px 8px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .category:hover { color: var(--text-bright); }
+  .category .caret { font-size: 10px; }
+
+  .channel {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 8px;
+    margin-bottom: 2px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+  }
+  .channel:hover { background: var(--hover); color: var(--text); }
+  .channel.active { background: var(--active); color: var(--text-bright); }
+  .channel .glyph { font-size: 20px; color: #80848e; font-weight: 400; }
+  .channel .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel.unread { color: var(--text-bright); font-weight: 600; }
+  .badge {
+    background: var(--red);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    padding: 0 6px;
+    min-width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  /* user panel */
+  .user-panel {
+    height: 52px;
+    flex: none;
+    background: #232428;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .user-panel .meta { flex: 1; min-width: 0; line-height: 1.2; }
+  .user-panel .uname { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+  .user-panel .utag { font-size: 12px; color: var(--text-muted); }
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font-size: 16px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--hover); }
+
+  .avatar {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .avatar.lg { width: 40px; height: 40px; font-size: 15px; }
+  .avatar .status {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 3px solid var(--sidebar);
+    background: var(--green);
+  }
+  .avatar .status.idle { background: var(--yellow); }
+  .avatar .status.dnd { background: var(--red); }
+  .avatar .status.offline { background: #80848e; }
+
+  /* ---------- chat column ---------- */
+
+  .chat {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--chat);
+  }
+
+  .chat-header {
+    height: 48px;
+    flex: none;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.2), 0 1.5px 0 rgba(0,0,0,.05);
+    z-index: 1;
+  }
+  .chat-header .glyph { font-size: 24px; color: #80848e; }
+  .chat-header .title { font-weight: 600; color: var(--text-bright); }
+  .chat-header .topic {
+    color: var(--text-muted);
+    font-size: 14px;
+    padding-left: 16px;
+    margin-left: 8px;
+    border-left: 1px solid var(--divider);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chat-header .spacer { flex: 1; }
+
+  .search {
+    width: 144px;
+    height: 24px;
+    background: var(--rail);
+    border: 0;
+    border-radius: 4px;
+    padding: 0 8px;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .search::placeholder { color: var(--text-muted); }
+  .search:focus { width: 240px; outline: none; transition: width .2s ease; }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 0 24px;
+  }
+
+  .channel-intro { padding: 16px 16px 8px; }
+  .channel-intro .blob {
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    background: var(--input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  .channel-intro h1 { font-size: 32px; margin: 0 0 8px; color: var(--text-bright); }
+  .channel-intro p { margin: 0; color: var(--text-muted); font-size: 16px; }
+
+  .divider-date {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 16px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .divider-date::before, .divider-date::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--divider);
+  }
+
+  .msg {
+    display: flex;
+    gap: 16px;
+    padding: 2px 48px 2px 16px;
+    position: relative;
+  }
+  .msg:hover { background: #2e3035; }
+  .msg.grouped { margin-top: 0; }
+  .msg.start { margin-top: 17px; }
+
+  .msg .gutter {
+    width: 40px;
+    flex: none;
+    display: flex;
+    justify-content: center;
+  }
+  .msg .gutter .ts {
+    display: none;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 22px;
+  }
+  .msg.grouped:hover .gutter .ts { display: block; }
+
+  .msg .body { flex: 1; min-width: 0; }
+  .msg .head { display: flex; align-items: baseline; gap: 8px; }
+  .msg .author { font-size: 16px; font-weight: 500; color: var(--text-bright); cursor: pointer; }
+  .msg .author:hover { text-decoration: underline; }
+  .msg .stamp { font-size: 12px; color: var(--text-muted); }
+  .msg .tag {
+    background: var(--brand);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 3px;
+    padding: 1px 4px;
+    text-transform: uppercase;
+  }
+  .msg .content {
+    font-size: 16px;
+    line-height: 1.375;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg .content a { color: var(--link); text-decoration: none; }
+  .msg .content a:hover { text-decoration: underline; }
+  .msg .content code {
+    background: var(--rail);
+    border-radius: 3px;
+    padding: 1px 3px;
+    font-family: Consolas, "Andale Mono WT", monospace;
+    font-size: 14px;
+  }
+  .msg .content pre {
+    background: #2b2d31;
+    border: 1px solid var(--rail);
+    border-radius: 4px;
+    padding: 8px;
+    margin: 6px 0 0;
+    overflow-x: auto;
+    font-family: Consolas, "Andale Mono WT", monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #b5bac1;
+  }
+  .mention {
+    background: rgba(88,101,242,.3);
+    color: #c9cdfb;
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mention:hover { background: var(--brand); color: #fff; }
+
+  .reactions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+  .reaction {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid transparent;
+    font-size: 14px;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .reaction:hover { border-color: #4e5058; }
+  .reaction.mine {
+    background: rgba(88,101,242,.15);
+    border-color: var(--brand);
+    color: #c9cdfb;
+  }
+  .reaction .count { font-size: 13px; font-weight: 600; }
+
+  .msg-actions {
+    position: absolute;
+    top: -16px;
+    right: 16px;
+    display: none;
+    background: var(--sidebar);
+    border: 1px solid rgba(0,0,0,.2);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .msg:hover .msg-actions { display: flex; }
+  .msg-actions button {
+    width: 32px;
+    height: 32px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .msg-actions button:hover { background: var(--hover); color: var(--text-bright); }
+
+  /* composer */
+  .composer { flex: none; padding: 0 16px 24px; }
+  .composer-inner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--input);
+    border-radius: 8px;
+    padding: 0 16px;
+  }
+  .composer-inner .plus {
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border: 0;
+    border-radius: 50%;
+    background: var(--text-muted);
+    color: var(--input);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .composer-inner .plus:hover { background: var(--text-bright); }
+  .composer-inner input {
+    flex: 1;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 16px;
+    font-family: inherit;
+  }
+  .composer-inner input:focus { outline: none; }
+  .composer-inner input::placeholder { color: var(--text-muted); }
+  .composer-inner .tools { display: flex; gap: 8px; color: var(--text-muted); font-size: 18px; }
+  .composer-inner .tools span { cursor: pointer; }
+  .composer-inner .tools span:hover { color: var(--text-bright); }
+
+  .typing {
+    height: 24px;
+    font-size: 13px;
+    color: var(--text);
+    padding: 2px 4px 0;
+  }
+  .typing strong { font-weight: 600; }
+
+  /* ---------- member list ---------- */
+
+  .members {
+    width: 240px;
+    flex: 0 0 240px;
+    background: var(--members);
+    overflow-y: auto;
+    padding: 16px 8px;
+  }
+  .members h2 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+    color: var(--text-muted);
+    margin: 16px 0 4px 8px;
+  }
+  .members h2:first-child { margin-top: 0; }
+  .member {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 42px;
+    padding: 0 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .member:hover { background: var(--hover); }
+  .member .avatar .status { border-color: var(--members); }
+  .member:hover .avatar .status { border-color: var(--hover); }
+  .member .who { min-width: 0; line-height: 1.2; }
+  .member .mname {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .member.offline { opacity: .3; }
+  .member .activity { font-size: 12px; color: var(--text-muted); }
+
+  @media (max-width: 1024px) { .members { display: none; } }
+  @media (max-width: 720px) { .sidebar { flex: 0 0 200px; width: 200px; } }
+</style>
+</head>
+<body>
+
+<!-- ============ server rail ============ -->
+<nav class="rail">
+  <div class="server home" title="Direct Messages">◈</div>
+  <div class="rail-divider"></div>
+  <div class="server active" style="background:#5865f2" title="Aura XR">AX</div>
+  <div class="server" style="background:#3ba55c" title="Rust Nomicon">RN</div>
+  <div class="server" style="background:#e67e22" title="Homelab">HL</div>
+  <div class="server" style="background:#9b59b6" title="Blender Guild">BG</div>
+  <div class="server" title="Kernel Hackers">KH</div>
+  <div class="rail-divider"></div>
+  <div class="server add" title="Add a Server">+</div>
+</nav>
+
+<!-- ============ channel sidebar ============ -->
+<aside class="sidebar">
+  <header class="guild-header">
+    <span>Aura XR</span>
+    <span class="chevron">▾</span>
+  </header>
+
+  <div class="channels">
+    <div class="category"><span class="caret">▾</span> Information</div>
+    <div class="channel"><span class="glyph">#</span><span class="name">welcome</span></div>
+    <div class="channel"><span class="glyph">#</span><span class="name">announcements</span></div>
+    <div class="channel"><span class="glyph">#</span><span class="name">rules</span></div>
+
+    <div class="category"><span class="caret">▾</span> Text Channels</div>
+    <div class="channel active"><span class="glyph">#</span><span class="name">general</span></div>
+    <div class="channel unread"><span class="glyph">#</span><span class="name">dev-log</span><span class="badge">3</span></div>
+    <div class="channel"><span class="glyph">#</span><span class="name">design</span></div>
+    <div class="channel"><span class="glyph">#</span><span class="name">bug-reports</span></div>
+    <div class="channel"><span class="glyph">#</span><span class="name">off-topic</span></div>
+    <div class="channel"><span class="glyph">🔒</span><span class="name">core-team</span></div>
+
+    <div class="category"><span class="caret">▾</span> Voice Channels</div>
+    <div class="channel"><span class="glyph">🔊</span><span class="name">Lounge</span></div>
+    <div class="channel"><span class="glyph">🔊</span><span class="name">Pair Programming</span></div>
+    <div class="channel"><span class="glyph">🔊</span><span class="name">AFK</span></div>
+  </div>
+
+  <div class="user-panel">
+    <div class="avatar" style="background:#5865f2">RC<span class="status"></span></div>
+    <div class="meta">
+      <div class="uname">rushi</div>
+      <div class="utag">Online</div>
+    </div>
+    <button class="icon-btn" title="Mute">🎙</button>
+    <button class="icon-btn" title="Deafen">🎧</button>
+    <button class="icon-btn" title="User Settings">⚙</button>
+  </div>
+</aside>
+
+<!-- ============ chat ============ -->
+<main class="chat">
+  <header class="chat-header">
+    <span class="glyph">#</span>
+    <span class="title">general</span>
+    <span class="topic">Everything about the Aura headset client — keep bug reports in #bug-reports</span>
+    <span class="spacer"></span>
+    <input class="search" type="text" placeholder="Search">
+    <button class="icon-btn" title="Pinned Messages">📌</button>
+    <button class="icon-btn" title="Member List">👥</button>
+    <button class="icon-btn" title="Inbox">📥</button>
+  </header>
+
+  <div class="messages" id="messages">
+
+    <div class="channel-intro">
+      <div class="blob">#</div>
+      <h1>Welcome to #general!</h1>
+      <p>This is the start of the #general channel.</p>
+    </div>
+
+    <div class="divider-date">September 7, 2026</div>
+
+    <div class="msg start">
+      <div class="gutter"><div class="avatar" style="background:#e91e63">MK</div></div>
+      <div class="body">
+        <div class="head">
+          <span class="author" style="color:#e91e63">mika</span>
+          <span class="stamp">Today at 9:14 AM</span>
+        </div>
+        <div class="content">morning — did anyone else see the passthrough flicker on the last build?</div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>
+    </div>
+
+    <div class="msg grouped">
+      <div class="gutter"><span class="ts">9:15 AM</span></div>
+      <div class="body">
+        <div class="content">it only happens after the dock animation finishes, so I think it's the compositor layer swap</div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>
+    </div>
+
+    <div class="msg start">
+      <div class="gutter"><div class="avatar" style="background:#3ba55c">TN</div></div>
+      <div class="body">
+        <div class="head">
+          <span class="author" style="color:#3ba55c">tanner</span>
+          <span class="stamp">Today at 9:22 AM</span>
+        </div>
+        <div class="content">yep, reproduced. <span class="mention">@mika</span> it's the <code>SurfaceControl</code> transaction not being applied in the same frame. Fix is a one-liner:</div>
+        <pre>tx.setEarlyWakeupStart()
+  .setLayer(dock, Z_DOCK)
+  .apply(<span style="color:#c586c0">true</span>) <span style="color:#6a9955">// sync</span></pre>
+        <div class="reactions">
+          <div class="reaction mine">🔥 <span class="count">4</span></div>
+          <div class="reaction">🙏 <span class="count">2</span></div>
+        </div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>
+    </div>
+
+    <div class="msg start">
+      <div class="gutter"><div class="avatar" style="background:#5865f2">AB</div></div>
+      <div class="body">
+        <div class="head">
+          <span class="author" style="color:#5865f2">aura-bot</span>
+          <span class="tag">Bot</span>
+          <span class="stamp">Today at 9:23 AM</span>
+        </div>
+        <div class="content">Build <a href="#">#2841</a> passed on <code>paseo</code> — 214 tests, 0 failures, 38s.</div>
+        <div class="reactions">
+          <div class="reaction">✅ <span class="count">7</span></div>
+        </div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>
+    </div>
+
+    <div class="msg start">
+      <div class="gutter"><div class="avatar" style="background:#faa61a">JD</div></div>
+      <div class="body">
+        <div class="head">
+          <span class="author" style="color:#faa61a">jules</span>
+          <span class="stamp">Today at 9:40 AM</span>
+        </div>
+        <div class="content">shipping the new settings panel today. <span class="mention">@everyone</span> please sanity check the battery indicator on device before I tag the release 🙂</div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>
+    </div>
+
+    <div class="msg grouped">
+      <div class="gutter"><span class="ts">9:41 AM</span></div>
+      <div class="body">
+        <div class="content">screenshots in <a href="#">#design</a> if you want the before/after</div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>
+    </div>
+
+  </div>
+
+  <div class="composer">
+    <div class="composer-inner">
+      <button class="plus" title="Upload a file">+</button>
+      <input id="composer-input" type="text" placeholder="Message #general" autocomplete="off">
+      <div class="tools">
+        <span title="Gift">🎁</span>
+        <span title="GIF">🖼</span>
+        <span title="Sticker">🏷</span>
+        <span title="Emoji">😀</span>
+      </div>
+    </div>
+    <div class="typing"><strong>mika</strong> is typing…</div>
+  </div>
+</main>
+
+<!-- ============ member list ============ -->
+<aside class="members">
+  <h2>Online — 5</h2>
+
+  <div class="member">
+    <div class="avatar" style="background:#faa61a">JD<span class="status"></span></div>
+    <div class="who">
+      <div class="mname" style="color:#faa61a">jules</div>
+      <div class="activity">Playing Half-Life: Alyx</div>
+    </div>
+  </div>
+
+  <div class="member">
+    <div class="avatar" style="background:#e91e63">MK<span class="status idle"></span></div>
+    <div class="who"><div class="mname" style="color:#e91e63">mika</div></div>
+  </div>
+
+  <div class="member">
+    <div class="avatar" style="background:#3ba55c">TN<span class="status"></span></div>
+    <div class="who"><div class="mname" style="color:#3ba55c">tanner</div></div>
+  </div>
+
+  <div class="member">
+    <div class="avatar" style="background:#5865f2">RC<span class="status"></span></div>
+    <div class="who"><div class="mname">rushi</div></div>
+  </div>
+
+  <div class="member">
+    <div class="avatar" style="background:#5865f2">AB<span class="status dnd"></span></div>
+    <div class="who"><div class="mname" style="color:#5865f2">aura-bot</div></div>
+  </div>
+
+  <h2>Offline — 2</h2>
+
+  <div class="member offline">
+    <div class="avatar" style="background:#9b59b6">SV<span class="status offline"></span></div>
+    <div class="who"><div class="mname">sven</div></div>
+  </div>
+
+  <div class="member offline">
+    <div class="avatar" style="background:#80848e">PR<span class="status offline"></span></div>
+    <div class="who"><div class="mname">priya</div></div>
+  </div>
+</aside>
+
+<script>
+  // channel switching
+  const channels = document.querySelectorAll('.channel');
+  const headerTitle = document.querySelector('.chat-header .title');
+  const headerGlyph = document.querySelector('.chat-header .glyph');
+  const input = document.getElementById('composer-input');
+
+  channels.forEach(ch => ch.addEventListener('click', () => {
+    const glyph = ch.querySelector('.glyph').textContent;
+    if (glyph === '🔊') return; // voice channels don't change the view
+    channels.forEach(c => c.classList.remove('active'));
+    ch.classList.add('active');
+    ch.classList.remove('unread');
+    ch.querySelector('.badge')?.remove();
+    const name = ch.querySelector('.name').textContent;
+    headerTitle.textContent = name;
+    headerGlyph.textContent = glyph;
+    input.placeholder = 'Message #' + name;
+  }));
+
+  // server switching
+  document.querySelectorAll('.server').forEach(s => s.addEventListener('click', () => {
+    if (s.classList.contains('add') || s.classList.contains('home')) return;
+    document.querySelectorAll('.server').forEach(x => x.classList.remove('active'));
+    s.classList.add('active');
+  }));
+
+  // reactions toggle
+  document.addEventListener('click', e => {
+    const r = e.target.closest('.reaction');
+    if (!r) return;
+    const count = r.querySelector('.count');
+    const mine = r.classList.toggle('mine');
+    count.textContent = Number(count.textContent) + (mine ? 1 : -1);
+  });
+
+  // sending a message
+  const list = document.getElementById('messages');
+  input.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const el = document.createElement('div');
+    el.className = 'msg start';
+    el.innerHTML = `
+      <div class="gutter"><div class="avatar" style="background:#5865f2">RC</div></div>
+      <div class="body">
+        <div class="head">
+          <span class="author">rushi</span>
+          <span class="stamp">Today at ${time}</span>
+        </div>
+        <div class="content"></div>
+      </div>
+      <div class="msg-actions"><button>😀</button><button>↩</button><button>⋯</button></div>`;
+    el.querySelector('.content').textContent = input.value;
+    list.appendChild(el);
+    input.value = '';
+    list.scrollTop = list.scrollHeight;
+  });
+
+  list.scrollTop = list.scrollHeight;
+</script>
+</body>
+</html>

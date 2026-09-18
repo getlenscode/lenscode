@@ -319,6 +319,22 @@ export const AgentListRequest = z.object({
   ...machineScope,
 });
 
+/**
+ * Archived/closed agents — `agent.list` only ever returns live ones, so
+ * without this an archived agent disappears from the client entirely even
+ * though Paseo still has its full history (`daemon.fetchAgentHistory`,
+ * which is what Paseo Desktop's own History view is built on).
+ */
+export const AgentHistoryRequest = z.object({
+  ...requestBase,
+  type: z.literal("agent.history"),
+  search: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+  /** From a previous agent.history response's nextCursor. */
+  cursor: z.string().optional(),
+  ...machineScope,
+});
+
 export const AgentCreateRequest = z.object({
   ...requestBase,
   type: z.literal("agent.create"),
@@ -466,6 +482,22 @@ export const MachineDisconnectRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Snip tool — XR client crops a screenshot of its own workspace locally
+// (SceneCore's spatial compositor gives no server-side capture surface to
+// grab), then hands the flattened PNG to the bridge. agent.send has no image
+// field, so this writes the file to disk on the bridge's own machine and
+// hands the client back an absolute path to reference in a normal text
+// prompt — Claude Code's Read tool already handles image files directly.
+// ---------------------------------------------------------------------------
+
+export const SnipUploadRequest = z.object({
+  ...requestBase,
+  type: z.literal("snip.upload"),
+  /** Base64-encoded PNG bytes of the cropped screenshot. */
+  pngBase64: z.string().min(1),
+});
+
+// ---------------------------------------------------------------------------
 // Request union / responses / events
 // ---------------------------------------------------------------------------
 
@@ -497,6 +529,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   MachineConnectRequest,
   MachineDisconnectRequest,
   AgentListRequest,
+  AgentHistoryRequest,
   AgentCreateRequest,
   AgentSendRequest,
   AgentTimelineRequest,
@@ -507,6 +540,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   WorktreeListRequest,
   WorktreeOpenRequest,
   WorktreeRemoveRequest,
+  SnipUploadRequest,
 ]);
 export type XrRequest = z.infer<typeof XrRequest>;
 
@@ -583,6 +617,19 @@ export const AgentSummary = z.object({
   costUsd: z.number().nullable(),
 });
 export type AgentSummary = z.infer<typeof AgentSummary>;
+
+/** One archived/closed agent.history entry — read-only (no pending permissions/cost, nothing to act on). */
+export const AgentHistorySummary = z.object({
+  agentId: z.string(),
+  provider: z.string(),
+  model: z.string().nullable(),
+  title: z.string().nullable(),
+  status: AgentStatus,
+  cwd: z.string(),
+  createdAt: z.string(),
+  archivedAt: z.string().nullable(),
+});
+export type AgentHistorySummary = z.infer<typeof AgentHistorySummary>;
 
 /**
  * One entry in an agent's activity feed — normalized from Paseo's timeline
