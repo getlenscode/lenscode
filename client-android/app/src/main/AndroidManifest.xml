@@ -8,6 +8,9 @@
          this runtime permission on immersive devices — see
          developer.android.com/develop/xr/jetpack-xr-sdk/arcore/device-pose. -->
     <uses-permission android:name="android.permission.HEAD_TRACKING" />
+    <!-- Home view weather HUD — coarse is enough for a current-conditions
+         lookup, no need for GPS-grade precision. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- XR-only app: request the immersive feature. -->
     <uses-feature android:name="android.software.xr.immersive" android:required="true" />
@@ -25,8 +28,9 @@
     </queries>
 
     <application
-        android:label="Aura Workspace"
-        android:theme="@style/Theme.AuraXr"
+        android:label="LensCode"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.LensCodeXr"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
 

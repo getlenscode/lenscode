@@ -1,5 +1,5 @@
 {
-  "name": "@aura/protocol",
+  "name": "@lenscode/protocol",
   "version": "0.1.0",
   "description": "",
   "main": "dist/index.js",

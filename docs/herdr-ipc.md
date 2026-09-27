@@ -24,7 +24,7 @@ Regenerate after Herdr updates; the schema carries `protocol` (currently **20**)
   session/server starts on `herdr` launch or `herdr server`. The bridge must surface
   "Herdr not running" as a clear error state, not a crash.
 
-## Method groups relevant to Aura (125 methods total; key ones)
+## Method groups relevant to LensCode (125 methods total; key ones)
 
 | Spec need | Herdr methods |
 |---|---|
@@ -42,7 +42,7 @@ Regenerate after Herdr updates; the schema carries `protocol` (currently **20**)
 | Notifications | `notification.show` |
 | Health | `ping` |
 
-## Implications for aura-bridge
+## Implications for lenscode-bridge
 
 1. **Transparent proxy is viable** (spec §69–70): the XR `herdr.request` message can wrap
    the native envelope unchanged; responses/events forward as-is after permission checks.
@@ -59,6 +59,6 @@ Regenerate after Herdr updates; the schema carries `protocol` (currently **20**)
 
 ## Security notes
 
-- The raw socket must never be network-exposed (spec §6). Only aura-bridge talks to it.
+- The raw socket must never be network-exposed (spec §6). Only lenscode-bridge talks to it.
 - `server.stop`, `server.live_handoff`, `plugin.*`, `integration.*` should be **blocked**
   at the bridge's method allowlist — the XR client has no business calling them.

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Single-PC setup for Aura Workspace.
+# Single-PC setup for LensCode.
 #
 # Use this when there is only one machine (e.g. "doraemon") and you want it
-# to act as the local aura-bridge + Paseo host, with the phone/emulator
+# to act as the local lenscode-bridge + Paseo host, with the phone/emulator
 # connecting to it directly over the LAN — no ~/.ssh/config, no Remote tab,
 # no SSH tunnel. See docs/architecture.md for why the SSH/Remote path exists
 # at all and why the phone can't replace it.
 #
 # What this script does:
 #   1. Checks that `paseo` is installed and that its daemon is reachable.
-#   2. Installs aura-bridge's dependencies (protocol package + aura-bridge).
+#   2. Installs lenscode-bridge's dependencies (protocol package + lenscode-bridge).
 #   3. Prints this machine's LAN IP and the exact Android build command to
 #      point the app at it.
-#   4. Starts aura-bridge in the foreground (npm run dev).
+#   4. Starts lenscode-bridge in the foreground (npm run dev).
 #
 # It does not install Paseo itself — installation differs by Paseo version;
 # follow your installed version's daemon setup instructions.
@@ -20,9 +20,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BRIDGE_DIR="$REPO_ROOT/aura-bridge"
-PASEO_URL="${AURA_PASEO_URL:-ws://127.0.0.1:6767/ws}"
-BRIDGE_PORT="${AURA_PORT:-8137}"
+BRIDGE_DIR="$REPO_ROOT/lenscode-bridge"
+PASEO_URL="${LENSCODE_PASEO_URL:-ws://127.0.0.1:6767/ws}"
+BRIDGE_PORT="${LENSCODE_PORT:-8137}"
 
 info()  { printf '\033[1;34m[setup]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[setup]\033[0m %s\n' "$*"; }
@@ -41,12 +41,12 @@ if command -v nc >/dev/null 2>&1 && nc -z "${PASEO_HOST_PORT%%:*}" "${PASEO_HOST
 else
   warn "local Paseo daemon not detected on $PASEO_HOST_PORT."
   warn "Start it first, e.g.:  paseo daemon"
-  warn "(continuing — aura-bridge will retry the connection itself)"
+  warn "(continuing — lenscode-bridge will retry the connection itself)"
 fi
 
 # --- 2. Install deps ----------------------------------------------------------
 
-info "installing dependencies (protocol, aura-bridge)..."
+info "installing dependencies (protocol, lenscode-bridge)..."
 ( cd "$REPO_ROOT/protocol" && npm install --silent )
 ( cd "$BRIDGE_DIR" && npm install --silent )
 
@@ -68,9 +68,9 @@ echo
 info "phone and this PC must be on the same LAN/Wi-Fi for that address to resolve."
 echo
 
-# --- 4. Run aura-bridge -------------------------------------------------------
+# --- 4. Run lenscode-bridge -------------------------------------------------------
 
-info "starting aura-bridge (AURA_PORT=$BRIDGE_PORT, AURA_PASEO_URL=$PASEO_URL)..."
+info "starting lenscode-bridge (LENSCODE_PORT=$BRIDGE_PORT, LENSCODE_PASEO_URL=$PASEO_URL)..."
 info "leave this running; Ctrl+C to stop."
 cd "$BRIDGE_DIR"
-AURA_PORT="$BRIDGE_PORT" AURA_PASEO_URL="$PASEO_URL" npm run dev
+LENSCODE_PORT="$BRIDGE_PORT" LENSCODE_PASEO_URL="$PASEO_URL" npm run dev

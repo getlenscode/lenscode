@@ -9,10 +9,10 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
-namespace Aura.Net
+namespace LensCode.Net
 {
     /// <summary>
-    /// WebSocket connection to aura-bridge speaking XR protocol v1.
+    /// WebSocket connection to lenscode-bridge speaking XR protocol v1.
     /// Requests correlate on id; events surface via OnEvent on the main thread.
     /// Reconnects with backoff; the backend is authoritative, so every
     /// (re)connect triggers a fresh hello + snapshot cycle by the owner.
@@ -104,7 +104,7 @@ namespace Aura.Net
             }
             catch (JsonReaderException)
             {
-                Debug.LogWarning($"aura-bridge sent unparseable frame: {json[..Math.Min(120, json.Length)]}");
+                Debug.LogWarning($"lenscode-bridge sent unparseable frame: {json[..Math.Min(120, json.Length)]}");
                 return;
             }
 

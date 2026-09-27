@@ -1,6 +1,6 @@
-# Aura Workspace
+# LensCode
 
-Mixed-reality agent command center for Android XR glasses (XREAL Aura-class).
+Mixed-reality agent command center for Android XR glasses (XREAL LensCode-class).
 A spatial control surface for coding agents (Claude, Codex, Hermes, Pi), terminals,
 Git branches/worktrees/diffs, and remote SSH machines — driven by gaze + pinch + voice.
 
@@ -10,7 +10,7 @@ Git branches/worktrees/diffs, and remote SSH machines — driven by gaze + pinch
 Android XR client (Jetpack XR / Compose for XR)   → client-android/
    │  WSS/HTTPS (TLS, paired devices only)
    ▼
-aura-bridge (auth, pairing, files, search, Git, Paseo session adapter)  → aura-bridge/
+lenscode-bridge (auth, pairing, files, search, Git, Paseo session adapter)  → lenscode-bridge/
    │  WebSocket (@getpaseo/client)
    ▼
 Paseo daemon (terminals, agents, workspaces, worktrees — authoritative)
@@ -26,14 +26,16 @@ the retired Herdr integration this replaced.
 
 - `client-android/` — Jetpack XR (Compose for XR) Android XR client
 - `client-unity/` — archived Unity 6 + OpenXR client (no longer developed)
-- `aura-bridge/` — Node/TypeScript XR gateway, now a Paseo session adapter
-- `protocol/` — XR protocol v2 schema (single source of truth; generates TS + C# types)
+- `lenscode-bridge/` — Node/TypeScript XR gateway, now a Paseo session adapter
+- `protocol/` — XR protocol v3 schema (single source of truth; generates TS + C# types)
 - `docs/` — design notes, migration plan, QA scenarios
+- `website/` — product story and technical documentation site
 
 ## References
 
 - [Try it: remote projects, AI coding, and switching machines](docs/try-it-workflows.md) — click-by-click exercises and example prompts.
 - [Remote setup and current limits](docs/remote-setup-and-limits.md) — prerequisites, supported paths, and troubleshooting.
+- [Website competitive analysis](docs/website-competitive-analysis.md) — product, documentation, and positioning patterns reviewed before the site build.
 - `../Project Specifications Herdr XR.md` — full product specification
 - `../MR App Ideas for Productivity.html` — visual mockup of the six primary views
 - `docs/paseo-migration-plan.md` — Herdr → Paseo migration plan and phase status

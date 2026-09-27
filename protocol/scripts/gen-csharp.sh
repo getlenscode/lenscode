@@ -19,7 +19,7 @@ rm -f "$OUT_DIR"/*.cs
 npx --yes quicktype \
   --src-lang schema \
   --lang cs \
-  --namespace Aura.Protocol \
+  --namespace LensCode.Protocol \
   --framework NewtonSoft \
   --features attributes-only \
   --out "$OUT_DIR/XrProtocol.cs" \

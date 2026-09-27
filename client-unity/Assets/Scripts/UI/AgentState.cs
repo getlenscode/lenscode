@@ -1,4 +1,4 @@
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>The six agent states from spec §10.</summary>
     public enum AgentState

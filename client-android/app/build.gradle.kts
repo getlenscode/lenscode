@@ -6,23 +6,23 @@ plugins {
 }
 
 android {
-    namespace = "dev.aura.xr"
+    namespace = "com.lenscode.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.aura.xr"
+        applicationId = "com.lenscode.app"
         // Android XR baseline (XR preview images are API 34).
         minSdk = 34
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        // aura-bridge WebSocket URL. Defaults to 10.0.2.2 (the emulator's
+        // lenscode-bridge WebSocket URL. Defaults to 10.0.2.2 (the emulator's
         // host-loopback alias); override for a real device on the same LAN
         // with -PbridgeUrl="ws://<host-lan-ip>:8137" (adb reverse can't help
         // here since the app dials a literal IP, not localhost).
         val bridgeUrl = (project.findProperty("bridgeUrl") as String?) ?: "ws://10.0.2.2:8137"
         buildConfigField("String", "BRIDGE_URL", "\"$bridgeUrl\"")
-        // Agentic voice routing (dev.aura.xr.voice.KoogVoiceRouter) — Gemini
+        // Agentic voice routing (com.lenscode.app.voice.KoogVoiceRouter) — Gemini
         // via Koog, on-device. Empty key = the router falls back to the
         // deterministic local one (VoiceCommandRouter.kt), no network call
         // attempted. Set with:
@@ -78,7 +78,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // Agentic voice command routing (on-device, Gemini via Koog — see
-    // dev.aura.xr.voice.KoogVoiceRouter). Koog is JetBrains' Kotlin
+    // com.lenscode.app.voice.KoogVoiceRouter). Koog is JetBrains' Kotlin
     // multiplatform AI agent framework; Android is one of its supported targets.
     implementation("ai.koog:koog-agents:0.5.0")
     // Koog's default Ktor engine (CIO) implements its own pure-Kotlin TLS

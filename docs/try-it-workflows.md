@@ -1,4 +1,4 @@
-# Try Aura Workspace: remote projects and AI coding
+# Try LensCode: remote projects and AI coding
 
 These walkthroughs match the Android XR controls in this repository as of September 7, 2026. They are based on the implementation; the full two-machine workflow has not been exercised against two live remote hosts.
 
@@ -7,7 +7,7 @@ In the tablet emulator, click the labels below. On XR hardware, select the same 
 ## Before you start
 
 1. Complete [remote setup](remote-setup-and-limits.md#prepare-two-machines).
-2. Launch Aura Workspace. Confirm that the main screen says **bridge connected** and **paseo connected**.
+2. Launch LensCode. Confirm that the main screen says **bridge connected** and **paseo connected**.
 3. Use two SSH aliases, such as `dev-a` and `dev-b`. Replace the example user `alex` and all example paths with your actual remote paths.
 4. Start with a disposable demo folder. You will create files during these exercises.
 
@@ -45,13 +45,13 @@ If already connected, use **Browse** instead of **Connect**. Browse starts at `/
 2. In **Send a message…**, enter the prompt below with your real alias and path. You can use the small microphone beside the message field to dictate it, then review the text.
 3. Click **Send**.
 
-> Use SSH alias dev-a for every project command. The project must exist only at /home/alex/projects/aura-notes-demo on dev-a, not on the local machine. First verify the remote hostname and report the absolute target path. If that directory already contains files, stop and ask me before changing them. Create a small notes app from scratch using index.html, styles.css, and app.js, with no build tools or external dependencies. Include adding and deleting notes, localStorage persistence, keyboard-accessible controls, and a README with run instructions. Use a dark glass visual style with subtly rounded rectangular cards. Initialize Git if this is a new directory. Check the JavaScript syntax and report exactly which checks passed. Do not commit or deploy anything.
+> Use SSH alias dev-a for every project command. The project must exist only at /home/alex/projects/lenscode-notes-demo on dev-a, not on the local machine. First verify the remote hostname and report the absolute target path. If that directory already contains files, stop and ask me before changing them. Create a small notes app from scratch using index.html, styles.css, and app.js, with no build tools or external dependencies. Include adding and deleting notes, localStorage persistence, keyboard-accessible controls, and a README with run instructions. Use a dark glass visual style with subtly rounded rectangular cards. Initialize Git if this is a new directory. Check the JavaScript syntax and report exactly which checks passed. Do not commit or deploy anything.
 
 4. Reopen the agent card to inspect **ACTIVITY**. A successful Send closes the detail card.
 5. If the agent is waiting for approval, click **Permissions**, read the requested action, then click **Allow** or **Deny**. Return to the agent card afterward.
 6. Wait until the agent reports the files were created on `dev-a`. An **idle** state alone is not proof the task succeeded; read its response.
 7. Click **Remote → Connect** for `dev-a`, or **Browse** if already connected.
-8. Enter `home → alex → projects → aura-notes-demo`, then click **Open this folder**.
+8. Enter `home → alex → projects → lenscode-notes-demo`, then click **Open this folder**.
 9. In **Code**, click `index.html`, `styles.css`, `app.js`, and `README.md` to inspect the output.
 
 Expected result: the files exist on the specified remote host and are readable in XR. The Code panel is a source viewer, not a running web preview.
@@ -62,8 +62,8 @@ Expected result: the files exist on the specified remote host and are readable i
 
    ```sh
    ssh dev-a
-   mkdir -p /home/alex/projects/aura-notes-demo
-   cd /home/alex/projects/aura-notes-demo
+   mkdir -p /home/alex/projects/lenscode-notes-demo
+   cd /home/alex/projects/lenscode-notes-demo
    pwd
    ls -la
    ```
@@ -96,7 +96,7 @@ For an AI running directly on `dev-b`, send the same task in its external SSH se
 ## 4. Switch between two remote projects and see their code
 
 1. Connect both `dev-a` and `dev-b` through **Remote**.
-2. On `dev-a`, click **Browse**, navigate to `aura-notes-demo`, then click **Open this folder**.
+2. On `dev-a`, click **Browse**, navigate to `lenscode-notes-demo`, then click **Open this folder**.
 3. Open `app.js` in **Code**. Confirm the explorer heading identifies `dev-a` and the expected folder.
 4. Click **Remote**, then **Browse** on `dev-b`.
 5. Navigate to `existing-site`, click **Open this folder**, and inspect its changed header file.
@@ -111,7 +111,7 @@ Code shows one project's files at a time. There is no two-project tab bar or sid
 
 1. Click **Agents** to see the local Paseo agents.
 2. Click the first agent and read its label, provider, working directory, and **ACTIVITY**.
-3. Send a follow-up, such as: “On dev-a, in /home/alex/projects/aura-notes-demo, add a search field for notes. Preserve the existing implementation and run the relevant checks.”
+3. Send a follow-up, such as: “On dev-a, in /home/alex/projects/lenscode-notes-demo, add a search field for notes. Preserve the existing implementation and run the relevant checks.”
 4. Click another agent card, or **Close** and select another agent from **Agents**.
 5. Send its task with `dev-b` and the absolute directory explicitly named.
 6. Use **Remote → Browse → Open this folder** to inspect the output from each machine.

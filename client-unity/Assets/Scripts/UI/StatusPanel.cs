@@ -1,9 +1,9 @@
-using Aura.Net;
+using LensCode.Net;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>
     /// World-space glass panel showing bridge/Herdr connection state and a live
@@ -12,7 +12,7 @@ namespace Aura.UI
     /// </summary>
     public sealed class StatusPanel : MonoBehaviour
     {
-        [SerializeField] private AuraClient client;
+        [SerializeField] private LensCodeClient client;
         [SerializeField] private UIDocument uiDocument;
 
         // UI Toolkit's rich-text <color> tags do not actually recolor spans in

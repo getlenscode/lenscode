@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>
     /// Populates the persistent agent strip (spec §10) from a data source and

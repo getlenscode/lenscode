@@ -1,5 +1,5 @@
 /*
- * Aura Workspace glass theme — ported from MR App Ideas for Productivity.html
+ * LensCode Workspace glass theme — ported from MR App Ideas for Productivity.html
  * (CSS custom properties --bg/--panel/--line/--text/--muted/--blue/--green/
  * --red/--amber/--purple, border-radius 20px). USS has no backdrop-filter or
  * box-shadow, so the "glass" look here is a dark semi-transparent fill + a

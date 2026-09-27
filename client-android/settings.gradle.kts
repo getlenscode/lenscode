@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "aura-xr"
+rootProject.name = "lenscode-xr"
 include(":app")

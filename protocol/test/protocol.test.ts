@@ -12,7 +12,7 @@ test("hello request round-trips", () => {
     type: "hello",
     protocolVersion: PROTOCOL_VERSION,
     deviceId: "dev-123",
-    clientInfo: { app: "aura-xr", version: "0.1.0", platform: "android-xr" },
+    clientInfo: { app: "lenscode-xr", version: "0.1.0", platform: "android-xr" },
   };
   const parsed = XrRequest.parse(msg);
   assert.equal(parsed.type, "hello");

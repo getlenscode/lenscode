@@ -1,7 +1,7 @@
-using Aura.Interaction;
+using LensCode.Interaction;
 using UnityEngine;
 
-namespace Aura.Panels
+namespace LensCode.Panels
 {
     /// <summary>
     /// A movable, resizable, pinnable world-space panel (spec §52 Panel Management).
@@ -10,7 +10,7 @@ namespace Aura.Panels
     /// pin/reset), pinch = no-op here (selection happens on the panel's own
     /// content, not the frame).
     /// </summary>
-    public sealed class AuraPanel : MonoBehaviour
+    public sealed class LensCodePanel : MonoBehaviour
     {
         [Tooltip("Stable identifier used for layout persistence; must be unique per panel.")]
         [SerializeField] private string panelId;
@@ -36,7 +36,7 @@ namespace Aura.Panels
         private void Awake()
         {
             if (string.IsNullOrEmpty(panelId))
-                Debug.LogWarning($"AuraPanel on '{name}' has no panelId; layout will not persist.", this);
+                Debug.LogWarning($"LensCodePanel on '{name}' has no panelId; layout will not persist.", this);
             if (grabHandle == null) grabHandle = GetComponent<PinchGesture>();
             _defaultPose = new Pose(transform.position, transform.rotation);
             _headCamera = Camera.main;

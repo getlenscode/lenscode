@@ -1,7 +1,7 @@
 // Frosted-glass "blur behind" panel for URP. USS has no backdrop-filter, so
 // this quad sits just behind each UI Toolkit panel and supplies the actual
 // blur-and-tint backdrop the mockup's CSS glass panels rely on.
-Shader "Aura/GlassBlur"
+Shader "LensCode/GlassBlur"
 {
     Properties
     {

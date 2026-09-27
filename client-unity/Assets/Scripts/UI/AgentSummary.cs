@@ -1,4 +1,4 @@
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>
     /// Display-ready agent data for the strip and its detail card (spec §10).

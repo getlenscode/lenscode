@@ -4,7 +4,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using UnityEngine;
 
-namespace Aura.Panels
+namespace LensCode.Panels
 {
     /// <summary>Serializable snapshot of one panel's pose (spec §52 layout persistence).</summary>
     public sealed class PanelLayoutData
@@ -18,14 +18,14 @@ namespace Aura.Panels
     /// <summary>
     /// Saves/restores panel layout across sessions. Client-side only, per spec §41
     /// ("workspace layout persistence on the client side where appropriate") —
-    /// this never talks to aura-bridge.
+    /// this never talks to lenscode-bridge.
     /// </summary>
     public static class PanelLayoutStore
     {
         private static string FilePath =>
             Path.Combine(Application.persistentDataPath, "panel-layout.json");
 
-        public static void Save(IEnumerable<AuraPanel> panels)
+        public static void Save(IEnumerable<LensCodePanel> panels)
         {
             var data = panels
                 .Where(p => !string.IsNullOrEmpty(p.PanelId))

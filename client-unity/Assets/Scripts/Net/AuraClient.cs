@@ -3,14 +3,14 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
-namespace Aura.Net
+namespace LensCode.Net
 {
     /// <summary>
     /// Scene-level owner of the bridge connection. Runs the initial-sync sequence
     /// (spec §7): hello → snapshot → subscribe, and resyncs on every reconnect
     /// because backend state wins (spec §58–59).
     /// </summary>
-    public sealed class AuraClient : MonoBehaviour
+    public sealed class LensCodeClient : MonoBehaviour
     {
         [SerializeField] private string bridgeUrl = "ws://127.0.0.1:8137";
         [SerializeField] private float reconnectDelaySeconds = 3f;
@@ -47,7 +47,7 @@ namespace Aura.Net
                     deviceId = SystemInfo.deviceUniqueIdentifier,
                     clientInfo = new
                     {
-                        app = "aura-xr",
+                        app = "lenscode-xr",
                         version = Application.version,
                         platform = Application.platform.ToString(),
                     },

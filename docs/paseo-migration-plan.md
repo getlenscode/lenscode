@@ -8,7 +8,7 @@ Kotlin client rewritten against the new protocol and builds clean end-to-end (20
 ## Phase 2 status (2026-09-05) — validated live
 
 `agent.*`, `permission.respond`, and `provider.list` added to `protocol/` (bumped to v3) and implemented in a
-new `aura-bridge/src/agents.ts`, wired into `server.ts`. Local-machine only for now — no remote-agent story
+new `lenscode-bridge/src/agents.ts`, wired into `server.ts`. Local-machine only for now — no remote-agent story
 (`agent.*`/`permission.*`/`provider.*` ignore `machineId`; `terminal.*` still routes per machine as before).
 Agent/permission push events (agent_stream, agent_permission_request, …) needed no new wiring — they already
 flow through the generic `backend` topic broadcast built in Phase 1.
@@ -27,7 +27,7 @@ as a "populate a picker once" call, not a hot path.
 ## Phase 0 + Phase 1 status (2026-09-05) — validated live
 
 Ran a real `@getpaseo/cli` 0.7.2 daemon locally (isolated `HOME`, scratch dir, not the user's real Paseo
-install) and pointed the full bridge test suite at it via `AURA_PASEO_URL`. **26/26 tests pass** (0 skipped,
+install) and pointed the full bridge test suite at it via `LENSCODE_PASEO_URL`. **26/26 tests pass** (0 skipped,
 0 failed) — terminal create/rename/list/read/close, Ctrl+C interrupt, 20-concurrent-terminals, snapshot, and
 the full pairing flow all exercised against real daemon responses, not mocks.
 
@@ -46,7 +46,7 @@ Done, typechecked, and tested:
   `backend_unavailable`/`backend_error`, `herdrConnected`/`herdrProtocol` → `backendConnected`/`backendProtocol`
   (now a version string, not a number), `herdr.request`/`HerdrProxyRequest` removed, `terminal.process_info`
   removed (no Paseo equivalent). 6/6 tests green.
-- `aura-bridge/`: `herdr.ts` deleted, replaced by `paseo.ts` (wraps `@getpaseo/client`'s `DaemonClient` via its
+- `lenscode-bridge/`: `herdr.ts` deleted, replaced by `paseo.ts` (wraps `@getpaseo/client`'s `DaemonClient` via its
   `internal/daemon-client` export — the high-level `createPaseoClient()` agent/workspace wrapper is Phase 2).
   `terminals.ts` rewritten against real SDK calls (`listTerminals`/`createTerminal`/`killTerminal`/
   `renameTerminal`/`captureTerminal`/`sendTerminalInput`), including the workspace-resolution and
@@ -54,8 +54,8 @@ Done, typechecked, and tested:
   `createPaseoWorktree`/`getPaseoWorktreeList`/`fetchWorkspaces` instead of raw Herdr `worktree.*` calls
   (not yet exercised live — no worktree/branch-switch test in the suite). `remote.ts` forwards a TCP port
   (Paseo listens on 6767) instead of a Unix socket (not yet validated live — needs a second machine or a
-  loopback SSH setup). `config.ts` reads `AURA_PASEO_URL`/`AURA_PASEO_PASSWORD` (defaults to
-  `ws://127.0.0.1:6767/ws`), warns once on the old `AURA_HERDR_SOCKET` key. `allowlist.ts` deleted (its only
+  loopback SSH setup). `config.ts` reads `LENSCODE_PASEO_URL`/`LENSCODE_PASEO_PASSWORD` (defaults to
+  `ws://127.0.0.1:6767/ws`), warns once on the old `LENSCODE_HERDR_SOCKET` key. `allowlist.ts` deleted (its only
   caller, the `herdr.request` passthrough, is gone).
 
 ## Phase 3 status (2026-09-05) — Kotlin client rewritten, builds clean
@@ -99,7 +99,7 @@ UI changes (`WorkspaceUi.kt`, `MainActivity.kt`):
 - Terminal list status dot: was `pane.focused` (no longer exists), now `pane.agentStatus`
   (idle/working/attention) via a new `terminalActivityColor()` helper — genuinely more useful than a stale
   focus flag.
-- `AuraColors.agentStatusColor()` updated from Herdr's status vocabulary (working/blocked/done/idle) to
+- `LensCodeColors.agentStatusColor()` updated from Herdr's status vocabulary (working/blocked/done/idle) to
   Paseo's real `AGENT_LIFECYCLE_STATUSES` (initializing/idle/running/error/closed).
 - Worktree view: dropped `isLinked`/"main checkout" distinction — Paseo's worktree list is Paseo-owned linked
   worktrees only, it never includes the repo's main checkout, so every entry is now uniformly removable.
@@ -120,7 +120,7 @@ next natural checkpoint, not a known gap.
 
 ## Goal
 
-Make Aura an **XR client for Paseo** — what `packages/app` (Expo) and the web UI are for
+Make LensCode an **XR client for Paseo** — what `packages/app` (Expo) and the web UI are for
 phones and browsers, but for smart glasses. Herdr is removed entirely.
 
 ## What Paseo actually is (verified against getpaseo/paseo @ 0.7.2)
@@ -140,12 +140,12 @@ phones and browsers, but for smart glasses. Herdr is removed entirely.
 
 The important upgrade over Herdr: Paseo has **agents as first-class objects** —
 status, timeline, permission requests, usage/cost, subagents, modes, providers.
-Herdr only had panes and PTYs; Aura had to infer agent state from scraped terminal
+Herdr only had panes and PTYs; LensCode had to infer agent state from scraped terminal
 output. That inference layer disappears.
 
 ## Architectural decision
 
-**Keep `aura-bridge` and swap its backend: `HerdrClient` → `@getpaseo/client`.**
+**Keep `lenscode-bridge` and swap its backend: `HerdrClient` → `@getpaseo/client`.**
 Do *not* make the Kotlin client speak Paseo's wire protocol directly.
 
 Why:
@@ -157,7 +157,7 @@ Why:
 - Paseo's protocol churns on a published schedule. The bridge absorbs that churn;
   `protocol/` stays a narrow, stable, glasses-shaped surface that the Kotlin client
   and the generated C# DTOs keep targeting.
-- Aura's own concerns (device pairing, gaze/pinch affordances, panel layout
+- LensCode's own concerns (device pairing, gaze/pinch affordances, panel layout
   persistence, voice search, walking mode) stay bridge-side where they already work.
 
 Cost of the alternative (direct Kotlin → daemon): rewrite of `BridgeClient.kt`
@@ -171,12 +171,12 @@ The bridge's role changes from *"Herdr IPC proxy + everything Herdr lacks"* to
 
 | File | Lines | Herdr refs | Action |
 |---|---|---|---|
-| `aura-bridge/src/herdr.ts` | 184 | 10 | **Delete**, replace with `paseo.ts` |
-| `aura-bridge/src/terminals.ts` | 156 | 17 | Rewrite against Paseo terminal RPCs |
-| `aura-bridge/src/server.ts` | 821 | 42 | Rewire; drop `herdr.request` passthrough |
-| `aura-bridge/src/allowlist.ts` | 33 | 2 | Repoint at Paseo RPC names |
-| `aura-bridge/src/config.ts` | 43 | 3 | `herdrSocketPath` → Paseo URL/password/relay |
-| `aura-bridge/src/remote.ts` | 137 | 2 | Machines → Paseo hosts |
+| `lenscode-bridge/src/herdr.ts` | 184 | 10 | **Delete**, replace with `paseo.ts` |
+| `lenscode-bridge/src/terminals.ts` | 156 | 17 | Rewrite against Paseo terminal RPCs |
+| `lenscode-bridge/src/server.ts` | 821 | 42 | Rewire; drop `herdr.request` passthrough |
+| `lenscode-bridge/src/allowlist.ts` | 33 | 2 | Repoint at Paseo RPC names |
+| `lenscode-bridge/src/config.ts` | 43 | 3 | `herdrSocketPath` → Paseo URL/password/relay |
+| `lenscode-bridge/src/remote.ts` | 137 | 2 | Machines → Paseo hosts |
 | `files.ts` `git.ts` `pairing.ts` `machines.ts` `remoteFiles.ts` | 899 | 0 | Untouched in Phase 1; candidates for deletion in Phase 4 |
 
 Client side: `BridgeClient.kt` and `WorkspaceUi.kt` mention "herdr" only as XR-protocol
@@ -186,7 +186,7 @@ field names (`herdrConnected`, `herdr_unavailable`) — pure renames, no logic c
 
 ## RPC mapping
 
-| Aura XR protocol | Herdr (old) | Paseo (new) |
+| LensCode XR protocol | Herdr (old) | Paseo (new) |
 |---|---|---|
 | `terminal.list` | `pane.list` + `tab.list` | `list_terminals_request` |
 | `terminal.create` | `tab.create` | `create_terminal_request` |
@@ -214,13 +214,13 @@ field names (`herdrConnected`, `herdr_unavailable`) — pure renames, no logic c
 Run `paseo daemon` locally. Write `scratch/paseo-probe.ts` using `@getpaseo/client`:
 connect, `agents.create`, `waitForFinish`, list terminals, subscribe to one terminal
 and print decoded frames. Confirms the SDK works from a plain Node script and pins
-the real shapes before any Aura code changes. Record findings in `docs/paseo-ipc.md`
+the real shapes before any LensCode code changes. Record findings in `docs/paseo-ipc.md`
 (the successor to `herdr-ipc.md`).
 
 ### Phase 1 — backend swap, protocol frozen (2–3 days)
 Goal: **the Android client binary does not change and still works.**
-1. `npm i @getpaseo/client @getpaseo/protocol` in `aura-bridge`.
-2. New `aura-bridge/src/paseo.ts` exposing the same shape `server.ts` expects
+1. `npm i @getpaseo/client @getpaseo/protocol` in `lenscode-bridge`.
+2. New `lenscode-bridge/src/paseo.ts` exposing the same shape `server.ts` expects
    (`connect`, `request`, `subscribeEvents`, `connected`, `protocol`, event emitter).
 3. Rewrite `terminals.ts` against the mapping table; `terminal.focus` becomes a
    bridge-local no-op that still returns success.
@@ -228,7 +228,7 @@ Goal: **the Android client binary does not change and still works.**
    overrides. Keep reading the old key for one release, warn, and ignore it.
 5. `allowlist.ts`: replace the Herdr method allowlist with a Paseo one.
 6. Delete `herdr.ts` and the `herdr.request` case.
-7. Port `aura-bridge/test/*.ts` (28 tests currently green against live Herdr 0.8.2)
+7. Port `lenscode-bridge/test/*.ts` (28 tests currently green against live Herdr 0.8.2)
    to run against a live `paseo daemon`. **Gate: 28/28 green again.**
 
 Rename `herdrConnected` → `backendConnected` and `herdr_unavailable` →
@@ -260,7 +260,7 @@ Once Paseo's `fs.*` and `checkout.*` are wired, delete or thin `files.ts` (303),
 wrapper over Paseo's multi-host support. Expect a net ~700-line deletion.
 
 ### Phase 5 — pairing and transport (1–2 days)
-Aura's own `pairing.ts` (device → bridge) stays. Add bridge → daemon transport
+LensCode's own `pairing.ts` (device → bridge) stays. Add bridge → daemon transport
 config: direct, Tailscale, or relay. Reuse the existing QR flow so the glasses pair
 to the bridge and the bridge pairs to the daemon, rather than inventing a second
 pairing UX inside a headset.

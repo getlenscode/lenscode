@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
-namespace Aura.Interaction
+namespace LensCode.Interaction
 {
     /// <summary>
     /// Translates XRI's raw hover/select events on an <see cref="XRBaseInteractable"/>

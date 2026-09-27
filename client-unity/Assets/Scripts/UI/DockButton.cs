@@ -1,8 +1,8 @@
-using Aura.Interaction;
+using LensCode.Interaction;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>
     /// One quick-dock button (spec §71: Code/Terminal/Diff/Git/Agents/Remote).

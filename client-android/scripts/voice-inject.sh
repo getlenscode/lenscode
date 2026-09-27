@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Types text into Aura's voice-command review popup as if it had been
+# Types text into LensCode's voice-command review popup as if it had been
 # recognized from speech — for testing without talking out loud (e.g. in a
 # public place). Requires the debug-only INJECT_VOICE_COMMAND broadcast
 # receiver in MainActivity.kt (registered only when BuildConfig.DEBUG),
@@ -44,7 +44,7 @@ fi
 
 if [ -z "$SERIAL" ]; then
   echo "No emulator running — booting $AVD_NAME…" >&2
-  nohup "$EMULATOR" -avd "$AVD_NAME" -no-snapshot-load > /tmp/aura-emulator-inject.log 2>&1 &
+  nohup "$EMULATOR" -avd "$AVD_NAME" -no-snapshot-load > /tmp/lenscode-emulator-inject.log 2>&1 &
   "$ADB" wait-for-device
   SERIAL=$("$ADB" devices | awk '/^emulator-/{print $1; exit}')
   echo "Waiting for boot to finish…" >&2
@@ -63,6 +63,6 @@ echo "Target: $SERIAL" >&2
 ESCAPED_TEXT="${TEXT// /\\ }"
 
 # shellcheck disable=SC2086
-"$ADB" -s "$SERIAL" shell am broadcast -a dev.aura.xr.INJECT_VOICE_COMMAND --es text $ESCAPED_TEXT
+"$ADB" -s "$SERIAL" shell am broadcast -a com.lenscode.app.INJECT_VOICE_COMMAND --es text $ESCAPED_TEXT
 
 echo "Sent: \"$TEXT\" — check the headset/emulator screen for the review popup." >&2

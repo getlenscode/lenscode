@@ -1,8 +1,8 @@
-using Aura.Interaction;
+using LensCode.Interaction;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>
     /// One entry in the persistent agent strip (spec §10): "Claude ● Working".

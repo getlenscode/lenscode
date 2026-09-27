@@ -1,5 +1,5 @@
 /**
- * Aura XR protocol v3 — the contract between the Android XR client and aura-bridge.
+ * LensCode XR protocol v3 — the contract between the Android XR client and lenscode-bridge.
  *
  * Design (spec §69):
  *  - every request carries a client-generated `id`; responses echo it
@@ -16,7 +16,7 @@
  * match Paseo's own terminal ids (they are not Herdr panes).
  *
  * v3 (docs/paseo-migration-plan.md, Phase 2): agents become first-class. Herdr
- * had no agent model at all — Aura inferred agent state by scraping terminal
+ * had no agent model at all — LensCode inferred agent state by scraping terminal
  * output. Paseo tracks agents as their own objects (status, provider/model,
  * cost, pending permission requests), so `agent.*` and `permission.*` below
  * are new, not renamed. Agent/terminal push events (agent_stream,

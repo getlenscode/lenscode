@@ -14,7 +14,7 @@ mkdirSync(dir, { recursive: true });
 // Combined document: reference copy + version pin for both sides.
 const combined = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  title: "Aura XR Protocol",
+  title: "LensCode XR Protocol",
   protocolVersion: PROTOCOL_VERSION,
   schemas: {
     request: z.toJSONSchema(XrRequest),

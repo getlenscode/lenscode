@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Aura.UI
+namespace LensCode.UI
 {
     /// <summary>
     /// Quick dock (spec §71): exactly one dominant primary panel at a time,

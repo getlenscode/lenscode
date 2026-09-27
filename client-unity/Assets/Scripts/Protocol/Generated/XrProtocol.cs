@@ -1,4 +1,4 @@
-namespace Aura.Protocol
+namespace LensCode.Protocol
 {
     using System;
     using System.Collections.Generic;

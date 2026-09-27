@@ -1,10 +1,10 @@
 # Remote setup and current limits
 
-Companion to [Try Aura Workspace](try-it-workflows.md). These notes describe the checked-in implementation, not a guarantee that your hosts or provider credentials are configured.
+Companion to [Try LensCode](try-it-workflows.md). These notes describe the checked-in implementation, not a guarantee that your hosts or provider credentials are configured.
 
 ## Prepare two machines
 
-“Local” means the computer running `aura-bridge` and its connected Paseo daemon. The tablet emulator is the UI client. Remote aliases are read from the bridge user's `~/.ssh/config`.
+“Local” means the computer running `lenscode-bridge` and its connected Paseo daemon. The tablet emulator is the UI client. Remote aliases are read from the bridge user's `~/.ssh/config`.
 
 1. On the bridge computer, add explicit aliases to `~/.ssh/config`, using your actual hosts, users, and keys:
 
@@ -29,7 +29,7 @@ Companion to [Try Aura Workspace](try-it-workflows.md). These notes describe the
    ```
 
 4. Have a compatible Paseo daemon installed and running on each remote machine. This bridge forwards to `127.0.0.1:6767` on the remote host and connects to `/ws`. Its **Connect** button does not install or start Paseo. Use your installed Paseo version's daemon setup instructions; the repository migration notes use `paseo daemon`.
-5. Have local Paseo and `aura-bridge` running. In an already configured checkout, the bridge's development command is `npm run dev` from `aura-bridge/`.
+5. Have local Paseo and `lenscode-bridge` running. In an already configured checkout, the bridge's development command is `npm run dev` from `lenscode-bridge/`.
 6. For a local XR agent doing remote work, make SSH available to the agent's runtime too. If the agent runs in a sandbox or container, successful SSH from your desktop alone does not prove the agent can reach it. First send a read-only task asking it to verify the remote hostname and working directory.
 7. For AI running directly on a remote host, install and authenticate your chosen coding CLI on that host. This guide assumes it is already available; installing providers is a separate setup task.
 8. Launch the app, complete pairing if prompted, and check **bridge connected** and **paseo connected**. Then click **Remote** and confirm both aliases appear.
@@ -92,10 +92,10 @@ Check that the correct folder is open and is a Git repository. New/untracked fil
 
 ## Implementation references
 
-- [Workspace UI labels and fields](../client-android/app/src/main/java/dev/aura/xr/ui/WorkspaceUi.kt)
-- [Navigation, local agent targeting, voice creation, and launch layout](../client-android/app/src/main/java/dev/aura/xr/MainActivity.kt)
-- [Client file roots and terminal machine selection](../client-android/app/src/main/java/dev/aura/xr/net/BridgeClient.kt)
-- [SSH alias discovery](../aura-bridge/src/machines.ts)
-- [Remote Paseo tunnel](../aura-bridge/src/remote.ts)
-- [Bridge routing and local-only agent handlers](../aura-bridge/src/server.ts)
+- [Workspace UI labels and fields](../client-android/app/src/main/java/com/lenscode/app/ui/WorkspaceUi.kt)
+- [Navigation, local agent targeting, voice creation, and launch layout](../client-android/app/src/main/java/com/lenscode/app/MainActivity.kt)
+- [Client file roots and terminal machine selection](../client-android/app/src/main/java/com/lenscode/app/net/BridgeClient.kt)
+- [SSH alias discovery](../lenscode-bridge/src/machines.ts)
+- [Remote Paseo tunnel](../lenscode-bridge/src/remote.ts)
+- [Bridge routing and local-only agent handlers](../lenscode-bridge/src/server.ts)
 - [Migration notes](paseo-migration-plan.md)

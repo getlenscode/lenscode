@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: AuraGlass
+  m_Name: LensCodeGlass
   m_Shader: {fileID: 4800000, guid: 6dad85aa1a3ab455ab3ac00e1141b29d, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0

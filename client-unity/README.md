@@ -1,6 +1,6 @@
-# Aura XR Client (Unity 6)
+# LensCode XR Client (Unity 6)
 
-Unity 6 + OpenXR client for Android XR. Talks to `aura-bridge` over WebSocket
+Unity 6 + OpenXR client for Android XR. Talks to `lenscode-bridge` over WebSocket
 using XR protocol v1 (`../protocol`).
 
 ## First open (one-time editor setup)
@@ -16,10 +16,10 @@ using XR protocol v1 (`../protocol`).
 4. **Graphics**: assign a URP pipeline asset (create default URP assets if absent).
 5. Create scene `Assets/Scenes/Main.unity`:
    - `XR Origin (XR Rig)` from XR Interaction Toolkit samples
-   - empty `AuraClient` GameObject with `Aura.Net.AuraClient`
+   - empty `LensCodeClient` GameObject with `LensCode.Net.LensCodeClient`
    - world-space canvas ~1.2 m ahead with a TextMeshPro text; add
-     `Aura.UI.StatusPanel` wired to the client and text.
-6. Run `aura-bridge` on this machine (`npm run dev` in `../aura-bridge`), then
+     `LensCode.UI.StatusPanel` wired to the client and text.
+6. Run `lenscode-bridge` on this machine (`npm run dev` in `../lenscode-bridge`), then
    enter Play mode (or deploy to the Android XR emulator). The panel should show
    `bridge ● connected · herdr ● connected` and live workspace/pane/agent counts.
 
@@ -38,8 +38,8 @@ against the installed package source, not guessed. These need Editor-GUI scene
 wiring that can't be scripted headlessly:
 
 1. Add an `XRSimpleInteractable` + `PinchGesture` to each panel's grab handle,
-   and an `AuraPanel` on the panel root (assign a unique `panelId`).
-2. Add one `WorkspaceLayoutController` to the scene, referencing all `AuraPanel`s
+   and an `LensCodePanel` on the panel root (assign a unique `panelId`).
+2. Add one `WorkspaceLayoutController` to the scene, referencing all `LensCodePanel`s
    (or leave the array empty — it falls back to `FindObjectsByType`).
 3. Build the agent strip: one `AgentStatusItem` (+ `XRSimpleInteractable` +
    `PinchGesture`) per slot, referenced by an `AgentStripController`.
@@ -54,4 +54,4 @@ wiring that can't be scripted headlessly:
 
 Install via Android Studio (SDK Manager → Android XR system image + emulator).
 The bridge URL for an emulator is `ws://10.0.2.2:8137` (host loopback); set it on
-the `AuraClient` component for emulator builds.
+the `LensCodeClient` component for emulator builds.

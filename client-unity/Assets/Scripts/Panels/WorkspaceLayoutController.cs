@@ -1,7 +1,7 @@
 using System.Linq;
 using UnityEngine;
 
-namespace Aura.Panels
+namespace LensCode.Panels
 {
     /// <summary>
     /// Scene-level owner of panel layout persistence: restores saved poses at
@@ -10,12 +10,12 @@ namespace Aura.Panels
     /// </summary>
     public sealed class WorkspaceLayoutController : MonoBehaviour
     {
-        [SerializeField] private AuraPanel[] panels;
+        [SerializeField] private LensCodePanel[] panels;
 
         private void Awake()
         {
             if (panels == null || panels.Length == 0)
-                panels = FindObjectsByType<AuraPanel>(FindObjectsSortMode.None);
+                panels = FindObjectsByType<LensCodePanel>(FindObjectsSortMode.None);
         }
 
         private void Start()
