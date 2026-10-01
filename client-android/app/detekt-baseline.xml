@@ -1,0 +1,485 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:AgentComposer.kt$@Composable fun AgentComposer( state: ComposerState, machineLabel: String, machineId: String, onSelectMachine: (MachineInfo) -&gt; Unit, folderLabel: String, machines: List&lt;MachineInfo&gt;, branches: List&lt;String&gt;, currentBranch: String?, worktrees: List&lt;WorktreeInfo&gt;, providers: List&lt;ProviderInfo&gt;, isListening: Boolean, onMic: () -&gt; Unit, onSend: () -&gt; Unit, onSwitchBranch: (String) -&gt; Unit, onOpenWorktree: (WorktreeInfo) -&gt; Unit, onModeChosen: (ComposerMode) -&gt; Unit, onModelChosen: (provider: String, model: String?) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>CyclomaticComplexMethod:AgentsPanel.kt$@Composable private fun AgentActivityRow(entry: com.lenscode.app.net.AgentTimelineEntry)</ID>
+    <ID>CyclomaticComplexMethod:DiffPanel.kt$@Composable fun DiffPanelContent( status: com.lenscode.app.net.GitStatus?, diffPath: String?, diffText: String?, onSelectFile: (String) -&gt; Unit, onStageHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, onDiscardHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, discardConfirm: DeleteConfirmState? = null, stagedHunks: Set&lt;Int&gt; = emptySet(), )</ID>
+    <ID>CyclomaticComplexMethod:DockIcon.kt$@Composable fun DockIcon(id: String, color: Color)</ID>
+    <ID>CyclomaticComplexMethod:FilesPanel.kt$@Composable fun FilesPanelContent( rootLabel: String, path: String, entries: List&lt;DirEntry&gt;, file: FileContent?, onOpenDir: (String) -&gt; Unit, onOpenFile: (String) -&gt; Unit, onUp: () -&gt; Unit, searchQuery: String = "", onSearchQueryChange: (String) -&gt; Unit = {}, searchResults: List&lt;com.lenscode.app.net.FileSearchHit&gt; = emptyList(), composer: (@Composable () -&gt; Unit)? = null, )</ID>
+    <ID>CyclomaticComplexMethod:KoogVoiceRouter.kt$VoiceStep$fun toVoiceAction(): VoiceAction?</ID>
+    <ID>CyclomaticComplexMethod:WorkspaceRoot.kt$@OptIn(ExperimentalFollowingSubspaceApi::class) @Composable fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -&gt; Unit = {})</ID>
+    <ID>FunctionNaming:AgentComposer.kt$@Composable fun AgentComposer( state: ComposerState, machineLabel: String, machineId: String, onSelectMachine: (MachineInfo) -&gt; Unit, folderLabel: String, machines: List&lt;MachineInfo&gt;, branches: List&lt;String&gt;, currentBranch: String?, worktrees: List&lt;WorktreeInfo&gt;, providers: List&lt;ProviderInfo&gt;, isListening: Boolean, onMic: () -&gt; Unit, onSend: () -&gt; Unit, onSwitchBranch: (String) -&gt; Unit, onOpenWorktree: (WorktreeInfo) -&gt; Unit, onModeChosen: (ComposerMode) -&gt; Unit, onModelChosen: (provider: String, model: String?) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:AgentComposer.kt$@Composable private fun Chip( label: String, highlighted: Boolean = false, onClick: (() -&gt; Unit)? = null, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:AgentComposer.kt$@Composable private fun MenuCard(speakHint: String, content: @Composable () -&gt; Unit)</ID>
+    <ID>FunctionNaming:AgentComposer.kt$@Composable private fun MenuRow( title: String, subtitle: String? = null, selected: Boolean = false, hint: String? = null, onClick: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:AgentPickerOverlay.kt$@Composable fun AgentPickerOverlay( title: String, agents: List&lt;AgentInfo&gt;, onSelect: (AgentInfo) -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:AgentsPanel.kt$@Composable fun AgentChipContent(name: String, stateLabel: String, dotColor: Color, kind: String = name)</ID>
+    <ID>FunctionNaming:AgentsPanel.kt$@Composable fun AgentDetailOverlay( state: AgentDetailState?, timeline: List&lt;com.lenscode.app.net.AgentTimelineEntry&gt; = emptyList(), promptText: String, onPromptChange: (String) -&gt; Unit, onSendPrompt: () -&gt; Unit, onArchive: () -&gt; Unit, onOpenWorkspace: () -&gt; Unit, onDismiss: () -&gt; Unit, isListeningForPrompt: Boolean = false, onVoiceInput: () -&gt; Unit = {}, )</ID>
+    <ID>FunctionNaming:AgentsPanel.kt$@Composable fun AgentsPanelContent( agents: List&lt;AgentInfo&gt;, onSelect: (AgentInfo) -&gt; Unit, onArchive: (AgentInfo) -&gt; Unit = {}, // Archived/closed agents (docs/snip-and-agent-management-plan.md) — Paseo // still has their full record even after agent.list drops them; this is // LensCode's equivalent of Paseo Desktop's own History view. history: List&lt;com.lenscode.app.net.AgentHistoryEntry&gt; = emptyList(), historyHasMore: Boolean = false, onShowHistory: () -&gt; Unit = {}, onLoadMoreHistory: () -&gt; Unit = {}, onSelectHistory: (com.lenscode.app.net.AgentHistoryEntry) -&gt; Unit = {}, )</ID>
+    <ID>FunctionNaming:AgentsPanel.kt$@Composable fun PermissionsPanelContent( permissions: List&lt;com.lenscode.app.net.PermissionInfo&gt;, agents: List&lt;AgentInfo&gt;, onRespond: (com.lenscode.app.net.PermissionInfo, String, String?) -&gt; Unit, )</ID>
+    <ID>FunctionNaming:AgentsPanel.kt$@Composable private fun AgentActivityFeed(timeline: List&lt;com.lenscode.app.net.AgentTimelineEntry&gt;)</ID>
+    <ID>FunctionNaming:AgentsPanel.kt$@Composable private fun AgentActivityRow(entry: com.lenscode.app.net.AgentTimelineEntry)</ID>
+    <ID>FunctionNaming:BatteryStatus.kt$@Composable fun BatteryIndicator()</ID>
+    <ID>FunctionNaming:BatteryStatus.kt$@Composable private fun BatteryGlyph(percent: Int, charging: Boolean, color: androidx.compose.ui.graphics.Color)</ID>
+    <ID>FunctionNaming:BatteryStatus.kt$@Composable private fun Spacer4()</ID>
+    <ID>FunctionNaming:BrowserPanel.kt$@Composable fun BrowserLaunchOverlay( visible: Boolean, url: String, onUrlChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onDismiss: () -&gt; Unit, isListeningForUrl: Boolean = false, onVoiceInput: () -&gt; Unit = {}, )</ID>
+    <ID>FunctionNaming:BrowserPanel.kt$@Composable fun BrowserPanelContent( url: String, onChangeUrl: () -&gt; Unit, onOpenInChrome: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:DiffPanel.kt$@Composable fun BranchConflictCard(conflict: BranchConflictState?)</ID>
+    <ID>FunctionNaming:DiffPanel.kt$@Composable fun DeleteConfirmCard(deleteConfirm: DeleteConfirmState?)</ID>
+    <ID>FunctionNaming:DiffPanel.kt$@Composable fun DiffPanelContent( status: com.lenscode.app.net.GitStatus?, diffPath: String?, diffText: String?, onSelectFile: (String) -&gt; Unit, onStageHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, onDiscardHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, discardConfirm: DeleteConfirmState? = null, stagedHunks: Set&lt;Int&gt; = emptySet(), )</ID>
+    <ID>FunctionNaming:Dock.kt$@Composable fun DockButtonContent( id: String, label: String, active: Boolean, /** Something needs the user's response here (e.g. a pending agent permission) — independent of [active], since the dock item doesn't have to be the current view to need attention. */ attention: Boolean = false, onClick: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:Dock.kt$@Composable fun PlaceholderPanelContent(title: String, note: String)</ID>
+    <ID>FunctionNaming:DockIcon.kt$@Composable fun DockIcon(id: String, color: Color)</ID>
+    <ID>FunctionNaming:FilesPanel.kt$@Composable fun FilesPanelContent( rootLabel: String, path: String, entries: List&lt;DirEntry&gt;, file: FileContent?, onOpenDir: (String) -&gt; Unit, onOpenFile: (String) -&gt; Unit, onUp: () -&gt; Unit, searchQuery: String = "", onSearchQueryChange: (String) -&gt; Unit = {}, searchResults: List&lt;com.lenscode.app.net.FileSearchHit&gt; = emptyList(), composer: (@Composable () -&gt; Unit)? = null, )</ID>
+    <ID>FunctionNaming:HomeHud.kt$@Composable fun HomeHud( batteryPercent: Int, batteryCharging: Boolean, weather: WeatherReading?, weatherLocationDenied: Boolean, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:HomeHud.kt$@Composable fun HudRing( diameter: Dp, progress: Float, color: Color, value: String, label: String, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:HomeHud.kt$@Composable fun WeatherCard(reading: WeatherReading?, locationDenied: Boolean, modifier: Modifier = Modifier)</ID>
+    <ID>FunctionNaming:HomePanel.kt$@Composable fun PrimaryPanelContent( state: BridgeClient.UiState, onResetLayout: () -&gt; Unit = {}, pinned: Boolean = false, onTogglePin: () -&gt; Unit = {}, onBringCloser: () -&gt; Unit = {}, onPushFarther: () -&gt; Unit = {}, followMeEnabled: Boolean = false, onToggleFollowMe: () -&gt; Unit = {}, onEnterPip: () -&gt; Unit = {}, pairingState: PairingState = PairingState.Authenticated, deviceName: String = "", onDeviceNameChange: (String) -&gt; Unit = {}, onBeginPairing: () -&gt; Unit = {}, pairingCode: String = "", onPairingCodeChange: (String) -&gt; Unit = {}, onSubmitPairingCode: () -&gt; Unit = {}, onRetryPairing: () -&gt; Unit = {}, weather: com.lenscode.app.net.WeatherReading? = null, weatherLocationDenied: Boolean = false, /** Which workspace the file browser is currently rooted at — e.g. "local" or a worktree/branch name. */ projectLabel: String = "local", /** "local" or a connected remote machine's SSH host alias — never a raw IP (spec §54/§36). */ projectMachineId: String = "local", /** Absolute path on whichever machine [projectMachineId] refers to. Null until the first dir.list completes. */ projectRootPath: String? = null, )</ID>
+    <ID>FunctionNaming:HomePanel.kt$@Composable internal fun PairingTextField(value: String, onValueChange: (String) -&gt; Unit, placeholder: String, onSubmit: () -&gt; Unit)</ID>
+    <ID>FunctionNaming:HomePanel.kt$@Composable private fun PairingFlowContent( pairingState: PairingState, deviceName: String, onDeviceNameChange: (String) -&gt; Unit, onBeginPairing: () -&gt; Unit, pairingCode: String, onPairingCodeChange: (String) -&gt; Unit, onSubmitPairingCode: () -&gt; Unit, onRetryPairing: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:RemotePanel.kt$@Composable fun RemoteBrowseOverlay( state: com.lenscode.app.net.RemoteBrowseState?, onNavigate: (String) -&gt; Unit, onUp: () -&gt; Unit, onOpen: () -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:RemotePanel.kt$@Composable fun RemotePanelContent( machines: List&lt;com.lenscode.app.net.MachineInfo&gt;, connectingMachineId: String?, connectError: String?, onConnect: (String) -&gt; Unit, onDisconnect: (String) -&gt; Unit, onViewTerminals: (String) -&gt; Unit, onBrowse: (String) -&gt; Unit, )</ID>
+    <ID>FunctionNaming:SettingsPanelContent.kt$@Composable fun SettingsPanelContent( geminiResult: GeminiConfigResult, buildKeyPresent: Boolean, configPath: String, onReload: () -&gt; Unit, currentThemeId: ThemeId = ThemeId.CURSOR, onThemeChange: (ThemeId) -&gt; Unit = {}, )</ID>
+    <ID>FunctionNaming:SettingsPanelContent.kt$@Composable private fun CodeBlock(lines: List&lt;String&gt;)</ID>
+    <ID>FunctionNaming:SettingsPanelContent.kt$@Composable private fun CodeLine(text: String, color: androidx.compose.ui.graphics.Color = LensCodeColors.Text)</ID>
+    <ID>FunctionNaming:SettingsPanelContent.kt$@Composable private fun SettingsSection(title: String, content: @Composable () -&gt; Unit)</ID>
+    <ID>FunctionNaming:SnipCapture.kt$@Composable fun SnipRegion( controller: SnipCaptureController, group: String, itemId: String, modifier: Modifier = Modifier, content: @Composable () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:SnipCropOverlay.kt$@Composable fun SnipCropOverlay( bitmap: Bitmap, uploading: Boolean, onConfirm: (Rect) -&gt; Unit, onSave: (Rect) -&gt; Unit, onCancel: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:SnipCropOverlay.kt$@Composable private fun SnipButton( text: String, background: Color, textColor: Color, enabled: Boolean, onClick: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:SnipCropOverlay.kt$@Composable private fun SnipHandle(offset: Offset, onDrag: (Offset) -&gt; Unit)</ID>
+    <ID>FunctionNaming:Surfaces.kt$@Composable fun CardSurface(corner: Dp = CardCorner, content: @Composable () -&gt; Unit)</ID>
+    <ID>FunctionNaming:Surfaces.kt$@Composable fun Eyebrow(text: String)</ID>
+    <ID>FunctionNaming:Surfaces.kt$@Composable fun GlassSurface(corner: Dp = PanelCorner, content: @Composable () -&gt; Unit)</ID>
+    <ID>FunctionNaming:Surfaces.kt$@Composable fun StatusDot(color: Color, size: Dp = 8.dp)</ID>
+    <ID>FunctionNaming:TerminalPanel.kt$@Composable fun TerminalPanelContent( terminals: List&lt;PaneInfo&gt;, machineId: String, selected: PaneInfo?, output: String?, onSelect: (PaneInfo) -&gt; Unit, onNew: () -&gt; Unit, onClose: (PaneInfo) -&gt; Unit, onRequestStop: (PaneInfo) -&gt; Unit, stopConfirm: StopConfirmState?, )</ID>
+    <ID>FunctionNaming:VoiceOverlays.kt$@Composable fun VoiceCommandOverlay( isListening: Boolean, partial: String, error: String?, reviewText: String?, isRouting: Boolean, onSubmit: () -&gt; Unit, onCancel: () -&gt; Unit, onDismissError: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:VoiceOverlays.kt$@Composable fun VoiceOverlay( isListening: Boolean, partial: String, error: String?, result: VoiceResolution?, onSelectCandidate: (String) -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:WorkspaceRoot.kt$@OptIn(ExperimentalFollowingSubspaceApi::class) @Composable fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -&gt; Unit = {})</ID>
+    <ID>LargeClass:BridgeClient.kt$BridgeClient</ID>
+    <ID>LongMethod:AgentComposer.kt$@Composable fun AgentComposer( state: ComposerState, machineLabel: String, machineId: String, onSelectMachine: (MachineInfo) -&gt; Unit, folderLabel: String, machines: List&lt;MachineInfo&gt;, branches: List&lt;String&gt;, currentBranch: String?, worktrees: List&lt;WorktreeInfo&gt;, providers: List&lt;ProviderInfo&gt;, isListening: Boolean, onMic: () -&gt; Unit, onSend: () -&gt; Unit, onSwitchBranch: (String) -&gt; Unit, onOpenWorktree: (WorktreeInfo) -&gt; Unit, onModeChosen: (ComposerMode) -&gt; Unit, onModelChosen: (provider: String, model: String?) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>LongMethod:AgentsPanel.kt$@Composable fun AgentDetailOverlay( state: AgentDetailState?, timeline: List&lt;com.lenscode.app.net.AgentTimelineEntry&gt; = emptyList(), promptText: String, onPromptChange: (String) -&gt; Unit, onSendPrompt: () -&gt; Unit, onArchive: () -&gt; Unit, onOpenWorkspace: () -&gt; Unit, onDismiss: () -&gt; Unit, isListeningForPrompt: Boolean = false, onVoiceInput: () -&gt; Unit = {}, )</ID>
+    <ID>LongMethod:AgentsPanel.kt$@Composable fun AgentsPanelContent( agents: List&lt;AgentInfo&gt;, onSelect: (AgentInfo) -&gt; Unit, onArchive: (AgentInfo) -&gt; Unit = {}, // Archived/closed agents (docs/snip-and-agent-management-plan.md) — Paseo // still has their full record even after agent.list drops them; this is // LensCode's equivalent of Paseo Desktop's own History view. history: List&lt;com.lenscode.app.net.AgentHistoryEntry&gt; = emptyList(), historyHasMore: Boolean = false, onShowHistory: () -&gt; Unit = {}, onLoadMoreHistory: () -&gt; Unit = {}, onSelectHistory: (com.lenscode.app.net.AgentHistoryEntry) -&gt; Unit = {}, )</ID>
+    <ID>LongMethod:AgentsPanel.kt$@Composable fun PermissionsPanelContent( permissions: List&lt;com.lenscode.app.net.PermissionInfo&gt;, agents: List&lt;AgentInfo&gt;, onRespond: (com.lenscode.app.net.PermissionInfo, String, String?) -&gt; Unit, )</ID>
+    <ID>LongMethod:BrowserPanel.kt$@Composable fun BrowserPanelContent( url: String, onChangeUrl: () -&gt; Unit, onOpenInChrome: () -&gt; Unit, )</ID>
+    <ID>LongMethod:DiffPanel.kt$@Composable fun DiffPanelContent( status: com.lenscode.app.net.GitStatus?, diffPath: String?, diffText: String?, onSelectFile: (String) -&gt; Unit, onStageHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, onDiscardHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, discardConfirm: DeleteConfirmState? = null, stagedHunks: Set&lt;Int&gt; = emptySet(), )</ID>
+    <ID>LongMethod:Dock.kt$@Composable fun DockButtonContent( id: String, label: String, active: Boolean, /** Something needs the user's response here (e.g. a pending agent permission) — independent of [active], since the dock item doesn't have to be the current view to need attention. */ attention: Boolean = false, onClick: () -&gt; Unit, )</ID>
+    <ID>LongMethod:DockIcon.kt$@Composable fun DockIcon(id: String, color: Color)</ID>
+    <ID>LongMethod:FilesPanel.kt$@Composable fun FilesPanelContent( rootLabel: String, path: String, entries: List&lt;DirEntry&gt;, file: FileContent?, onOpenDir: (String) -&gt; Unit, onOpenFile: (String) -&gt; Unit, onUp: () -&gt; Unit, searchQuery: String = "", onSearchQueryChange: (String) -&gt; Unit = {}, searchResults: List&lt;com.lenscode.app.net.FileSearchHit&gt; = emptyList(), composer: (@Composable () -&gt; Unit)? = null, )</ID>
+    <ID>LongMethod:HomePanel.kt$@Composable fun PrimaryPanelContent( state: BridgeClient.UiState, onResetLayout: () -&gt; Unit = {}, pinned: Boolean = false, onTogglePin: () -&gt; Unit = {}, onBringCloser: () -&gt; Unit = {}, onPushFarther: () -&gt; Unit = {}, followMeEnabled: Boolean = false, onToggleFollowMe: () -&gt; Unit = {}, onEnterPip: () -&gt; Unit = {}, pairingState: PairingState = PairingState.Authenticated, deviceName: String = "", onDeviceNameChange: (String) -&gt; Unit = {}, onBeginPairing: () -&gt; Unit = {}, pairingCode: String = "", onPairingCodeChange: (String) -&gt; Unit = {}, onSubmitPairingCode: () -&gt; Unit = {}, onRetryPairing: () -&gt; Unit = {}, weather: com.lenscode.app.net.WeatherReading? = null, weatherLocationDenied: Boolean = false, /** Which workspace the file browser is currently rooted at — e.g. "local" or a worktree/branch name. */ projectLabel: String = "local", /** "local" or a connected remote machine's SSH host alias — never a raw IP (spec §54/§36). */ projectMachineId: String = "local", /** Absolute path on whichever machine [projectMachineId] refers to. Null until the first dir.list completes. */ projectRootPath: String? = null, )</ID>
+    <ID>LongMethod:HomePanel.kt$@Composable private fun PairingFlowContent( pairingState: PairingState, deviceName: String, onDeviceNameChange: (String) -&gt; Unit, onBeginPairing: () -&gt; Unit, pairingCode: String, onPairingCodeChange: (String) -&gt; Unit, onSubmitPairingCode: () -&gt; Unit, onRetryPairing: () -&gt; Unit, )</ID>
+    <ID>LongMethod:RemotePanel.kt$@Composable fun RemoteBrowseOverlay( state: com.lenscode.app.net.RemoteBrowseState?, onNavigate: (String) -&gt; Unit, onUp: () -&gt; Unit, onOpen: () -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
+    <ID>LongMethod:RemotePanel.kt$@Composable fun RemotePanelContent( machines: List&lt;com.lenscode.app.net.MachineInfo&gt;, connectingMachineId: String?, connectError: String?, onConnect: (String) -&gt; Unit, onDisconnect: (String) -&gt; Unit, onViewTerminals: (String) -&gt; Unit, onBrowse: (String) -&gt; Unit, )</ID>
+    <ID>LongMethod:SettingsPanelContent.kt$@Composable fun SettingsPanelContent( geminiResult: GeminiConfigResult, buildKeyPresent: Boolean, configPath: String, onReload: () -&gt; Unit, currentThemeId: ThemeId = ThemeId.CURSOR, onThemeChange: (ThemeId) -&gt; Unit = {}, )</ID>
+    <ID>LongMethod:SnipCropOverlay.kt$@Composable fun SnipCropOverlay( bitmap: Bitmap, uploading: Boolean, onConfirm: (Rect) -&gt; Unit, onSave: (Rect) -&gt; Unit, onCancel: () -&gt; Unit, )</ID>
+    <ID>LongMethod:TerminalPanel.kt$@Composable fun TerminalPanelContent( terminals: List&lt;PaneInfo&gt;, machineId: String, selected: PaneInfo?, output: String?, onSelect: (PaneInfo) -&gt; Unit, onNew: () -&gt; Unit, onClose: (PaneInfo) -&gt; Unit, onRequestStop: (PaneInfo) -&gt; Unit, stopConfirm: StopConfirmState?, )</ID>
+    <ID>LongMethod:VoiceOverlays.kt$@Composable fun VoiceCommandOverlay( isListening: Boolean, partial: String, error: String?, reviewText: String?, isRouting: Boolean, onSubmit: () -&gt; Unit, onCancel: () -&gt; Unit, onDismissError: () -&gt; Unit, )</ID>
+    <ID>LongMethod:VoiceOverlays.kt$@Composable fun VoiceOverlay( isListening: Boolean, partial: String, error: String?, result: VoiceResolution?, onSelectCandidate: (String) -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
+    <ID>LongMethod:WorkspaceRoot.kt$@Composable fun androidx.xr.compose.subspace.SpatialBoxScope.spatialContent()</ID>
+    <ID>LongMethod:WorkspaceRoot.kt$@OptIn(ExperimentalFollowingSubspaceApi::class) @Composable fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -&gt; Unit = {})</ID>
+    <ID>LongMethod:WorkspaceRoot.kt$fun executeVoiceAction(action: com.lenscode.app.voice.VoiceAction)</ID>
+    <ID>LongMethod:WorkspaceRoot.kt$fun startVoiceAgent( instruction: String?, // One-shot overrides from a spoken "…in a new worktree using Opus" — // they apply to this agent only and never touch the composer's defaults. modeId: String? = null, provider: String? = null, model: String? = null, worktree: Boolean? = null, )</ID>
+    <ID>LongParameterList:AgentComposer.kt$( state: ComposerState, machineLabel: String, machineId: String, onSelectMachine: (MachineInfo) -&gt; Unit, folderLabel: String, machines: List&lt;MachineInfo&gt;, branches: List&lt;String&gt;, currentBranch: String?, worktrees: List&lt;WorktreeInfo&gt;, providers: List&lt;ProviderInfo&gt;, isListening: Boolean, onMic: () -&gt; Unit, onSend: () -&gt; Unit, onSwitchBranch: (String) -&gt; Unit, onOpenWorktree: (WorktreeInfo) -&gt; Unit, onModeChosen: (ComposerMode) -&gt; Unit, onModelChosen: (provider: String, model: String?) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>LongParameterList:AgentsPanel.kt$( agents: List&lt;AgentInfo&gt;, onSelect: (AgentInfo) -&gt; Unit, onArchive: (AgentInfo) -&gt; Unit = {}, // Archived/closed agents (docs/snip-and-agent-management-plan.md) — Paseo // still has their full record even after agent.list drops them; this is // LensCode's equivalent of Paseo Desktop's own History view. history: List&lt;com.lenscode.app.net.AgentHistoryEntry&gt; = emptyList(), historyHasMore: Boolean = false, onShowHistory: () -&gt; Unit = {}, onLoadMoreHistory: () -&gt; Unit = {}, onSelectHistory: (com.lenscode.app.net.AgentHistoryEntry) -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:AgentsPanel.kt$( state: AgentDetailState?, timeline: List&lt;com.lenscode.app.net.AgentTimelineEntry&gt; = emptyList(), promptText: String, onPromptChange: (String) -&gt; Unit, onSendPrompt: () -&gt; Unit, onArchive: () -&gt; Unit, onOpenWorkspace: () -&gt; Unit, onDismiss: () -&gt; Unit, isListeningForPrompt: Boolean = false, onVoiceInput: () -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:BridgeClient.kt$BridgeClient$( provider: String, cwd: String, prompt: String, model: String? = null, title: String? = null, workspaceId: String? = null, /** Paseo permission mode ("auto", "bypassPermissions", …) — null keeps Paseo's own "default" (ask every time). */ modeId: String? = null, /** Which machine runs the agent — a connected remote host's id, or "local". */ machineId: String = "local", /** Run in a brand-new git worktree instead of [cwd]'s own checkout. */ worktree: Boolean = false, onCreated: (AgentInfo) -&gt; Unit = {}, onError: ((String) -&gt; Unit)? = null, )</ID>
+    <ID>LongParameterList:BrowserPanel.kt$( visible: Boolean, url: String, onUrlChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onDismiss: () -&gt; Unit, isListeningForUrl: Boolean = false, onVoiceInput: () -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:DiffPanel.kt$( status: com.lenscode.app.net.GitStatus?, diffPath: String?, diffText: String?, onSelectFile: (String) -&gt; Unit, onStageHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, onDiscardHunk: (path: String, patch: String) -&gt; Unit = { _, _ -&gt; }, discardConfirm: DeleteConfirmState? = null, stagedHunks: Set&lt;Int&gt; = emptySet(), )</ID>
+    <ID>LongParameterList:FilesPanel.kt$( rootLabel: String, path: String, entries: List&lt;DirEntry&gt;, file: FileContent?, onOpenDir: (String) -&gt; Unit, onOpenFile: (String) -&gt; Unit, onUp: () -&gt; Unit, searchQuery: String = "", onSearchQueryChange: (String) -&gt; Unit = {}, searchResults: List&lt;com.lenscode.app.net.FileSearchHit&gt; = emptyList(), composer: (@Composable () -&gt; Unit)? = null, )</ID>
+    <ID>LongParameterList:HomeHud.kt$( diameter: Dp, progress: Float, color: Color, value: String, label: String, modifier: Modifier = Modifier, )</ID>
+    <ID>LongParameterList:HomePanel.kt$( pairingState: PairingState, deviceName: String, onDeviceNameChange: (String) -&gt; Unit, onBeginPairing: () -&gt; Unit, pairingCode: String, onPairingCodeChange: (String) -&gt; Unit, onSubmitPairingCode: () -&gt; Unit, onRetryPairing: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:HomePanel.kt$( state: BridgeClient.UiState, onResetLayout: () -&gt; Unit = {}, pinned: Boolean = false, onTogglePin: () -&gt; Unit = {}, onBringCloser: () -&gt; Unit = {}, onPushFarther: () -&gt; Unit = {}, followMeEnabled: Boolean = false, onToggleFollowMe: () -&gt; Unit = {}, onEnterPip: () -&gt; Unit = {}, pairingState: PairingState = PairingState.Authenticated, deviceName: String = "", onDeviceNameChange: (String) -&gt; Unit = {}, onBeginPairing: () -&gt; Unit = {}, pairingCode: String = "", onPairingCodeChange: (String) -&gt; Unit = {}, onSubmitPairingCode: () -&gt; Unit = {}, onRetryPairing: () -&gt; Unit = {}, weather: com.lenscode.app.net.WeatherReading? = null, weatherLocationDenied: Boolean = false, /** Which workspace the file browser is currently rooted at — e.g. "local" or a worktree/branch name. */ projectLabel: String = "local", /** "local" or a connected remote machine's SSH host alias — never a raw IP (spec §54/§36). */ projectMachineId: String = "local", /** Absolute path on whichever machine [projectMachineId] refers to. Null until the first dir.list completes. */ projectRootPath: String? = null, )</ID>
+    <ID>LongParameterList:RemotePanel.kt$( machines: List&lt;com.lenscode.app.net.MachineInfo&gt;, connectingMachineId: String?, connectError: String?, onConnect: (String) -&gt; Unit, onDisconnect: (String) -&gt; Unit, onViewTerminals: (String) -&gt; Unit, onBrowse: (String) -&gt; Unit, )</ID>
+    <ID>LongParameterList:SettingsPanelContent.kt$( geminiResult: GeminiConfigResult, buildKeyPresent: Boolean, configPath: String, onReload: () -&gt; Unit, currentThemeId: ThemeId = ThemeId.CURSOR, onThemeChange: (ThemeId) -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:TerminalPanel.kt$( terminals: List&lt;PaneInfo&gt;, machineId: String, selected: PaneInfo?, output: String?, onSelect: (PaneInfo) -&gt; Unit, onNew: () -&gt; Unit, onClose: (PaneInfo) -&gt; Unit, onRequestStop: (PaneInfo) -&gt; Unit, stopConfirm: StopConfirmState?, )</ID>
+    <ID>LongParameterList:VoiceOverlays.kt$( isListening: Boolean, partial: String, error: String?, result: VoiceResolution?, onSelectCandidate: (String) -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:VoiceOverlays.kt$( isListening: Boolean, partial: String, error: String?, reviewText: String?, isRouting: Boolean, onSubmit: () -&gt; Unit, onCancel: () -&gt; Unit, onDismissError: () -&gt; Unit, )</ID>
+    <ID>LoopWithTooManyJumpStatements:CodeHighlighter.kt$for</ID>
+    <ID>MagicNumber:AgentComposer.kt$1800</ID>
+    <ID>MagicNumber:AgentPickerOverlay.kt$0xFF1E1E24</ID>
+    <ID>MagicNumber:AgentsPanel.kt$0xAA000000</ID>
+    <ID>MagicNumber:AgentsPanel.kt$500</ID>
+    <ID>MagicNumber:BatteryStatus.kt$0.4f</ID>
+    <ID>MagicNumber:BatteryStatus.kt$1.3f</ID>
+    <ID>MagicNumber:BatteryStatus.kt$100</ID>
+    <ID>MagicNumber:BatteryStatus.kt$100f</ID>
+    <ID>MagicNumber:BatteryStatus.kt$15</ID>
+    <ID>MagicNumber:BatteryStatus.kt$30</ID>
+    <ID>MagicNumber:BridgeClient.kt$BridgeClient$10</ID>
+    <ID>MagicNumber:BridgeClient.kt$BridgeClient$1000</ID>
+    <ID>MagicNumber:BridgeClient.kt$BridgeClient$20</ID>
+    <ID>MagicNumber:BridgeClient.kt$BridgeClient$200</ID>
+    <ID>MagicNumber:BridgeClient.kt$BridgeClient$3</ID>
+    <ID>MagicNumber:BrowserPanel.kt$0xAA000000</ID>
+    <ID>MagicNumber:CodeHighlighter.kt$500</ID>
+    <ID>MagicNumber:DiffPanel.kt$0x2A3FB950</ID>
+    <ID>MagicNumber:DiffPanel.kt$0x2AF85149</ID>
+    <ID>MagicNumber:DiffPanel.kt$0xAA000000</ID>
+    <ID>MagicNumber:DiffPanel.kt$0xFFB8E6B0</ID>
+    <ID>MagicNumber:DiffPanel.kt$0xFFF2B8B5</ID>
+    <ID>MagicNumber:Dock.kt$700</ID>
+    <ID>MagicNumber:DockIcon.kt$1.5f</ID>
+    <ID>MagicNumber:DockIcon.kt$10f</ID>
+    <ID>MagicNumber:DockIcon.kt$11f</ID>
+    <ID>MagicNumber:DockIcon.kt$12f</ID>
+    <ID>MagicNumber:DockIcon.kt$13f</ID>
+    <ID>MagicNumber:DockIcon.kt$14f</ID>
+    <ID>MagicNumber:DockIcon.kt$15f</ID>
+    <ID>MagicNumber:DockIcon.kt$16f</ID>
+    <ID>MagicNumber:DockIcon.kt$17f</ID>
+    <ID>MagicNumber:DockIcon.kt$180f</ID>
+    <ID>MagicNumber:DockIcon.kt$18f</ID>
+    <ID>MagicNumber:DockIcon.kt$19f</ID>
+    <ID>MagicNumber:DockIcon.kt$20f</ID>
+    <ID>MagicNumber:DockIcon.kt$21f</ID>
+    <ID>MagicNumber:DockIcon.kt$22f</ID>
+    <ID>MagicNumber:DockIcon.kt$24f</ID>
+    <ID>MagicNumber:DockIcon.kt$3.5f</ID>
+    <ID>MagicNumber:DockIcon.kt$3f</ID>
+    <ID>MagicNumber:DockIcon.kt$4f</ID>
+    <ID>MagicNumber:DockIcon.kt$5.5f</ID>
+    <ID>MagicNumber:DockIcon.kt$5f</ID>
+    <ID>MagicNumber:DockIcon.kt$6.5f</ID>
+    <ID>MagicNumber:DockIcon.kt$6f</ID>
+    <ID>MagicNumber:DockIcon.kt$7.5f</ID>
+    <ID>MagicNumber:DockIcon.kt$7f</ID>
+    <ID>MagicNumber:DockIcon.kt$8</ID>
+    <ID>MagicNumber:DockIcon.kt$8.5f</ID>
+    <ID>MagicNumber:DockIcon.kt$8f</ID>
+    <ID>MagicNumber:DockIcon.kt$9f</ID>
+    <ID>MagicNumber:FilesPanel.kt$0.88f</ID>
+    <ID>MagicNumber:FilesPanel.kt$0.92f</ID>
+    <ID>MagicNumber:FilesPanel.kt$0x33F0C040</ID>
+    <ID>MagicNumber:FilesPanel.kt$0x552F81F7</ID>
+    <ID>MagicNumber:FilesPanel.kt$0xDD000000</ID>
+    <ID>MagicNumber:FilesPanel.kt$60</ID>
+    <ID>MagicNumber:HomeHud.kt$0.06f</ID>
+    <ID>MagicNumber:HomeHud.kt$0.6f</ID>
+    <ID>MagicNumber:HomeHud.kt$100</ID>
+    <ID>MagicNumber:HomeHud.kt$1000</ID>
+    <ID>MagicNumber:HomeHud.kt$2.2f</ID>
+    <ID>MagicNumber:HomeHud.kt$360f</ID>
+    <ID>MagicNumber:HomeHud.kt$4000</ID>
+    <ID>MagicNumber:HomeHud.kt$60f</ID>
+    <ID>MagicNumber:RemotePanel.kt$0xAA000000</ID>
+    <ID>MagicNumber:SnipCropOverlay.kt$0.78f</ID>
+    <ID>MagicNumber:SnipCropOverlay.kt$0.9f</ID>
+    <ID>MagicNumber:SnipCropOverlay.kt$0xFF4FC3F7</ID>
+    <ID>MagicNumber:Surfaces.kt$0.12f</ID>
+    <ID>MagicNumber:Surfaces.kt$0.34f</ID>
+    <ID>MagicNumber:Surfaces.kt$0.4f</ID>
+    <ID>MagicNumber:Surfaces.kt$0.75f</ID>
+    <ID>MagicNumber:Surfaces.kt$0.76f</ID>
+    <ID>MagicNumber:TerminalPanel.kt$0xAA000000</ID>
+    <ID>MagicNumber:Theme.kt$0x0A64D2FF</ID>
+    <ID>MagicNumber:Theme.kt$0x0C268BD2</ID>
+    <ID>MagicNumber:Theme.kt$0x0C86D8EF</ID>
+    <ID>MagicNumber:Theme.kt$0x0C8BE9FD</ID>
+    <ID>MagicNumber:Theme.kt$0x10FFFFFF</ID>
+    <ID>MagicNumber:Theme.kt$0x12FFFFFF</ID>
+    <ID>MagicNumber:Theme.kt$0x182AA198</ID>
+    <ID>MagicNumber:Theme.kt$0x1864D2FF</ID>
+    <ID>MagicNumber:Theme.kt$0x187DDFFF</ID>
+    <ID>MagicNumber:Theme.kt$0x18BD93F9</ID>
+    <ID>MagicNumber:Theme.kt$0x24586E75</ID>
+    <ID>MagicNumber:Theme.kt$0x246272A4</ID>
+    <ID>MagicNumber:Theme.kt$0x24636366</ID>
+    <ID>MagicNumber:Theme.kt$0x246DA3BD</ID>
+    <ID>MagicNumber:Theme.kt$0x38586E75</ID>
+    <ID>MagicNumber:Theme.kt$0x386272A4</ID>
+    <ID>MagicNumber:Theme.kt$0x38636366</ID>
+    <ID>MagicNumber:Theme.kt$0x386F96AB</ID>
+    <ID>MagicNumber:Theme.kt$0x52586E75</ID>
+    <ID>MagicNumber:Theme.kt$0x526272A4</ID>
+    <ID>MagicNumber:Theme.kt$0x52636366</ID>
+    <ID>MagicNumber:Theme.kt$0x527C9CAD</ID>
+    <ID>MagicNumber:Theme.kt$0x55073642</ID>
+    <ID>MagicNumber:Theme.kt$0x551C1C1E</ID>
+    <ID>MagicNumber:Theme.kt$0x553D6278</ID>
+    <ID>MagicNumber:Theme.kt$0x5544475A</ID>
+    <ID>MagicNumber:Theme.kt$0x652AA198</ID>
+    <ID>MagicNumber:Theme.kt$0x6564D2FF</ID>
+    <ID>MagicNumber:Theme.kt$0x65BD93F9</ID>
+    <ID>MagicNumber:Theme.kt$0x65E0F4FF</ID>
+    <ID>MagicNumber:Theme.kt$0x9C073642</ID>
+    <ID>MagicNumber:Theme.kt$0x9C0A0A0A</ID>
+    <ID>MagicNumber:Theme.kt$0x9C172733</ID>
+    <ID>MagicNumber:Theme.kt$0x9C21222C</ID>
+    <ID>MagicNumber:Theme.kt$0xAD073642</ID>
+    <ID>MagicNumber:Theme.kt$0xAD0D0D0D</ID>
+    <ID>MagicNumber:Theme.kt$0xAD1C2D3A</ID>
+    <ID>MagicNumber:Theme.kt$0xAD282A36</ID>
+    <ID>MagicNumber:Theme.kt$0xB02AA198</ID>
+    <ID>MagicNumber:Theme.kt$0xB064D2FF</ID>
+    <ID>MagicNumber:Theme.kt$0xB09BDEFA</ID>
+    <ID>MagicNumber:Theme.kt$0xB0BD93F9</ID>
+    <ID>MagicNumber:Theme.kt$0xB3000000</ID>
+    <ID>MagicNumber:Theme.kt$0xB3073642</ID>
+    <ID>MagicNumber:Theme.kt$0xB3192A37</ID>
+    <ID>MagicNumber:Theme.kt$0xB3282A36</ID>
+    <ID>MagicNumber:Theme.kt$0xBA000000</ID>
+    <ID>MagicNumber:Theme.kt$0xBA002B36</ID>
+    <ID>MagicNumber:Theme.kt$0xBA101F2C</ID>
+    <ID>MagicNumber:Theme.kt$0xBA282A36</ID>
+    <ID>MagicNumber:Theme.kt$0xC50A4A5C</ID>
+    <ID>MagicNumber:Theme.kt$0xC51C1C1E</ID>
+    <ID>MagicNumber:Theme.kt$0xC52D4454</ID>
+    <ID>MagicNumber:Theme.kt$0xC544475A</ID>
+    <ID>MagicNumber:Theme.kt$0xCC073642</ID>
+    <ID>MagicNumber:Theme.kt$0xCC0D0D0D</ID>
+    <ID>MagicNumber:Theme.kt$0xCC263947</ID>
+    <ID>MagicNumber:Theme.kt$0xCC343746</ID>
+    <ID>MagicNumber:Theme.kt$0xCF000000</ID>
+    <ID>MagicNumber:Theme.kt$0xCF002B36</ID>
+    <ID>MagicNumber:Theme.kt$0xCF132330</ID>
+    <ID>MagicNumber:Theme.kt$0xCF21222C</ID>
+    <ID>MagicNumber:Theme.kt$0xD0000000</ID>
+    <ID>MagicNumber:Theme.kt$0xD0002B36</ID>
+    <ID>MagicNumber:Theme.kt$0xD0073642</ID>
+    <ID>MagicNumber:Theme.kt$0xD00A4A5C</ID>
+    <ID>MagicNumber:Theme.kt$0xD0101010</ID>
+    <ID>MagicNumber:Theme.kt$0xD01A344A</ID>
+    <ID>MagicNumber:Theme.kt$0xD01C1C1E</ID>
+    <ID>MagicNumber:Theme.kt$0xD0223342</ID>
+    <ID>MagicNumber:Theme.kt$0xD028293A</ID>
+    <ID>MagicNumber:Theme.kt$0xD0343746</ID>
+    <ID>MagicNumber:Theme.kt$0xD03B687E</ID>
+    <ID>MagicNumber:Theme.kt$0xD0454759</ID>
+    <ID>MagicNumber:Theme.kt$0xE6000000</ID>
+    <ID>MagicNumber:Theme.kt$0xE6002B36</ID>
+    <ID>MagicNumber:Theme.kt$0xE6101A24</ID>
+    <ID>MagicNumber:Theme.kt$0xE6101B26</ID>
+    <ID>MagicNumber:Theme.kt$0xE621222C</ID>
+    <ID>MagicNumber:Theme.kt$0xE6282A36</ID>
+    <ID>MagicNumber:Theme.kt$0xFF0A84FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFF268BD2</ID>
+    <ID>MagicNumber:Theme.kt$0xFF2AA198</ID>
+    <ID>MagicNumber:Theme.kt$0xFF30D158</ID>
+    <ID>MagicNumber:Theme.kt$0xFF4EC9B0</ID>
+    <ID>MagicNumber:Theme.kt$0xFF50FA7B</ID>
+    <ID>MagicNumber:Theme.kt$0xFF569CD6</ID>
+    <ID>MagicNumber:Theme.kt$0xFF586E75</ID>
+    <ID>MagicNumber:Theme.kt$0xFF59E58C</ID>
+    <ID>MagicNumber:Theme.kt$0xFF6272A4</ID>
+    <ID>MagicNumber:Theme.kt$0xFF636366</ID>
+    <ID>MagicNumber:Theme.kt$0xFF64D2FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFF6A9955</ID>
+    <ID>MagicNumber:Theme.kt$0xFF6C71C4</ID>
+    <ID>MagicNumber:Theme.kt$0xFF7DE9FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFF839496</ID>
+    <ID>MagicNumber:Theme.kt$0xFF859900</ID>
+    <ID>MagicNumber:Theme.kt$0xFF8A8A8E</ID>
+    <ID>MagicNumber:Theme.kt$0xFF8A9FAF</ID>
+    <ID>MagicNumber:Theme.kt$0xFF8B9DAD</ID>
+    <ID>MagicNumber:Theme.kt$0xFF8BE9FD</ID>
+    <ID>MagicNumber:Theme.kt$0xFF91CFFF</ID>
+    <ID>MagicNumber:Theme.kt$0xFF93A1A1</ID>
+    <ID>MagicNumber:Theme.kt$0xFF9580FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFF9EB8CC</ID>
+    <ID>MagicNumber:Theme.kt$0xFFA9B1D6</ID>
+    <ID>MagicNumber:Theme.kt$0xFFB0C1D0</ID>
+    <ID>MagicNumber:Theme.kt$0xFFB0C3D1</ID>
+    <ID>MagicNumber:Theme.kt$0xFFB494FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFFB58900</ID>
+    <ID>MagicNumber:Theme.kt$0xFFB5CEA8</ID>
+    <ID>MagicNumber:Theme.kt$0xFFBD93F9</ID>
+    <ID>MagicNumber:Theme.kt$0xFFBF5AF2</ID>
+    <ID>MagicNumber:Theme.kt$0xFFCE9178</ID>
+    <ID>MagicNumber:Theme.kt$0xFFD33682</ID>
+    <ID>MagicNumber:Theme.kt$0xFFD4D4D4</ID>
+    <ID>MagicNumber:Theme.kt$0xFFDC322F</ID>
+    <ID>MagicNumber:Theme.kt$0xFFE0F7FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFFEEE8D5</ID>
+    <ID>MagicNumber:Theme.kt$0xFFEEF7FF</ID>
+    <ID>MagicNumber:Theme.kt$0xFFF1FA8C</ID>
+    <ID>MagicNumber:Theme.kt$0xFFF8F8F2</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFF453A</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFF5555</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFF79C6</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFF7F95</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFFB86C</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFFD166</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFFD60A</ID>
+    <ID>MagicNumber:Theme.kt$0xFFFFFFFF</ID>
+    <ID>MagicNumber:Theme.kt$LensCodeColors$0xFFD8B4FE</ID>
+    <ID>MagicNumber:Theme.kt$LensCodeColors$0xFFDDE5ED</ID>
+    <ID>MagicNumber:Theme.kt$LensCodeColors$0xFFE7FBFF</ID>
+    <ID>MagicNumber:Theme.kt$LensCodeColors$0xFFFF955C</ID>
+    <ID>MagicNumber:VoiceOverlays.kt$0xAA000000</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$3</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$45</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$48</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$51</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$53</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$55</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$56</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$57</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$61</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$63</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$65</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$66</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$67</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$71</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$73</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$75</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$77</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$80</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$81</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$82</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$85</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$86</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$95</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$96</ID>
+    <ID>MagicNumber:WeatherClient.kt$WeatherReading$99</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$100</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$1000f</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$3</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$4</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$40f</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$5000</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$520f</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$900f</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$&lt;no name provided&gt;$0.6f</ID>
+    <ID>MagicNumber:WorkspaceRoot.kt$WorkspaceUiState$0.6f</ID>
+    <ID>MatchingDeclarationName:SnipCapture.kt$SnipCaptureController</ID>
+    <ID>MatchingDeclarationName:TerminalPanel.kt$StopConfirmState</ID>
+    <ID>MatchingDeclarationName:VoiceCommandRouter.kt$VoiceCommand</ID>
+    <ID>MaxLineLength:AgentComposer.kt$.</ID>
+    <ID>MaxLineLength:AgentComposer.kt$Chip("💻 $machineLabel", state.menu == "machine" || state.flash == "machine", { state.toggleMenu("machine") })</ID>
+    <ID>MaxLineLength:AgentComposer.kt$MenuRow</ID>
+    <ID>MaxLineLength:AgentComposer.kt$Text(title, color = LensCodeColors.Text, fontSize = 14.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)</ID>
+    <ID>MaxLineLength:AgentComposer.kt$modifier = Modifier.clickable { state.toggleMenu("branch") }.padding(horizontal = 12.dp, vertical = 7.dp)</ID>
+    <ID>MaxLineLength:AgentComposer.kt$val ComposerBypassMode = ComposerMode("bypassPermissions", "Bypass permissions", "No approval prompts at all", "bypass permissions")</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$"This closes ${target.label}'s runtime. Its history stays in Paseo, but it can't take new messages."</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text("Archive this agent?", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text("Nothing waiting on you.", color = LensCodeColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text("Tap Allow or Deny to answer — never sent without your say.", color = LensCodeColors.Muted, fontSize = 12.sp)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text("cost \$${"%.4f".format(agent.costUsd)}", color = LensCodeColors.Muted, fontSize = 11.sp)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text(agent.label, color = LensCodeColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text(agent.status, color = LensCodeColors.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text(agentLabel, color = LensCodeColors.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text(entry.label, color = LensCodeColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$Text(name.take(1), color = LensCodeColors.agentAccent(kind), fontWeight = FontWeight.Black, fontSize = 14.sp)</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$color = if (action.behavior == "allow") LensCodeColors.Green else LensCodeColors.Red</ID>
+    <ID>MaxLineLength:AgentsPanel.kt$modifier = Modifier.clickable { onRespond(permission, "allow", null) }.padding(end = 20.dp)</ID>
+    <ID>MaxLineLength:BatteryStatus.kt$/** A body-and-nub battery outline with a fill proportional to charge — the shared 24-unit line-icon style from DockIcon.kt. */</ID>
+    <ID>MaxLineLength:BatteryStatus.kt$/** Live battery reading: (percent 0-100, charging). Registers a sticky-intent receiver so it updates as the OS reports changes, no polling. */</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$/** Absolute path of whatever the file browser is currently rooted at — local or remote, never an IP (spec §54/§36). */</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$/** Paseo permission mode ("auto", "bypassPermissions", …) — null keeps Paseo's own "default" (ask every time). */</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$/** Soft-deletes the agent and closes its runtime (spec §57 — caller must have already shown a confirmation card). */</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$/** The workspace Code is currently showing — what a new agent should start in. "local" = the bridge's project root. */</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$/** agentId → machine, learned from agent.list/agent.create, so follow-up requests reach the host the agent runs on. */</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("branch", branch).put("force", force)</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("query", query).put("limit", 20)</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$JSONObject().put("terminalId", terminalId).put("machineId", machineId).put("source", "visible").put("format", "text")</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$if (_terminalsMachineId.value != machineId) switchTerminalsMachine(machineId) else refreshTerminals(machineId)</ID>
+    <ID>MaxLineLength:BridgeClient.kt$BridgeClient$onError?.invoke(error.optString("detail").ifBlank { error.optString("message", "Could not create that agent.") })</ID>
+    <ID>MaxLineLength:BrowserPanel.kt$"Opens as its own window, requested docked to the right — reposition it if it lands somewhere else."</ID>
+    <ID>MaxLineLength:BrowserPanel.kt$&lt;no name provided&gt;$android.util.Log.w("LensCodeBrowser", "SSL error for ${error.url}: ${error.primaryError}")</ID>
+    <ID>MaxLineLength:BrowserPanel.kt$&lt;no name provided&gt;$android.util.Log.w("LensCodeBrowser", "load failed for ${request.url}: ${error.description} (${error.errorCode})")</ID>
+    <ID>MaxLineLength:BrowserPanel.kt$&lt;no name provided&gt;$android.util.Log.w("LensCodeBrowser", "load failed for ${request.url}: HTTP ${errorResponse.statusCode}")</ID>
+    <ID>MaxLineLength:BrowserPanel.kt$&lt;no name provided&gt;$override</ID>
+    <ID>MaxLineLength:BrowserPanel.kt$modifier = Modifier.clickable(enabled = !isListeningForUrl, onClick = onVoiceInput).padding(6.dp)</ID>
+    <ID>MaxLineLength:CodeHighlighter.kt$SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected|data|sealed|open|abstract|annotation|inner|value)\s+)*class\s+(\w+)"""), "class")</ID>
+    <ID>MaxLineLength:CodeHighlighter.kt$SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected|suspend|inline|infix|tailrec|operator|external|open|override|abstract)\s+)*fun\s+(?:&lt;[^&gt;]*&gt;\s*)?(?:[\w]+\.)*(\w+)"""), "function")</ID>
+    <ID>MaxLineLength:CodeHighlighter.kt$SymbolPattern(Regex("""^\s*(?:public|private|protected)\s+(?:static\s+)?[\w&lt;&gt;\[\], ?]+\s+(\w+)\s*\("""), "method")</ID>
+    <ID>MaxLineLength:CodeHighlighter.kt$SymbolPattern(Regex("""^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?interface\s+(\w+)"""), "interface")</ID>
+    <ID>MaxLineLength:DiffPanel.kt$Text("✓ staged", color = LensCodeColors.Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:DiffPanel.kt$Text(deleteConfirm.title, color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:DiffPanel.kt$Text(discardConfirm.title, color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:DiffPanel.kt$diffText.isBlank() -&gt; Text("No textual diff to show.", color = LensCodeColors.Muted, fontSize = 13.sp)</ID>
+    <ID>MaxLineLength:DiffPanel.kt$line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")</ID>
+    <ID>MaxLineLength:DiffPanel.kt$modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onCancel).padding(vertical = 8.dp)</ID>
+    <ID>MaxLineLength:DiffPanel.kt$modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onStash).padding(vertical = 8.dp)</ID>
+    <ID>MaxLineLength:DiffPanel.kt$modifier = Modifier.fillMaxWidth().clickable(onClick = conflict.onWorktree).padding(vertical = 8.dp)</ID>
+    <ID>MaxLineLength:Dock.kt$/** Something needs the user's response here (e.g. a pending agent permission) — independent of [active], since the dock item doesn't have to be the current view to need attention. */</ID>
+    <ID>MaxLineLength:Dock.kt$Brush.verticalGradient(listOf(LensCodeColors.DockActiveGradTop, LensCodeColors.DockActiveGradBottom))</ID>
+    <ID>MaxLineLength:FilesPanel.kt$Text("↑ ..", color = VsCodeColors.Breadcrumb, fontSize = 13.sp, fontFamily = FontFamily.Monospace)</ID>
+    <ID>MaxLineLength:FilesPanel.kt$Text("▲", color = LensCodeColors.Blue, fontSize = 13.sp, modifier = Modifier.clickable { jump(-1) })</ID>
+    <ID>MaxLineLength:FilesPanel.kt$Text("▼", color = LensCodeColors.Blue, fontSize = 13.sp, modifier = Modifier.clickable { jump(1) })</ID>
+    <ID>MaxLineLength:FilesPanel.kt$Text(annotatedLines[idx], fontSize = 12.sp, fontFamily = FontFamily.Monospace)</ID>
+    <ID>MaxLineLength:FilesPanel.kt$color = if (i == segments.lastIndex) VsCodeColors.LineNumberActive else VsCodeColors.Breadcrumb</ID>
+    <ID>MaxLineLength:FilesPanel.kt$editorScope.launch { listState.scrollToItem(sym.line, scrollOffset = -100) }</ID>
+    <ID>MaxLineLength:HomeHud.kt$/** Current-conditions card — icon, temperature, condition label, humidity/wind. Shows a placeholder while loading/unavailable rather than fake data. */</ID>
+    <ID>MaxLineLength:HomeHud.kt$/** System-wide RAM used %, polled every few seconds via ActivityManager.MemoryInfo (no permission needed, unlike per-process CPU). */</ID>
+    <ID>MaxLineLength:HomeHud.kt$Text(value, color = LensCodeColors.Text, fontSize = (diameter.value * 0.16f).sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:HomePanel.kt$"A pairing code is now shown on the bridge's console.\nEnter it below to finish pairing “${pairingState.deviceName}”."</ID>
+    <ID>MaxLineLength:HomePanel.kt$internal</ID>
+    <ID>MaxLineLength:KoogVoiceRouter.kt$VoiceAction.AskAgent$@property:LLMDescription("only if the user named a model for this request (\"using Opus\"), as heard; else null")</ID>
+    <ID>MaxLineLength:KoogVoiceRouter.kt$VoiceAction.SetWorktree$data</ID>
+    <ID>MaxLineLength:KoogVoiceRouter.kt$VoiceRouterContext$/** True when at least one agent has a tool call waiting on you — makes respond_permission a valid interpretation. */</ID>
+    <ID>MaxLineLength:KoogVoiceRouter.kt$VoiceRouterContext$/** What the router tells the model about what's currently on screen, so it can judge which actions are even valid right now. */</ID>
+    <ID>MaxLineLength:KoogVoiceRouter.kt$VoiceStep$@property:LLMDescription("optional, only for type=open_file: 1-based line number if one was mentioned. Null otherwise.")</ID>
+    <ID>MaxLineLength:RemotePanel.kt$val next = if (state.path.endsWith("/")) "${state.path}${entry.name}" else "${state.path}/${entry.name}"</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$.</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$Text("1. Create this file:", color = LensCodeColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$Text("2. Push it to this device at:", color = LensCodeColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$Text("3. From a computer with adb (USB or same-Wi-Fi debugging):", color = LensCodeColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$Text(title, color = LensCodeColors.Eyebrow, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$Triple(LensCodeColors.Idle, "Gemini voice routing: off", "No config file found and no key baked into the build.")</ID>
+    <ID>MaxLineLength:SettingsPanelContent.kt$Triple(LensCodeColors.Idle, "Gemini voice routing: off", "No key in the config file or the build. Voice falls back to the local command matcher.")</ID>
+    <ID>MaxLineLength:SnipCapture.kt$/** Marks one region (an agent chip, the primary panel, the quick dock) as part of [SnipCaptureController.captureComposite]. */</ID>
+    <ID>MaxLineLength:SnipCropOverlay.kt$SnipButton("Cancel", background = Color.White, textColor = Color.Black, enabled = !uploading, onClick = onCancel)</ID>
+    <ID>MaxLineLength:SnipCropOverlay.kt$SnipButton("Save", background = Color.White, textColor = Color.Black, enabled = !uploading, onClick = { onSave(cropRectInBitmapSpace()) })</ID>
+    <ID>MaxLineLength:SnipCropOverlay.kt$drawRect(dim, topLeft = Offset(0f, rect.bottom), size = Size(size.width, size.height - rect.bottom))</ID>
+    <ID>MaxLineLength:SnipCropOverlay.kt$drawRect(dim, topLeft = Offset(rect.right, rect.top), size = Size(size.width - rect.right, rect.height))</ID>
+    <ID>MaxLineLength:TerminalPanel.kt$Text("Stop this process?", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:TerminalPanel.kt$Text(pane.title, color = LensCodeColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:TerminalPanel.kt$Text(selected.title, color = LensCodeColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:Theme.kt$LensCodeColors$/** Per-agent accent, matching .logo.claude/.codex/.hermes/.pi — provider branding, kept theme-independent on purpose. */</ID>
+    <ID>MaxLineLength:VoiceOverlays.kt$Text("Did I get that right?", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:VoiceOverlays.kt$Text("Listening…", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:VoiceOverlays.kt$Text("Thinking…", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:VoiceOverlays.kt$Text("Voice command", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:VoiceOverlays.kt$Text("Voice search", color = LensCodeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$"accept" in h || "auto" in h || "edit" in h -&gt; com.lenscode.app.ui.ComposerModes.first { it.id == "acceptEdits" }</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$"manual" in h || "ask" in h || "default" in h -&gt; com.lenscode.app.ui.ComposerModes.first { it.id == "default" }</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$/** Fuzzy model match over every provider's models (and provider names): "opus" → the Opus model id. Speech rarely matches an id exactly. */</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$/** Maps the old deterministic single-intent router's output onto the new action grammar, for the no-key/offline fallback path. */</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$/** Runs a whole plan's actions in order — see [executeVoiceAction] for what each does and why it's safe to just run them. */</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$AgentChipContent(agent.label, agent.status, LensCodeColors.agentStatusColor(agent.status), agent.provider)</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$SnipRegion</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$SpatialPanel</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$android.util.Log.d("LensCodeFollowMe", "followMe=$ui.followMeEnabled trackingReady=$ui.deviceTrackingReady distance=${ui.followMeDistanceM}m")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$android.util.Log.d("LensCodeVoice", "open_file requested line ${action.line} — not supported yet, ignoring")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$android.util.Log.d("LensCodeVoice", "startVoiceAgent provider=$useProvider model=$useModel mode=$useMode worktree=$useWorktree")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$android.util.Log.d("LensCodeVoice", "started agent ${created.agentId} (tmux)${instruction?.let { " for \"$it\"" } ?: ""}")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$android.util.Log.w("LensCodeVoice", "terminal.create failed: $message (${error.optString("detail")})")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$bridge.applyHunk(path, com.lenscode.app.ui.hunkPatch(header, hunk), "discard", onDone = {}, onError = {})</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$bridge.applyHunk(path, com.lenscode.app.ui.hunkPatch(header, hunk), "stage", onDone = {}, onError = {})</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$else</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$if</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$if (action.model != null &amp;&amp; picked == null) showToast("No model matching \"${action.model}\" — using ${composer.model ?: composer.provider}.")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$if (granted) fetchWeatherForLastKnownLocation() else locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$if (granted) startListening(ui.pendingVoiceMode) else ui.voiceError = "Microphone permission is required for voice input."</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$if (matches.isEmpty()) showToast("No terminal matching \"$target\" found.") else closeAll(matches)</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$message = "Bypass permissions lets agents run every tool call without asking. Say “confirm” or tap Enable."</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$message = "This closes ${agent.label}'s runtime. Its history stays in Paseo, but it can't take new messages."</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$message = "This closes ${target.label}'s runtime. Its history stays in Paseo, but it can't take new messages."</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$message = "This reverts those lines in $path back to HEAD. Uncommitted changes in this hunk are lost."</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$modeId = mode?.id?.takeIf { it != com.lenscode.app.ui.ComposerBypassMode.id }</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$permissions.isNotEmpty() -&gt; executeVoiceAction(com.lenscode.app.voice.VoiceAction.RespondPermission("allow"))</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$showToast(if (action.enabled) "New agents will run in a new worktree." else "Worktree off — agents run in the current checkout.")</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$ui.composerSendRequested = true</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$ui.weatherReading = com.lenscode.app.net.WeatherClient.fetchCurrent(location.latitude, location.longitude)</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$val</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$val reuseTarget = ui.voiceAgentId?.takeIf { id -&gt; agents.any { it.agentId == id &amp;&amp; it.status != "closed" } }</ID>
+    <ID>MaxLineLength:WorkspaceRoot.kt$val task = if (instruction != null) "Task: $instruction" else "No task yet — say a brief hello and wait for the next instruction."</ID>
+    <ID>MayBeConst:CodeHighlighter.kt$private val NUMBER_RE = "\\b\\d+(?:\\.\\d+)?\\b"</ID>
+    <ID>MayBeConst:CodeHighlighter.kt$private val STRING_RE = "\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])*'|`(?:\\\\.|[^`\\\\])*`"</ID>
+    <ID>MayBeConst:CodeHighlighter.kt$private val WORD_RE = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"</ID>
+    <ID>ReturnCount:BridgeClient.kt$BridgeClient.Listener$override fun onMessage(webSocket: WebSocket, text: String)</ID>
+    <ID>ReturnCount:VoiceCommandRouter.kt$private fun extractTarget(text: String, subjectPattern: String): String</ID>
+    <ID>ReturnCount:WorkspaceRoot.kt$fun normalizeBrowserUrl(rawUrl: String): String?</ID>
+    <ID>ReturnCount:WorkspaceRoot.kt$fun resolveModel(heard: String): Pair&lt;String, String?&gt;?</ID>
+    <ID>SwallowedException:AgentsPanel.kt$e: Exception</ID>
+    <ID>SwallowedException:WorkspaceRoot.kt$e: android.content.ActivityNotFoundException</ID>
+    <ID>TooGenericExceptionCaught:AgentsPanel.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:BridgeClient.kt$BridgeClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:BridgeClient.kt$BridgeClient.Listener$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WeatherClient.kt$WeatherClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WorkspaceRoot.kt$e: Exception</ID>
+    <ID>TooManyFunctions:BridgeClient.kt$BridgeClient</ID>
+    <ID>UnusedParameter:BatteryStatus.kt$charging: Boolean</ID>
+  </CurrentIssues>
+</SmellBaseline>

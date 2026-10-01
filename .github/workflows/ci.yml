@@ -30,6 +30,12 @@ jobs:
         working-directory: client-android
         run: ./gradlew :app:testDebugUnitTest
 
+      # Baselined: existing findings are grandfathered in detekt-baseline.xml,
+      # so this fails only on NEW violations.
+      - name: detekt
+        working-directory: client-android
+        run: ./gradlew :app:detekt
+
       # Advisory for now — no lint baseline exists yet, so report only.
       - name: Android lint (advisory)
         working-directory: client-android
