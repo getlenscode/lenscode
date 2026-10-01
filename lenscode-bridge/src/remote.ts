@@ -55,6 +55,10 @@ function localPortFor(machineId: string): number {
 export class RemoteManager {
   private connections = new Map<string, Connection>();
 
+  connectedIds(): string[] {
+    return [...this.connections.keys()];
+  }
+
   isConnected(machineId: string): boolean {
     return this.connections.has(machineId);
   }

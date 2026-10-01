@@ -660,6 +660,7 @@ fun FilesPanelContent(
     searchQuery: String = "",
     onSearchQueryChange: (String) -> Unit = {},
     searchResults: List<com.lenscode.app.net.FileSearchHit> = emptyList(),
+    composer: (@Composable () -> Unit)? = null,
 ) {
     Box(
         Modifier.fillMaxSize().glassFinish(PanelCorner),
@@ -796,6 +797,7 @@ fun FilesPanelContent(
 
             // ── Editor ───────────────────────────────────────────────────
             Column(Modifier.fillMaxSize()) {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
                 if (file == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Select a file to open it.", color = VsCodeColors.Breadcrumb, fontSize = 14.sp)
@@ -1093,57 +1095,11 @@ fun FilesPanelContent(
                         )
                     }
                 }
+                }
+                // Claude Code–style composer, pinned under the editor (see AgentComposer).
+                composer?.invoke()
             }
         }
-    }
-}
-
-/**
- * Which Paseo permission mode voice's ask_agent creates new agents with
- * (docs/paseo-migration-plan.md follow-up — confirmed live: an agent left on
- * Paseo's own "default" mode blocks forever on its first tool call's
- * permission request, since nothing in a hands-free voice flow ever answers
- * it). "manual" keeps that default deliberately — see the app's Permissions
- * queue and AskAgentRespondPermission for how to answer one when picked.
- */
-private val VoiceAgentModes = listOf(
-    "auto" to "Auto",
-    "bypass" to "Bypass",
-    "manual" to "Manual",
-)
-
-@Composable
-private fun VoiceAgentModeSelector(selected: String, onSelect: (String) -> Unit) {
-    Column {
-        Text("NEW AGENT PERMISSIONS (VOICE)", color = LensCodeColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((id, label) in VoiceAgentModes) {
-                val active = id == selected
-                Text(
-                    label,
-                    color = if (active) LensCodeColors.Text else LensCodeColors.Muted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (active) LensCodeColors.DockActiveGradTop else LensCodeColors.CardBg)
-                        .border(1.dp, if (active) LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder, RoundedCornerShape(3.dp))
-                        .clickable { onSelect(id) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            when (selected) {
-                "auto" -> "Paseo's classifier auto-approves low-risk tool calls, still asks about risky ones."
-                "bypass" -> "No approval prompts at all — fully hands-free, use with caution."
-                else -> "Every tool call waits for you — approve in Permissions, or by voice (\"allow\"/\"deny\")."
-            },
-            color = LensCodeColors.Muted,
-            fontSize = 11.sp,
-        )
     }
 }
 
@@ -1194,8 +1150,6 @@ fun AgentsPanelContent(
     agents: List<AgentInfo>,
     onSelect: (AgentInfo) -> Unit,
     onArchive: (AgentInfo) -> Unit = {},
-    voiceAgentModeId: String = "auto",
-    onVoiceAgentModeChange: (String) -> Unit = {},
     // Archived/closed agents (docs/snip-and-agent-management-plan.md) — Paseo
     // still has their full record even after agent.list drops them; this is
     // LensCode's equivalent of Paseo Desktop's own History view.
@@ -1303,8 +1257,6 @@ fun AgentsPanelContent(
             if (agents.isNotEmpty()) {
                 Text("Tap an agent to see status and respond.", color = LensCodeColors.Muted, fontSize = 12.sp)
             }
-            Spacer(Modifier.height(14.dp))
-            VoiceAgentModeSelector(voiceAgentModeId, onVoiceAgentModeChange)
             Spacer(Modifier.height(14.dp))
             if (agents.isEmpty()) {
                 Text(
@@ -1514,135 +1466,15 @@ data class DeleteConfirmState(
     val message: String,
     val onConfirm: () -> Unit,
     val onCancel: () -> Unit,
+    val confirmLabel: String = "Delete",
 )
 
-/** Git / Worktrees view: branch switcher up top, real Paseo worktree.list below. */
+/**
+ * Dirty-tree branch-switch card (spec §27). Rendered at the app's overlay level
+ * now that the Git tab is gone — branch switching lives in the Code composer.
+ */
 @Composable
-fun GitPanelContent(
-    worktrees: List<com.lenscode.app.net.WorktreeInfo>,
-    branches: List<String>,
-    currentBranch: String?,
-    onOpenInCode: (com.lenscode.app.net.WorktreeInfo) -> Unit,
-    onSwitchBranch: (String) -> Unit,
-    onDeleteBranch: (String) -> Unit,
-    onRemoveWorktree: (com.lenscode.app.net.WorktreeInfo) -> Unit,
-    conflict: BranchConflictState?,
-    deleteConfirm: DeleteConfirmState?,
-) {
-    Box(Modifier.fillMaxSize()) {
-    GlassSurface {
-        Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Eyebrow("BRANCH" + (currentBranch?.let { " · $it" } ?: ""))
-            Spacer(Modifier.height(10.dp))
-            if (branches.isEmpty()) {
-                Text("No branches found.", color = LensCodeColors.Muted, fontSize = 13.sp)
-            } else {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    for (branch in branches) {
-                        val isCurrent = branch == currentBranch
-                        Row(
-                            Modifier
-                                .padding(end = 8.dp)
-                                .clip(RoundedCornerShape(CardCorner))
-                                .background(if (isCurrent) LensCodeColors.DockActiveGradTop else LensCodeColors.CardBg)
-                                .border(
-                                    1.dp,
-                                    if (isCurrent) LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder,
-                                    RoundedCornerShape(CardCorner),
-                                )
-                                .clickable(enabled = !isCurrent) { onSwitchBranch(branch) }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                branch,
-                                color = if (isCurrent) LensCodeColors.ActiveDock else LensCodeColors.Text,
-                                fontSize = 13.sp,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                            )
-                            // Never the current branch — git itself refuses that anyway.
-                            if (!isCurrent) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "×",
-                                    color = LensCodeColors.Muted,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.clickable { onDeleteBranch(branch) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-            Eyebrow("WORKTREES")
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Tap a worktree to open its checkout in Code.",
-                color = LensCodeColors.Muted,
-                fontSize = 12.sp,
-            )
-            Spacer(Modifier.height(14.dp))
-            if (worktrees.isEmpty()) {
-                Text("No worktrees found.", color = LensCodeColors.Muted, fontSize = 14.sp)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Create one with `paseo` or the desktop app's worktree picker.",
-                    color = LensCodeColors.Muted,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(worktrees) { wt ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(3.dp))
-                                .clickable { onOpenInCode(wt) }
-                                .padding(horizontal = 6.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // Paseo's worktree list is Paseo-owned linked worktrees only —
-                            // it never includes the repo's main checkout (docs/paseo-migration-plan.md,
-                            // Phase 3), so every entry here is removable.
-                            StatusDot(LensCodeColors.Cyan, size = 7.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.width(220.dp)) {
-                                Text(
-                                    wt.branch ?: "(detached)",
-                                    color = LensCodeColors.Text,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(
-                                    "linked worktree",
-                                    color = LensCodeColors.Muted,
-                                    fontSize = 11.sp,
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                wt.path,
-                                color = LensCodeColors.Eyebrow,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "🗑",
-                                fontSize = 13.sp,
-                                modifier = Modifier.clickable { onRemoveWorktree(wt) }.padding(4.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // A dirty tree is never resolved silently (spec §27) — this always
-    // appears first, and the actual switch only happens after a choice here.
+fun BranchConflictCard(conflict: BranchConflictState?) {
     if (conflict != null) {
         Box(
             Modifier.fillMaxSize().background(Color(0xAA000000)),
@@ -1695,7 +1527,11 @@ fun GitPanelContent(
             }
         }
     }
-    // Branch delete / worktree removal — never happens without this (spec §57).
+}
+
+/** Destructive-action confirmation card (spec §57), shown app-wide over whatever view asked for it. */
+@Composable
+fun DeleteConfirmCard(deleteConfirm: DeleteConfirmState?) {
     if (deleteConfirm != null) {
         Box(
             Modifier.fillMaxSize().background(Color(0xAA000000)),
@@ -1722,7 +1558,7 @@ fun GitPanelContent(
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            "Delete",
+                            deleteConfirm.confirmLabel,
                             color = LensCodeColors.Red,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -1732,7 +1568,6 @@ fun GitPanelContent(
                 }
             }
         }
-    }
     }
 }
 

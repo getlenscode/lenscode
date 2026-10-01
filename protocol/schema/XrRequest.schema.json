@@ -15,7 +15,7 @@
         },
         "protocolVersion": {
           "type": "number",
-          "const": 1
+          "const": 3
         },
         "deviceId": {
           "type": "string",
@@ -146,7 +146,7 @@
           "items": {
             "type": "string",
             "enum": [
-              "herdr",
+              "backend",
               "git",
               "files",
               "machines"
@@ -263,6 +263,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
@@ -303,6 +306,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
@@ -323,6 +329,9 @@
         "type": {
           "type": "string",
           "const": "terminal.list"
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
@@ -350,6 +359,9 @@
         },
         "cwd": {
           "type": "string"
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
@@ -369,15 +381,18 @@
           "type": "string",
           "const": "terminal.close"
         },
-        "paneId": {
+        "terminalId": {
           "type": "string",
           "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "paneId"
+        "terminalId"
       ],
       "additionalProperties": false
     },
@@ -392,15 +407,18 @@
           "type": "string",
           "const": "terminal.focus"
         },
-        "paneId": {
+        "terminalId": {
           "type": "string",
           "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "paneId"
+        "terminalId"
       ],
       "additionalProperties": false
     },
@@ -415,19 +433,22 @@
           "type": "string",
           "const": "terminal.rename"
         },
-        "paneId": {
+        "terminalId": {
           "type": "string",
           "minLength": 1
         },
         "name": {
           "type": "string",
           "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "paneId",
+        "terminalId",
         "name"
       ],
       "additionalProperties": false
@@ -443,7 +464,7 @@
           "type": "string",
           "const": "terminal.read"
         },
-        "paneId": {
+        "terminalId": {
           "type": "string",
           "minLength": 1
         },
@@ -468,12 +489,15 @@
             "text",
             "ansi"
           ]
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "paneId",
+        "terminalId",
         "source",
         "format"
       ],
@@ -490,18 +514,21 @@
           "type": "string",
           "const": "terminal.input"
         },
-        "paneId": {
+        "terminalId": {
           "type": "string",
           "minLength": 1
         },
         "text": {
+          "type": "string"
+        },
+        "machineId": {
           "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "paneId",
+        "terminalId",
         "text"
       ],
       "additionalProperties": false
@@ -517,43 +544,23 @@
           "type": "string",
           "const": "terminal.interrupt"
         },
-        "paneId": {
+        "terminalId": {
           "type": "string",
           "minLength": 1
         },
         "confirmed": {
           "type": "boolean",
           "const": true
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "paneId",
+        "terminalId",
         "confirmed"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "type": {
-          "type": "string",
-          "const": "terminal.process_info"
-        },
-        "paneId": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [
-        "id",
-        "type",
-        "paneId"
       ],
       "additionalProperties": false
     },
@@ -582,6 +589,9 @@
             "worktree",
             "abort"
           ]
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
@@ -601,9 +611,45 @@
         },
         "type": {
           "type": "string",
+          "const": "git.branch.delete"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "workspaceId",
+        "branch"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
           "const": "git.status"
         },
         "workspaceId": {
+          "type": "string"
+        },
+        "machineId": {
           "type": "string"
         }
       },
@@ -623,38 +669,533 @@
         },
         "type": {
           "type": "string",
-          "const": "herdr.request"
+          "const": "git.diff"
         },
-        "request": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "method": {
-              "type": "string",
-              "minLength": 1
-            },
-            "params": {
-              "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {}
-            }
-          },
-          "required": [
-            "id",
-            "method",
-            "params"
-          ],
-          "additionalProperties": false
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
         }
       },
       "required": [
         "id",
         "type",
-        "request"
+        "workspaceId",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "git.hunk.apply"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "patch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "stage",
+            "discard"
+          ]
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "workspaceId",
+        "path",
+        "patch",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "git.branches"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "workspaceId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "machine.list"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "machine.connect"
+        },
+        "machineId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "machineId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "machine.disconnect"
+        },
+        "machineId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "machineId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.list"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.history"
+        },
+        "search": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.create"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "modeId": {
+          "type": "string"
+        },
+        "worktree": {
+          "type": "boolean"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "provider",
+        "cwd"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.send"
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "agentId",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.timeline"
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "agentId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.archive"
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "agentId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "permission.list"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "permission.respond"
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permissionRequestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "behavior": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "selectedActionId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "agentId",
+        "permissionRequestId",
+        "behavior"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "provider.list"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "worktree.list"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "workspaceId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "worktree.open"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "worktree.remove"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "workspaceId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "snip.upload"
+        },
+        "pngBase64": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "pngBase64"
       ],
       "additionalProperties": false
     }

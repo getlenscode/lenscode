@@ -573,7 +573,19 @@ export class BridgeServer {
       case "agent.list": {
         if (!(await this.requireBackend(ws, req.id))) return;
         try {
-          this.send(ws, { id: req.id, result: { agents: await this.agents.list() } });
+          const local = (await this.agents.list()).map((a) => ({ ...a, machineId: "local" }));
+          // Agents running on connected remote hosts show up in the same list,
+          // tagged with their machine so later send/archive/etc. go to the right one.
+          const remote = await Promise.all(
+            this.remote.connectedIds().map(async (machineId) => {
+              try {
+                return (await this.agentsFor(machineId).list()).map((a) => ({ ...a, machineId }));
+              } catch {
+                return []; // one unreachable host shouldn't hide every other agent
+              }
+            }),
+          );
+          this.send(ws, { id: req.id, result: { agents: [...local, ...remote.flat()] } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -600,8 +612,15 @@ export class BridgeServer {
         return;
       }
       case "agent.create": {
-        if (!(await this.requireBackend(ws, req.id))) return;
+        const createMachineId = req.machineId ?? "local";
+        const createRemote = createMachineId !== "local";
+        if (!createRemote && !(await this.requireBackend(ws, req.id))) return;
         try {
+          // A restart drops every SSH tunnel — reconnect on demand instead of
+          // making the user redo the Remote → Connect dance first.
+          if (createRemote && !this.remote.isConnected(createMachineId)) {
+            await this.remote.connect(createMachineId);
+          }
           // req.cwd is whatever the client had handy — the XR client in
           // particular has no real filesystem view of its own and just sends
           // ".", which means nothing to Paseo (it'd resolve against the
@@ -610,19 +629,44 @@ export class BridgeServer {
           // missing/relative cwd as "the local workspace root" the same way
           // resolveWorkspaceRoot does for files/git, rather than passing it
           // through unresolved.
+          // On a remote machine the client's workspaceId IS the absolute folder
+          // it picked (see resolveFiles/gitFor) — there's no local Paseo
+          // workspace to look up, so use it directly.
           const cwd = req.cwd && req.cwd !== "." && req.cwd.startsWith("/")
             ? req.cwd
-            : await this.resolveWorkspaceRoot(req.workspaceId ?? "local");
-          const agent = await this.agents.create({
+            : createRemote
+              ? req.workspaceId ?? ""
+              : await this.resolveWorkspaceRoot(req.workspaceId ?? "local");
+          if (createRemote && !cwd.startsWith("/")) {
+            throw new Error("Pick a folder on that machine first.");
+          }
+          let agentCwd = cwd;
+          // "local" is the bridge's own alias for the project root, not a real Paseo workspace id.
+          let agentWorkspaceId = !createRemote && req.workspaceId && req.workspaceId !== "local" ? req.workspaceId : undefined;
+          if (req.worktree) {
+            // Fresh worktree off the current checkout — the agent works there
+            // so the user's own tree is never touched.
+            const client = await this.paseoClientFor(createMachineId);
+            const created = await client.daemon.createPaseoWorktree({
+              cwd,
+              ...(req.title ? { nameContext: req.title } : {}),
+            } as Parameters<typeof client.daemon.createPaseoWorktree>[0]);
+            if (created.error || !created.workspace) {
+              throw new Error(created.error ?? "worktree creation failed");
+            }
+            agentWorkspaceId = created.workspace.id;
+            agentCwd = created.workspace.workspaceDirectory ?? created.workspace.projectRootPath ?? cwd;
+          }
+          const agent = await this.agentsFor(createMachineId).create({
             provider: req.provider,
             model: req.model,
-            cwd,
-            workspaceId: req.workspaceId,
+            cwd: agentCwd,
+            workspaceId: agentWorkspaceId,
             title: req.title,
             prompt: req.prompt,
             modeId: req.modeId,
           });
-          this.send(ws, { id: req.id, result: { agent } });
+          this.send(ws, { id: req.id, result: { agent: { ...agent, machineId: createMachineId } } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -634,7 +678,7 @@ export class BridgeServer {
       case "agent.timeline": {
         if (!(await this.requireBackend(ws, req.id))) return;
         try {
-          const entries = await this.agents.timeline(req.agentId, req.limit);
+          const entries = await this.agentsFor(req.machineId ?? "local").timeline(req.agentId, req.limit);
           this.send(ws, { id: req.id, result: { entries } });
         } catch (e) {
           this.send(ws, {
@@ -647,7 +691,7 @@ export class BridgeServer {
       case "agent.send": {
         if (!(await this.requireBackend(ws, req.id))) return;
         try {
-          await this.agents.send(req.agentId, req.text);
+          await this.agentsFor(req.machineId ?? "local").send(req.agentId, req.text);
           this.send(ws, { id: req.id, result: { sent: true } });
         } catch (e) {
           this.send(ws, {
@@ -660,7 +704,7 @@ export class BridgeServer {
       case "agent.archive": {
         if (!(await this.requireBackend(ws, req.id))) return;
         try {
-          await this.agents.archive(req.agentId);
+          await this.agentsFor(req.machineId ?? "local").archive(req.agentId);
           this.send(ws, { id: req.id, result: { archived: req.agentId } });
         } catch (e) {
           this.send(ws, {
@@ -673,7 +717,11 @@ export class BridgeServer {
       case "permission.list": {
         if (!(await this.requireBackend(ws, req.id))) return;
         try {
-          this.send(ws, { id: req.id, result: { permissions: await this.agents.pendingPermissions() } });
+          const local = await this.agents.pendingPermissions();
+          const remote = await Promise.all(
+            this.remote.connectedIds().map((machineId) => this.agentsFor(machineId).pendingPermissions().catch(() => [])),
+          );
+          this.send(ws, { id: req.id, result: { permissions: [...local, ...remote.flat()] } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -685,7 +733,7 @@ export class BridgeServer {
       case "permission.respond": {
         if (!(await this.requireBackend(ws, req.id))) return;
         try {
-          await this.agents.respondToPermission(
+          await this.agentsFor(req.machineId ?? "local").respondToPermission(
             req.agentId,
             req.permissionRequestId,
             req.behavior,
@@ -992,6 +1040,20 @@ export class BridgeServer {
         openWorkspaceId: workspace?.id ?? null,
       };
     });
+  }
+
+  private remoteAgents = new Map<string, { client: PaseoClient; agents: Agents }>();
+
+  /** The agent API for "local" or a connected remote machine (re-created if that machine reconnected with a new client). */
+  private agentsFor(machineId: string): Agents {
+    if (machineId === "local") return this.agents;
+    const client = this.remote.clientFor(machineId);
+    if (!client) throw new Error(`Not connected to ${machineId} — connect to it first.`);
+    const cached = this.remoteAgents.get(machineId);
+    if (cached && cached.client === client) return cached.agents;
+    const agents = new Agents(client);
+    this.remoteAgents.set(machineId, { client, agents });
+    return agents;
   }
 
   /** Resolves "local" or a connected remote machine id to its PaseoClient, throwing a user-facing message otherwise. */

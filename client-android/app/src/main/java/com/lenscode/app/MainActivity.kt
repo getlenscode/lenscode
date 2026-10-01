@@ -59,7 +59,6 @@ import com.lenscode.app.ui.LensCodeCorners
 import com.lenscode.app.ui.DiffPanelContent
 import com.lenscode.app.ui.DockButtonContent
 import com.lenscode.app.ui.FilesPanelContent
-import com.lenscode.app.ui.GitPanelContent
 import com.lenscode.app.ui.PermissionsPanelContent
 import com.lenscode.app.ui.RemoteBrowseOverlay
 import com.lenscode.app.ui.RemotePanelContent
@@ -245,6 +244,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     val gitDiffText by bridge.gitDiffText.collectAsState()
     val branches by bridge.branches.collectAsState()
     val currentBranch by bridge.currentBranch.collectAsState()
+    val providers by bridge.providers.collectAsState()
     val voiceResult by bridge.voiceResult.collectAsState()
     var activeView by remember { mutableStateOf("home") }
     var selectedPane by remember { mutableStateOf<PaneInfo?>(null) }
@@ -273,7 +273,11 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     var openAgentPickerAgents by remember { mutableStateOf<List<com.lenscode.app.net.AgentInfo>>(emptyList()) }
     val snipScope = rememberCoroutineScope()
     fun showToast(message: String) {
-        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+        // Bridge callbacks arrive on the network thread, and Toast throws off
+        // the main looper — which silently aborted whatever ran after it.
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     // ── Browser dock button ──────────────────────────────────────────────
@@ -376,20 +380,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     // querying Paseo directly, and interrupting one kills the process
     // outright rather than leaving it running the way a real terminal would.
     var voiceAgentTerminalId by remember { mutableStateOf<String?>(null) }
-    // "auto" | "bypass" | "manual" — set via the dropdown in the Agents view
-    // (VoiceAgentModeSelector). Maps to the Paseo modeId a new voice agent is
-    // created with; see modeIdFor.
-    var voiceAgentModeId by remember { mutableStateOf("auto") }
-    fun modeIdFor(choice: String): String? = when (choice) {
-        // Claude Code's --permission-mode only accepts acceptEdits,
-        // bypassPermissions, default, plan (confirmed live — "auto" made every
-        // agent's first turn fail with "argument 'auto' is invalid"). acceptEdits
-        // is the closest real mode to the "auto-approve low-risk" copy this
-        // choice shows in VoiceAgentModeSelector.
-        "auto" -> "acceptEdits"
-        "bypass" -> "bypassPermissions"
-        else -> null // "manual" — Paseo's own default (ask every time)
-    }
+    // Mode / model / worktree for new agents — one shared state for the Code
+    // composer's chips and voice's ask_agent (and its set_* actions), so what
+    // you see on the chips is exactly what a spoken task will use.
+    val composer = remember { com.lenscode.app.ui.ComposerState() }
 
     // ── Device pairing (spec §55) ────────────────────────────────────────
     val pairingState by bridge.pairingState.collectAsState()
@@ -462,6 +456,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
         }
     }
 
+    var composerSendRequested by remember { mutableStateOf(false) }
+
     fun startListening(mode: String) {
         voiceMode = mode
         voiceError = null
@@ -473,6 +469,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
             onPartial = { text ->
                 voicePartial = text
                 if (mode == "agentPrompt") agentPromptText = text // live feedback right in the field being filled
+                if (mode == "composer") composer.prompt = text
                 if (mode == "browserUrl") browserUrl = com.lenscode.app.voice.normalizeSpokenAddress(text)
             },
             onResult = { text ->
@@ -481,6 +478,17 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 when (mode) {
                     "fileSearch" -> bridge.voiceSearch(text)
                     "agentPrompt" -> agentPromptText = text
+                    // Dictation into the Code composer: lands in the box for
+                    // review, never sends by itself — except the bare word
+                    // "send", so a fully hands-free round trip is possible.
+                    "composer" -> {
+                        val cleaned = text.trim().trimEnd('.', '!', '?').lowercase()
+                        if (cleaned in setOf("send", "send it", "submit", "go")) {
+                            composerSendRequested = true // handled once startVoiceAgent exists — see LaunchedEffect below
+                        } else {
+                            composer.prompt = text
+                        }
+                    }
                     // An address, not a sentence — "one nine two dot one six
                     // eight..." needs the digit/symbol-word collapsing, not
                     // the raw transcript.
@@ -584,15 +592,44 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
      * Shared by ask_agent (with a task) and new_agent (without one) — both end up
      * creating the same tmux-backed agent, just with a different first prompt.
      */
-    fun startVoiceAgent(instruction: String?) {
+    fun startVoiceAgent(
+        instruction: String?,
+        // One-shot overrides from a spoken "…in a new worktree using Opus" —
+        // they apply to this agent only and never touch the composer's defaults.
+        modeId: String? = null,
+        provider: String? = null,
+        model: String? = null,
+        worktree: Boolean? = null,
+    ) {
+        // The agent runs where Code is pointed: this machine, or the connected
+        // remote host whose folder is open (its workspaceId is that folder's path).
+        val agentMachine = filesMachineIdFlow
+        // There is no "local" machine in this app — every agent runs on a
+        // registered host (your laptop included). Nothing picked yet → ask.
+        if (agentMachine == "local") {
+            activeView = "code"
+            composer.menu = "machine"
+            showToast("Pick a machine first — tap the machine chip, or say its name.")
+            return
+        }
+        val remote = true
         activeView = "agents"
+        val useProvider = provider ?: composer.provider
+        val useModel = if (provider != null || model != null) model else composer.model
+        val useMode = modeId ?: composer.modeId
+        val useWorktree = worktree ?: composer.worktree
+        android.util.Log.d("LensCodeVoice", "startVoiceAgent provider=$useProvider model=$useModel mode=$useMode worktree=$useWorktree")
         // A tmux session both the agent and the Terminal view share
         // (docs/paseo-migration-plan.md follow-up) — created once,
         // then just told about in every later prompt. See the
         // instruction text below for exactly what this buys.
-        fun createAgentInTmux(terminalId: String) {
-            bridge.inputTerminal(terminalId, "tmux new -A -s lenscode-agent\n")
-            val prompt = """
+        // terminalId == null → the shared terminal couldn't be created (Paseo's
+        // terminal.create can fail independently of agents), so the agent is
+        // started anyway, just without the tmux mirroring instructions.
+        fun createAgentInTmux(terminalId: String?) {
+            if (terminalId != null) bridge.inputTerminal(terminalId, "tmux new -A -s lenscode-agent\n")
+            val task = if (instruction != null) "Task: $instruction" else "No task yet — say a brief hello and wait for the next instruction."
+            val prompt = if (terminalId == null) task else """
                 You have a tmux session named "lenscode-agent" available, mirrored live
                 in this workspace's own Terminal view. Always run shell commands
                 through it instead of your default tool execution — that's what
@@ -605,11 +642,16 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 (tmux send-keys -t lenscode-agent C-c, or kill its pid) rather than
                 canceling your own tool call.
 
-                ${if (instruction != null) "Task: $instruction" else "No task yet — say a brief hello and wait for the next instruction."}
+                $task
             """.trimIndent()
             bridge.createAgent(
-                provider = "claude",
-                cwd = ".",
+                provider = useProvider,
+                model = useModel,
+                worktree = useWorktree,
+                // The workspace Code is showing (a worktree's, say) — not the bridge's own root.
+                workspaceId = bridge.currentWorkspaceId.takeIf { it != "local" },
+                machineId = agentMachine,
+                cwd = if (remote) bridge.currentWorkspaceId else ".",
                 prompt = prompt,
                 // Without an explicit title, Paseo falls back to a prefix of
                 // `prompt` itself — which for every voice-created agent starts
@@ -620,16 +662,23 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 // agent's label is shown, permission cards included, hiding
                 // which agent a pending permission was actually for.
                 title = instruction ?: "Voice agent",
-                modeId = modeIdFor(voiceAgentModeId),
+                modeId = useMode,
                 onCreated = { created ->
                     voiceAgentId = created.agentId
+                    if (useWorktree) showToast("Started in a new worktree.")
                     android.util.Log.d("LensCodeVoice", "started agent ${created.agentId} (tmux)${instruction?.let { " for \"$it\"" } ?: ""}")
                 },
-                onError = { android.util.Log.w("LensCodeVoice", "agent.create failed") },
+                onError = { message ->
+                    android.util.Log.w("LensCodeVoice", "agent.create failed: $message")
+                    showToast("Couldn't start the agent: ${message.removePrefix("Error: ")}")
+                },
             )
         }
         val terminalId = voiceAgentTerminalId
-        if (terminalId != null) {
+        if (remote) {
+            // The shared tmux terminal is a local convenience — skip it on a remote host.
+            createAgentInTmux(null)
+        } else if (terminalId != null) {
             createAgentInTmux(terminalId)
         } else {
             bridge.createTerminal(
@@ -642,6 +691,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                     val message = error.optString("message", "Couldn't start the agent's terminal.")
                     android.util.Log.w("LensCodeVoice", "terminal.create failed: $message (${error.optString("detail")})")
                     voiceError = message
+                    // Don't let a terminal failure block the agent itself.
+                    showToast("Terminal unavailable — starting the agent without it.")
+                    createAgentInTmux(null)
                 },
             )
         }
@@ -758,6 +810,125 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
         )
     }
 
+    // ── Code-view composer helpers (shared by taps and voice) ──────────────
+    fun norm(text: String) = text.lowercase().filter { it.isLetterOrDigit() }
+
+    fun sendComposer() {
+        val text = composer.prompt.trim()
+        if (text.isEmpty()) return
+        composer.prompt = ""
+        composer.menu = null
+        showToast("Starting agent…")
+        startVoiceAgent(instruction = text)
+    }
+    LaunchedEffect(composerSendRequested) {
+        if (composerSendRequested) {
+            composerSendRequested = false
+            sendComposer()
+        }
+    }
+
+    /** Maps a spoken/typed mode name to one of the composer's modes; null if it isn't a mode at all. */
+    fun resolveMode(heard: String): com.lenscode.app.ui.ComposerMode? {
+        val h = heard.lowercase()
+        return when {
+            "bypass" in h || "skip" in h -> com.lenscode.app.ui.ComposerBypassMode
+            "plan" in h -> com.lenscode.app.ui.ComposerModes.first { it.id == "plan" }
+            "manual" in h || "ask" in h || "default" in h -> com.lenscode.app.ui.ComposerModes.first { it.id == "default" }
+            "accept" in h || "auto" in h || "edit" in h -> com.lenscode.app.ui.ComposerModes.first { it.id == "acceptEdits" }
+            else -> null
+        }
+    }
+
+    /** Fuzzy model match over every provider's models (and provider names): "opus" → the Opus model id. Speech rarely matches an id exactly. */
+    fun resolveModel(heard: String): Pair<String, String?>? {
+        val want = norm(heard)
+        if (want.isEmpty()) return null
+        for (p in providers.filter { it.available }) if (norm(p.provider) == want) return p.provider to null
+        val hits = providers.filter { it.available }.flatMap { p -> p.models.map { p.provider to it } }
+            .filter { norm(it.second).contains(want) }
+        // Several versions of one family match ("opus") — take the shortest id,
+        // which is the base/latest alias, and the confirmation toast names it.
+        return hits.minByOrNull { it.second.length }
+    }
+
+    /** Applies a mode pick. Bypass always asks first — by tap or by voice ("say confirm"). */
+    fun chooseMode(m: com.lenscode.app.ui.ComposerMode) {
+        if (m.id == com.lenscode.app.ui.ComposerBypassMode.id && composer.modeId != m.id) {
+            deleteConfirm = com.lenscode.app.ui.DeleteConfirmState(
+                title = "Turn off all approvals?",
+                message = "Bypass permissions lets agents run every tool call without asking. Say “confirm” or tap Enable.",
+                confirmLabel = "Enable",
+                onConfirm = {
+                    composer.modeId = m.id
+                    composer.flash = "mode"
+                    deleteConfirm = null
+                    showToast("Mode → ${m.label}")
+                },
+                onCancel = { deleteConfirm = null },
+            )
+        } else {
+            composer.modeId = m.id
+            composer.flash = "mode"
+            showToast("Mode → ${m.label}")
+        }
+    }
+
+    fun chooseModel(provider: String, model: String?) {
+        composer.provider = provider
+        composer.model = model
+        composer.flash = "model"
+        showToast("Model → ${model ?: provider}")
+    }
+
+    /** Branch switch with the dirty-tree resolution card (spec §27) — shared by the branch menu and voice. */
+    fun switchBranchFlow(target: String) {
+        fun opened(workspaceId: String?, machineId: String) {
+            branchConflict = null
+            if (workspaceId != null) {
+                bridge.openWorkspaceInFiles(workspaceId, target, machineId)
+                activeView = "code"
+            }
+        }
+        fun attempt(onDirty: String?) {
+            bridge.switchBranch(
+                target = target,
+                onDirty = onDirty,
+                onSwitched = {
+                    branchConflict = null
+                    composer.flash = "branch"
+                    showToast("Branch → $target")
+                },
+                onWorktreeCreated = { workspaceId, machineId -> opened(workspaceId, machineId) },
+                onConflict = {
+                    if (onDirty != null) {
+                        branchConflict = null
+                    } else {
+                        branchConflict = com.lenscode.app.ui.BranchConflictState(
+                            target = target,
+                            onStash = { attempt("stash") },
+                            onWorktree = { attempt("worktree") },
+                            onCancel = {
+                                branchConflict = null
+                                attempt("abort")
+                            },
+                        )
+                    }
+                },
+            )
+        }
+        attempt(null)
+    }
+
+    /** Loose branch-name match for speech: exact, then prefix, then substring, ignoring punctuation and case. */
+    fun resolveBranch(heard: String): String? {
+        val want = norm(heard)
+        if (want.isEmpty()) return null
+        return branches.firstOrNull { norm(it) == want }
+            ?: branches.firstOrNull { norm(it).startsWith(want) }
+            ?: branches.firstOrNull { norm(it).contains(want) }
+    }
+
     fun executeVoiceAction(action: com.lenscode.app.voice.VoiceAction) {
         android.util.Log.d("LensCodeVoice", "executing: $action")
         when (action) {
@@ -766,7 +937,18 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 // it opens the URL launch dialog first (BrowserLaunchOverlay),
                 // since there's no browser view to land on with nothing loaded.
                 // Voice mirrors that instead of showing an empty Browser panel.
-                if (action.view == "browser") browserOverlayOpen = true else activeView = action.view
+                when (action.view) {
+                    "browser" -> browserOverlayOpen = true
+                    // The Git tab is gone — branches and worktrees live in the
+                    // Code composer now. "open git" / "show worktrees" still work.
+                    "git" -> {
+                        activeView = "code"
+                        bridge.refreshBranches()
+                        bridge.refreshWorktrees()
+                        composer.menu = "branch"
+                    }
+                    else -> activeView = action.view
+                }
             }
 
             is com.lenscode.app.voice.VoiceAction.OpenFile -> {
@@ -946,6 +1128,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 // actively aborts an in-flight branch switch server-side —
                 // just clearing the local state would leave that dangling).
                 when {
+                    composer.menu != null -> composer.menu = null
                     archivePickerAgents.isNotEmpty() -> {
                         archivePickerAgents = emptyList()
                         showToast("Canceled.")
@@ -1013,10 +1196,77 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 val openTarget = agentDetail?.agent?.agentId
                 val reuseTarget = voiceAgentId?.takeIf { id -> agents.any { it.agentId == id && it.status != "closed" } }
                 val target = openTarget ?: reuseTarget
-                if (target != null) {
+                val wantsNewAgent = action.model != null || action.mode != null || action.worktree == true
+                if (target != null && !wantsNewAgent) {
                     bridge.sendAgentMessage(target, action.instruction)
                 } else {
-                    startVoiceAgent(instruction = action.instruction)
+                    // Settings named inside the sentence ("in a new worktree using
+                    // Opus…") only make sense for a fresh agent, and only for this one.
+                    val mode = action.mode?.let { resolveMode(it) }
+                    val picked = action.model?.let { resolveModel(it) }
+                    if (action.model != null && picked == null) showToast("No model matching \"${action.model}\" — using ${composer.model ?: composer.provider}.")
+                    startVoiceAgent(
+                        instruction = action.instruction,
+                        modeId = mode?.id?.takeIf { it != com.lenscode.app.ui.ComposerBypassMode.id }, // never bypass approvals from a passing phrase
+                        provider = picked?.first,
+                        model = picked?.second,
+                        worktree = action.worktree,
+                    )
+                }
+            }
+
+            is com.lenscode.app.voice.VoiceAction.SetMode -> {
+                val m = resolveMode(action.mode)
+                if (m == null) showToast("Not a mode I know: \"${action.mode}\". Try plan, accept edits, or manual.") else {
+                    activeView = "code"
+                    chooseMode(m)
+                }
+            }
+
+            is com.lenscode.app.voice.VoiceAction.SetModel -> {
+                val picked = resolveModel(action.model)
+                if (picked == null) {
+                    activeView = "code"
+                    composer.menu = "model"
+                    showToast("No model matching \"${action.model}\" — pick one, or say its name.")
+                } else {
+                    chooseModel(picked.first, picked.second)
+                }
+            }
+
+            is com.lenscode.app.voice.VoiceAction.SetWorktree -> {
+                composer.worktree = action.enabled
+                composer.flash = "branch"
+                showToast(if (action.enabled) "New agents will run in a new worktree." else "Worktree off — agents run in the current checkout.")
+            }
+
+            is com.lenscode.app.voice.VoiceAction.SwitchBranch -> {
+                val match = resolveBranch(action.branch)
+                if (match == null) {
+                    activeView = "code"
+                    composer.menu = "branch"
+                    showToast("No branch matching \"${action.branch}\" — pick one, or say its name.")
+                } else if (match == currentBranch) {
+                    showToast("Already on $match.")
+                } else {
+                    switchBranchFlow(match)
+                }
+            }
+
+            com.lenscode.app.voice.VoiceAction.ComposerStatus -> {
+                val modeLabel = com.lenscode.app.ui.composerModeFor(composer.modeId).label
+                showToast(
+                    "Mode: $modeLabel · Model: ${composer.model ?: composer.provider} · " +
+                        "Branch: ${currentBranch ?: "unknown"} · Worktree: ${if (composer.worktree) "on" else "off"}",
+                )
+            }
+
+            com.lenscode.app.voice.VoiceAction.Confirm -> {
+                val card = deleteConfirm ?: diffDiscardConfirm
+                when {
+                    card != null -> card.onConfirm()
+                    permissions.isNotEmpty() -> executeVoiceAction(com.lenscode.app.voice.VoiceAction.RespondPermission("allow"))
+                    else -> showToast("Nothing to confirm.")
                 }
             }
         }
@@ -1087,6 +1337,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
             terminalSelected = selectedPane != null,
             agentCardOpen = agentDetail?.agent?.label,
             hasPendingPermission = permissions.isNotEmpty(),
+            hasConfirmation = deleteConfirm != null || diffDiscardConfirm != null,
         )
         // voiceCommandReview stays set (not nulled here) so the overlay keeps
         // showing the transcript through the "Thinking…" state below.
@@ -1145,15 +1396,18 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     LaunchedEffect(activeView) {
         when (activeView) {
             "terminal" -> bridge.refreshTerminals()
-            "code" -> if (dirEntries.isEmpty()) bridge.listDir(dirPath)
+            "code" -> {
+                if (dirEntries.isEmpty()) bridge.listDir(dirPath)
+                // The composer's branch menu and model menu read these.
+                bridge.refreshBranches()
+                bridge.refreshWorktrees()
+                bridge.refreshMachines()
+                if (providers.isEmpty()) bridge.refreshProviders()
+            }
             "agents" -> bridge.refreshAgents()
             "permissions" -> {
                 bridge.refreshPermissions()
                 bridge.refreshAgents()
-            }
-            "git" -> {
-                bridge.refreshWorktrees()
-                bridge.refreshBranches()
             }
             "diff" -> bridge.refreshGitStatus()
             "remote" -> bridge.refreshMachines()
@@ -1297,6 +1551,30 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                             bridge.searchFiles(q)
                         },
                         searchResults = fileSearchResults,
+                        composer = {
+                            com.lenscode.app.ui.AgentComposer(
+                                state = composer,
+                                machineLabel = if (filesMachineIdFlow == "local") "Select machine"
+                                    else machines.firstOrNull { it.id == filesMachineIdFlow }?.label?.ifBlank { null } ?: filesMachineIdFlow,
+                                machineId = filesMachineIdFlow,
+                                // Connects, then the folder picker opens; the chip and
+                                // folder update once a folder is chosen.
+                                onSelectMachine = { m -> bridge.connectMachine(m.id, m.label.ifBlank { m.id }) },
+                                folderLabel = filesRootLabel,
+                                machines = machines,
+                                branches = branches,
+                                currentBranch = currentBranch,
+                                worktrees = worktrees,
+                                providers = providers,
+                                isListening = isListening && voiceMode == "composer",
+                                onMic = { requestVoice("composer") },
+                                onSend = { sendComposer() },
+                                onSwitchBranch = { switchBranchFlow(it) },
+                                onOpenWorktree = { wt -> bridge.openWorktreeInCode(wt) { activeView = "code" } },
+                                onModeChosen = { chooseMode(it) },
+                                onModelChosen = { provider, model -> chooseModel(provider, model) },
+                            )
+                        },
                     )
                     "agents" -> AgentsPanelContent(
                         agents,
@@ -1306,8 +1584,6 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                             if (voiceAgentId == agent.agentId) voiceAgentId = null
                             if (agentDetail?.agent?.agentId == agent.agentId) agentDetail = null
                         },
-                        voiceAgentModeId = voiceAgentModeId,
-                        onVoiceAgentModeChange = { voiceAgentModeId = it },
                         history = agentHistory,
                         historyHasMore = agentHistoryHasMore,
                         onShowHistory = { bridge.refreshAgentHistory() },
@@ -1365,111 +1641,6 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                         },
                         discardConfirm = diffDiscardConfirm,
                         stagedHunks = stagedHunks,
-                    )
-                    "git" -> GitPanelContent(
-                        worktrees = worktrees,
-                        branches = branches,
-                        currentBranch = currentBranch,
-                        onOpenInCode = { wt ->
-                            bridge.openWorktreeInCode(wt) { activeView = "code" }
-                        },
-                        onSwitchBranch = { target ->
-                            bridge.switchBranch(
-                                target = target,
-                                onSwitched = { branchConflict = null },
-                                onWorktreeCreated = { workspaceId, machineId ->
-                                    branchConflict = null
-                                    if (workspaceId != null) {
-                                        bridge.openWorkspaceInFiles(workspaceId, target, machineId)
-                                        activeView = "code"
-                                    }
-                                },
-                                onConflict = {
-                                    branchConflict = com.lenscode.app.ui.BranchConflictState(
-                                        target = target,
-                                        onStash = {
-                                            bridge.switchBranch(
-                                                target = target,
-                                                onDirty = "stash",
-                                                onSwitched = { branchConflict = null },
-                                                onWorktreeCreated = { workspaceId, machineId ->
-                                                    branchConflict = null
-                                                    if (workspaceId != null) {
-                                                        bridge.openWorkspaceInFiles(workspaceId, target, machineId)
-                                                        activeView = "code"
-                                                    }
-                                                },
-                                                onConflict = { branchConflict = null },
-                                            )
-                                        },
-                                        onWorktree = {
-                                            bridge.switchBranch(
-                                                target = target,
-                                                onDirty = "worktree",
-                                                onSwitched = { branchConflict = null },
-                                                onWorktreeCreated = { workspaceId, machineId ->
-                                                    branchConflict = null
-                                                    if (workspaceId != null) {
-                                                        bridge.openWorkspaceInFiles(workspaceId, target, machineId)
-                                                        activeView = "code"
-                                                    }
-                                                },
-                                                onConflict = { branchConflict = null },
-                                            )
-                                        },
-                                        onCancel = {
-                                            bridge.switchBranch(
-                                                target = target,
-                                                onDirty = "abort",
-                                                onSwitched = { branchConflict = null },
-                                                onWorktreeCreated = { _, _ -> branchConflict = null },
-                                                onConflict = { branchConflict = null },
-                                            )
-                                        },
-                                    )
-                                },
-                            )
-                        },
-                        onDeleteBranch = { branch ->
-                            deleteConfirm = com.lenscode.app.ui.DeleteConfirmState(
-                                title = "Delete branch?",
-                                message = "This deletes $branch. It can't be recovered if unmerged changes only exist there.",
-                                onConfirm = {
-                                    bridge.deleteBranch(
-                                        branch,
-                                        onDone = { deleteConfirm = null },
-                                        onError = { message ->
-                                            deleteConfirm = com.lenscode.app.ui.DeleteConfirmState(
-                                                title = "Couldn't delete $branch",
-                                                message = message,
-                                                onConfirm = {
-                                                    // Not fully merged is the common reason git -d refuses — offer -D.
-                                                    bridge.deleteBranch(branch, force = true, onDone = { deleteConfirm = null }, onError = { deleteConfirm = null })
-                                                },
-                                                onCancel = { deleteConfirm = null },
-                                            )
-                                        },
-                                    )
-                                },
-                                onCancel = { deleteConfirm = null },
-                            )
-                        },
-                        onRemoveWorktree = { wt ->
-                            deleteConfirm = com.lenscode.app.ui.DeleteConfirmState(
-                                title = "Remove worktree?",
-                                message = "This deletes the checkout at ${wt.path}. Any uncommitted changes there are lost.",
-                                onConfirm = {
-                                    bridge.removeWorktree(
-                                        wt,
-                                        onDone = { deleteConfirm = null },
-                                        onError = { deleteConfirm = null },
-                                    )
-                                },
-                                onCancel = { deleteConfirm = null },
-                            )
-                        },
-                        conflict = branchConflict,
-                        deleteConfirm = deleteConfirm,
                     )
                     "browser" -> com.lenscode.app.ui.BrowserPanelContent(
                         url = browserUrl,
@@ -1621,6 +1792,11 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                     },
                     onDismiss = { agentDetail = null },
                 )
+                // Confirmation cards live at the overlay level now that the Git
+                // tab (their old home) is gone — branch-switch conflicts, agent
+                // archive, Bypass enable. Voice answers them with "confirm"/"cancel".
+                com.lenscode.app.ui.BranchConflictCard(branchConflict)
+                com.lenscode.app.ui.DeleteConfirmCard(deleteConfirm)
                 // Shown right after a successful Connect (spec §37) — picking a
                 // folder here re-roots both Code and a fresh Terminal at it.
                 RemoteBrowseOverlay(
@@ -1734,7 +1910,6 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                             "code" to "Code",
                             "terminal" to "Terminal",
                             "diff" to "Diff",
-                            "git" to "Git",
                             "agents" to "Agents",
                             "permissions" to "Permissions",
                             "remote" to "Remote",

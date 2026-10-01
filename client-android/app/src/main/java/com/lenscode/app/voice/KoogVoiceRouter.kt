@@ -139,7 +139,55 @@ sealed class VoiceAction {
     data class AskAgent(
         @property:LLMDescription("the task/instruction, as heard, to hand to the coding agent")
         val instruction: String,
+        @property:LLMDescription("only if the user named a model for this request (\"using Opus\"), as heard; else null")
+        val model: String? = null,
+        @property:LLMDescription("only if the user named a permission mode for this request, as heard; else null")
+        val mode: String? = null,
+        @property:LLMDescription("true only if the user asked for a new worktree for this request; else null")
+        val worktree: Boolean? = null,
     ) : VoiceAction()
+
+    @Serializable
+    @SerialName("set_mode")
+    @LLMDescription(
+        "Change the permission mode new agents start in — \"plan mode\", \"accept edits\", " +
+            "\"manual mode\", \"auto mode\", \"bypass permissions\". Persists until changed again.",
+    )
+    data class SetMode(@property:LLMDescription("the mode as heard") val mode: String) : VoiceAction()
+
+    @Serializable
+    @SerialName("set_model")
+    @LLMDescription("Change the model new agents use — \"use Opus\", \"switch to Sonnet\". Persists.")
+    data class SetModel(@property:LLMDescription("the model/provider name as heard") val model: String) : VoiceAction()
+
+    @Serializable
+    @SerialName("set_worktree")
+    @LLMDescription(
+        "Turn the worktree checkbox on/off — \"use a new worktree\", \"run in a worktree\", " +
+            "\"stop using worktrees\". Persists.",
+    )
+    data class SetWorktree(@property:LLMDescription("true to turn on, false to turn off") val enabled: Boolean) : VoiceAction()
+
+    @Serializable
+    @SerialName("switch_branch")
+    @LLMDescription("Switch the open project's git branch — \"switch to main\", \"checkout the paseo branch\".")
+    data class SwitchBranch(@property:LLMDescription("the branch name as heard") val branch: String) : VoiceAction()
+
+    @Serializable
+    @SerialName("confirm")
+    @LLMDescription(
+        "Say yes to whatever confirmation card is on screen — \"confirm\", \"yes\", \"do it\", " +
+            "\"enable it\". Only valid when the context says a confirmation is open.",
+    )
+    data object Confirm : VoiceAction()
+
+    @Serializable
+    @SerialName("composer_status")
+    @LLMDescription(
+        "Read back the current agent settings — \"what mode am I in\", \"which model\", " +
+            "\"what branch\", \"what's selected\".",
+    )
+    data object ComposerStatus : VoiceAction()
 
     @Serializable
     @SerialName("open_agent")
@@ -194,7 +242,8 @@ data class VoiceStep(
     @property:LLMDescription(
         "one of: navigate, open_file, accept_changes, discard_changes, new_terminal, " +
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
-            "new_agent, ask_agent, respond_permission",
+            "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
+            "switch_branch, composer_status, confirm",
     )
     val type: String,
     @property:LLMDescription(
@@ -219,6 +268,23 @@ data class VoiceStep(
             "(default), \"all\", or a terminal's name/cwd as heard. Null otherwise.",
     )
     val target: String? = null,
+    @property:LLMDescription(
+        "type=set_mode: the mode as heard (required). type=ask_agent: a permission mode named " +
+            "for just this request, else null. Null otherwise.",
+    )
+    val mode: String? = null,
+    @property:LLMDescription(
+        "type=set_model: the model/provider name as heard (required). type=ask_agent: a model " +
+            "named for just this request, else null. Null otherwise.",
+    )
+    val model: String? = null,
+    @property:LLMDescription("type=switch_branch: the branch name as heard (required). Null otherwise.")
+    val branch: String? = null,
+    @property:LLMDescription(
+        "type=set_worktree: true to enable, false to disable (required). type=ask_agent: true if " +
+            "a new worktree was asked for just this request, else null. Null otherwise.",
+    )
+    val worktree: Boolean? = null,
 ) {
     fun toVoiceAction(): VoiceAction? = when (type) {
         "navigate" -> view?.let { VoiceAction.Navigate(it) }
@@ -233,7 +299,13 @@ data class VoiceStep(
         "dismiss" -> VoiceAction.Dismiss
         "new_agent" -> VoiceAction.NewAgent
         "search" -> query?.let { VoiceAction.Search(it) }
-        "ask_agent" -> instruction?.let { VoiceAction.AskAgent(it) }
+        "ask_agent" -> instruction?.let { VoiceAction.AskAgent(it, model, mode, worktree) }
+        "set_mode" -> mode?.takeIf { it.isNotBlank() }?.let { VoiceAction.SetMode(it) }
+        "set_model" -> model?.takeIf { it.isNotBlank() }?.let { VoiceAction.SetModel(it) }
+        "set_worktree" -> worktree?.let { VoiceAction.SetWorktree(it) }
+        "switch_branch" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.SwitchBranch(it) }
+        "composer_status" -> VoiceAction.ComposerStatus
+        "confirm" -> VoiceAction.Confirm
         "respond_permission" -> behavior?.let { VoiceAction.RespondPermission(it) }
         else -> null
     }
@@ -257,6 +329,8 @@ data class VoiceRouterContext(
     val agentCardOpen: String?,
     /** True when at least one agent has a tool call waiting on you — makes respond_permission a valid interpretation. */
     val hasPendingPermission: Boolean = false,
+    /** True when a confirmation card (delete, discard, Bypass…) is open — makes "yes"/"confirm" mean confirm. */
+    val hasConfirmation: Boolean = false,
 )
 
 private const val SYSTEM_PROMPT = """
@@ -299,8 +373,20 @@ an ordered list of actions from the fixed grammar. Rules:
   "never mind", "close this", "go back", a bare "no" with nothing else implied by context.
   Don't use dismiss for "no" when respond_permission's deny is what's actually meant
   (context says a permission is pending) — that takes priority.
+- The Code view has a composer with mode / model / branch / worktree settings for new agents.
+  "plan mode", "accept edits", "manual mode", "bypass permissions" -> set_mode; "use Opus",
+  "switch to Sonnet" -> set_model; "use a new worktree" / "no worktree" -> set_worktree;
+  "switch to <branch>" / "checkout <branch>" -> switch_branch; "open git", "show branches" or
+  "show worktrees" -> navigate with view=code (the branch menu lives there now); "what mode /
+  model / branch am I on" -> composer_status.
+- When ONE sentence both names settings and a task ("in a new worktree using Opus in plan
+  mode, add retry logic") return a single ask_agent with the task in `instruction` and the
+  named settings in its mode/model/worktree fields — do NOT split them into set_* steps, which
+  would change the defaults permanently.
 - Speech-to-text transcripts can be rough (dropped words, filenames spoken oddly, e.g.
   "package json" for "package.json") — use judgment.
+- Only use confirm when the context says a confirmation card is open ("confirm", "yes do
+  it", "enable it"); it takes priority over respond_permission for a bare "yes" then.
 - Only use respond_permission when the context line says a permission is pending. A bare
   "yes"/"no"/"allow it"/"deny" with nothing pending almost never fits anything else either —
   fall back to search with the raw transcript rather than inventing an action.
@@ -331,7 +417,8 @@ class KoogVoiceRouter(apiKey: String, modelId: String) {
             "diffFileOpen=${context.diffFileOpen ?: "none"}, " +
             "terminalSelected=${context.terminalSelected}, " +
             "agentCardOpen=${context.agentCardOpen ?: "none"}, " +
-            "hasPendingPermission=${context.hasPendingPermission}."
+            "hasPendingPermission=${context.hasPendingPermission}, " +
+            "hasConfirmation=${context.hasConfirmation}."
         val result = executor.executeStructured<VoiceCommandPlan>(
             prompt = prompt("voice-command") {
                 system(SYSTEM_PROMPT)
@@ -371,6 +458,23 @@ class KoogVoiceRouter(apiKey: String, modelId: String) {
             VoiceCommandPlan(listOf(VoiceStep(type = "kill_terminal"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "settings"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "browser"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "set_mode", mode = "plan"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
+            VoiceCommandPlan(
+                listOf(
+                    VoiceStep(
+                        type = "ask_agent",
+                        instruction = "add retry logic to the bridge",
+                        model = "opus",
+                        mode = "plan",
+                        worktree = true,
+                    ),
+                ),
+            ),
         )
     }
 }

@@ -19,8 +19,8 @@
                 "pairing_required",
                 "invalid_request",
                 "not_found",
-                "herdr_unavailable",
-                "herdr_error",
+                "backend_unavailable",
+                "backend_error",
                 "conflict",
                 "dangerous_op_unconfirmed",
                 "internal"
@@ -59,7 +59,7 @@
         "topic": {
           "type": "string",
           "enum": [
-            "herdr",
+            "backend",
             "git",
             "files",
             "machines",

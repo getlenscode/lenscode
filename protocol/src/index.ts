@@ -355,6 +355,12 @@ export const AgentCreateRequest = z.object({
    * it, so ask_agent always passes one explicitly.
    */
   modeId: z.string().optional(),
+  /**
+   * Run the agent in a brand-new git worktree branched off `cwd`'s current
+   * checkout instead of the checkout itself. The response's agent carries the
+   * new workspaceId so the client can open it in Code.
+   */
+  worktree: z.boolean().optional(),
   ...machineScope,
 });
 
@@ -615,6 +621,8 @@ export const AgentSummary = z.object({
   pendingPermissionCount: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
   costUsd: z.number().nullable(),
+  /** Which machine runs this agent — "local" or a connected remote's id. Omitted by single-machine backends. */
+  machineId: z.string().optional(),
 });
 export type AgentSummary = z.infer<typeof AgentSummary>;
 

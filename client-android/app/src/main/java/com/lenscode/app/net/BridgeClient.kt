@@ -55,6 +55,8 @@ data class AgentInfo(
     val pendingPermissionCount: Int,
     val lastError: String?,
     val costUsd: Double?,
+    /** "local" or the connected remote host this agent runs on. */
+    val machineId: String = "local",
 ) {
     /** Chip/card label — falls back to the provider name when the agent has no title. */
     val label: String get() = title?.takeIf { it.isNotBlank() } ?: provider
@@ -141,6 +143,9 @@ data class FileSearchHit(val path: String, val score: Double, val kind: String, 
 data class VoiceResolution(val confident: Boolean, val resolvedPath: String?, val candidates: List<VoiceCandidate>)
 
 data class GitStatus(val branch: String?, val files: List<GitFileStatus>)
+
+/** One coding-agent provider from `provider.list`, with the model ids it offers. */
+data class ProviderInfo(val provider: String, val available: Boolean, val models: List<String>)
 
 data class MachineInfo(val id: String, val label: String, val connected: Boolean = false)
 
@@ -297,6 +302,9 @@ class BridgeClient(
         refreshTerminals()
         refreshAgents()
         refreshPermissions()
+        refreshProviders()
+        refreshBranches()
+        refreshWorktrees()
         // So Home's project-path summary has something to show immediately,
         // not only after the user visits Code at least once.
         listDir(dirPath.value)
@@ -500,6 +508,8 @@ class BridgeClient(
      * the Code view into a worktree is just switching this id.
      */
     private var filesWorkspaceId = "local"
+    /** The workspace Code is currently showing — what a new agent should start in. "local" = the bridge's project root. */
+    val currentWorkspaceId: String get() = filesWorkspaceId
     /** "local" or a connected remote machine id — which machine `filesWorkspaceId` is interpreted against. */
     private var filesMachineId = "local"
 
@@ -673,6 +683,28 @@ class BridgeClient(
 
     // ── Branch switcher ──────────────────────────────────────────────────
 
+    private val _providers = MutableStateFlow<List<ProviderInfo>>(emptyList())
+    val providers: StateFlow<List<ProviderInfo>> = _providers
+
+    /** Fetched at connect time — model discovery can be slow on a cold provider, so the picker shouldn't wait on it. */
+    fun refreshProviders() {
+        send(
+            "provider.list",
+            onResult = { result ->
+                val arr = result.optJSONArray("providers") ?: JSONArray()
+                _providers.value = (0 until arr.length()).map { i ->
+                    val p = arr.getJSONObject(i)
+                    val models = p.optJSONArray("models") ?: JSONArray()
+                    ProviderInfo(
+                        provider = p.optString("provider"),
+                        available = p.optBoolean("available", false),
+                        models = (0 until models.length()).map { models.getString(it) },
+                    )
+                }
+            },
+        )
+    }
+
     private val _branches = MutableStateFlow<List<String>>(emptyList())
     val branches: StateFlow<List<String>> = _branches
 
@@ -815,7 +847,17 @@ class BridgeClient(
         pendingPermissionCount = a.optInt("pendingPermissionCount", 0),
         lastError = if (a.isNull("lastError")) null else a.optString("lastError"),
         costUsd = if (a.isNull("costUsd")) null else a.optDouble("costUsd"),
+        machineId = a.optString("machineId", "local").also { agentMachines[a.optString("agentId")] = it },
     )
+
+    /** agentId → machine, learned from agent.list/agent.create, so follow-up requests reach the host the agent runs on. */
+    private val agentMachines = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun withMachine(agentId: String, fields: JSONObject): JSONObject {
+        val machine = agentMachines[agentId]
+        if (machine != null && machine != "local") fields.put("machineId", machine)
+        return fields
+    }
 
     /**
      * Starts (or stops, with null) keeping [agentTimeline] live for one agent —
@@ -832,7 +874,7 @@ class BridgeClient(
     fun refreshAgentTimeline(agentId: String) {
         send(
             "agent.timeline",
-            JSONObject().put("agentId", agentId).put("limit", 200),
+            withMachine(agentId, JSONObject().put("agentId", agentId).put("limit", 200)),
             onResult = { result ->
                 val arr = result.optJSONArray("entries") ?: JSONArray()
                 _agentTimeline.value = (0 until arr.length()).map { i ->
@@ -855,7 +897,7 @@ class BridgeClient(
     fun sendAgentMessage(agentId: String, text: String, onDone: () -> Unit = {}, onError: (() -> Unit)? = null) {
         send(
             "agent.send",
-            JSONObject().put("agentId", agentId).put("text", text),
+            withMachine(agentId, JSONObject().put("agentId", agentId).put("text", text)),
             onResult = {
                 refreshAgents()
                 onDone()
@@ -879,8 +921,12 @@ class BridgeClient(
         workspaceId: String? = null,
         /** Paseo permission mode ("auto", "bypassPermissions", …) — null keeps Paseo's own "default" (ask every time). */
         modeId: String? = null,
+        /** Which machine runs the agent — a connected remote host's id, or "local". */
+        machineId: String = "local",
+        /** Run in a brand-new git worktree instead of [cwd]'s own checkout. */
+        worktree: Boolean = false,
         onCreated: (AgentInfo) -> Unit = {},
-        onError: (() -> Unit)? = null,
+        onError: ((String) -> Unit)? = null,
     ) {
         val fields = JSONObject()
             .put("provider", provider)
@@ -890,6 +936,8 @@ class BridgeClient(
         if (title != null) fields.put("title", title)
         if (workspaceId != null) fields.put("workspaceId", workspaceId)
         if (modeId != null) fields.put("modeId", modeId)
+        if (worktree) fields.put("worktree", true)
+        if (machineId != "local") fields.put("machineId", machineId)
         send(
             "agent.create",
             fields,
@@ -897,13 +945,16 @@ class BridgeClient(
                 refreshAgents()
                 onCreated(parseAgent(result.getJSONObject("agent")))
             },
-            onError = { onError?.invoke() },
+            onError = { error ->
+                // The bridge's own message ("Not connected to …", "Pick a folder…") beats a generic failure.
+                onError?.invoke(error.optString("detail").ifBlank { error.optString("message", "Could not create that agent.") })
+            },
         )
     }
 
     /** Soft-deletes the agent and closes its runtime (spec §57 — caller must have already shown a confirmation card). */
     fun archiveAgent(agentId: String, onDone: () -> Unit = {}) {
-        send("agent.archive", JSONObject().put("agentId", agentId), onResult = {
+        send("agent.archive", withMachine(agentId, JSONObject().put("agentId", agentId)), onResult = {
             refreshAgents()
             onDone()
         })
@@ -947,6 +998,7 @@ class BridgeClient(
             .put("permissionRequestId", permission.permissionRequestId)
             .put("behavior", behavior)
         if (selectedActionId != null) fields.put("selectedActionId", selectedActionId)
+        withMachine(permission.agentId, fields)
         send("permission.respond", fields, onResult = {
             refreshPermissions()
             refreshAgents()

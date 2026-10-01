@@ -71,6 +71,22 @@ test("agent.create requires provider and cwd", () => {
   );
 });
 
+test("agent.create accepts per-request model, mode and worktree", () => {
+  const parsed = XrRequest.parse({
+    id: "r6b",
+    type: "agent.create",
+    provider: "claude",
+    model: "claude-opus-5-5",
+    modeId: "plan",
+    worktree: true,
+    cwd: "/Users/me/dev/storefront",
+  });
+  assert.equal(parsed.type === "agent.create" && parsed.worktree, true);
+  assert.throws(() =>
+    XrRequest.parse({ id: "r6c", type: "agent.create", provider: "claude", cwd: "/tmp", worktree: "yes" }),
+  );
+});
+
 test("permission.respond carries the answered request id", () => {
   const parsed = XrRequest.parse({
     id: "r8",

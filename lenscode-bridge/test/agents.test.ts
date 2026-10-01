@@ -137,3 +137,36 @@ test("agent.create + agent.list + agent.send + agent.archive round-trip", async 
   assert.equal(archived.result.archived, agentId);
   ws.close();
 });
+
+test("agent.create with worktree:true runs the agent in a fresh worktree", async (t) => {
+  const ws = await connect();
+  if (!paseoUp) {
+    ws.close();
+    return t.skip("paseo daemon not running");
+  }
+  const providers = await rpc(ws, { id: nextId(), type: "provider.list" });
+  const available = providers.result.providers.find((p: any) => p.available);
+  if (!available) {
+    ws.close();
+    return t.skip("no available provider on this daemon");
+  }
+
+  const created = await rpc(ws, {
+    id: nextId(),
+    type: "agent.create",
+    provider: available.provider,
+    cwd: ".",
+    workspaceId: "local",
+    worktree: true,
+    title: "lenscode-bridge-worktree-agent-test",
+  });
+  if (created.error) {
+    // "local" isn't necessarily a git repo on every machine running this suite.
+    ws.close();
+    return t.skip(`worktree creation unavailable here: ${created.error.message}`);
+  }
+  const agentId = created.result.agent.agentId;
+  assert.ok(agentId);
+  await rpc(ws, { id: nextId(), type: "agent.archive", agentId });
+  ws.close();
+});
