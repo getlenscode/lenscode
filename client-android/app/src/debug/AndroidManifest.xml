@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Debug builds only: allow cleartext WS to the local lenscode-bridge dev
+         server. Release builds get neither attribute, so the platform default
+         (cleartext denied) applies — a release APK can never talk plaintext. -->
+    <application
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config" />
+
+</manifest>

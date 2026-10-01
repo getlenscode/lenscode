@@ -4,9 +4,9 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -74,7 +74,9 @@ import com.lenscode.app.voice.VoiceRecognizer
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var bridge: BridgeClient
+    // The ViewModel (not this Activity) owns the bridge connection — it
+    // survives Activity recreation, so a config change can't drop the socket.
+    private val viewModel: WorkspaceViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // All UI lives inside Subspace, which SceneCore renders through its own
@@ -92,21 +94,9 @@ class MainActivity : ComponentActivity() {
         // black panel with the launcher icon behind the spatial panels.
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(AndroidColor.TRANSPARENT))
 
-        val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-            ?: "android-xr-dev"
-        // BuildConfig.BRIDGE_URL defaults to 10.0.2.2 (emulator host-loopback
-        // alias); pass -PbridgeUrl=ws://<lan-ip>:8137 to gradle for a real device.
-        bridge = BridgeClient(
-            lifecycleScope,
-            BuildConfig.BRIDGE_URL,
-            deviceId,
-            com.lenscode.app.net.PairingStore(applicationContext),
-        )
-        bridge.connect()
-
         setContent {
             LensCodeWorkspace(
-                bridge,
+                viewModel.bridge,
                 // Confirmed live: entering PiP does change the Activity's own
                 // window (dumpsys shows mIsInPictureInPictureMode=true), but
                 // has no visible effect — every visible panel renders through
@@ -125,10 +115,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { requestFullSpace() }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        bridge.close()
-    }
+    // No onDestroy cleanup — WorkspaceViewModel.onCleared closes the bridge.
 }
 
 /**

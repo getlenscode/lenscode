@@ -27,12 +27,12 @@
         <package android:name="com.android.chrome" />
     </queries>
 
+    <!-- Cleartext allowances live in src/debug/ only — release builds must not
+         carry usesCleartextTraffic or the dev network security config. -->
     <application
         android:label="LensCode"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.LensCodeXr"
-        android:usesCleartextTraffic="true"
-        android:networkSecurityConfig="@xml/network_security_config">
+        android:theme="@style/Theme.LensCodeXr">
 
         <!-- Start directly in full space so Subspace content is spatialized. -->
         <property

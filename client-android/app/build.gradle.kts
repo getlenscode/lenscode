@@ -1,8 +1,16 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.detekt)
+}
+
+detekt {
+    // Existing findings are recorded in detekt-baseline.xml — new violations
+    // fail the build; whittle the baseline down instead of disabling rules.
+    baseline = file("detekt-baseline.xml")
+    buildUponDefaultConfig = true
 }
 
 android {
@@ -34,6 +42,18 @@ android {
         buildConfigField("String", "GEMINI_MODEL", "\"$geminiModel\"")
     }
 
+    buildTypes {
+        release {
+            // R8 is off until keep rules are tested — kotlinx-serialization and
+            // Koog's reflective internals will strip/break without them.
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -58,29 +78,29 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
-    implementation(composeBom)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.activity.compose)
+    implementation(libs.core.splashscreen)
 
     // Jetpack XR SDK
-    implementation("androidx.xr.compose:compose:1.0.0-alpha17")
-    implementation("androidx.xr.scenecore:scenecore:1.0.0-beta02")
-    implementation("androidx.xr.runtime:runtime:1.0.0-beta02")
+    implementation(libs.xr.compose)
+    implementation(libs.xr.scenecore)
+    implementation(libs.xr.runtime)
 
     // Bridge protocol transport (JSON handled by the platform's built-in org.json)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.okhttp)
 
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
 
     // Agentic voice command routing (on-device, Gemini via Koog — see
     // com.lenscode.app.voice.KoogVoiceRouter). Koog is JetBrains' Kotlin
     // multiplatform AI agent framework; Android is one of its supported targets.
-    implementation("ai.koog:koog-agents:0.5.0")
+    implementation(libs.koog.agents)
     // Koog's default Ktor engine (CIO) implements its own pure-Kotlin TLS
     // trust manager that only overrides the legacy 2-arg checkServerTrusted —
     // confirmed live, this crashes with a CertificateException against
@@ -88,7 +108,8 @@ dependencies {
     // requires once ANY <domain-config> exists in network_security_config.xml,
     // even for hosts, like Google's own API, that aren't listed in it).
     // OkHttp's Ktor engine implements the modern interface correctly.
-    implementation("io.ktor:ktor-client-okhttp:3.3.0")
+    implementation(libs.ktor.client.okhttp)
 
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

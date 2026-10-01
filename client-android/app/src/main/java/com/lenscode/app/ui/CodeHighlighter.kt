@@ -91,6 +91,19 @@ private val KEYWORDS: Map<String, Set<String>> = mapOf(
         "break", "continue", "return", "new", "this", "true", "false", "null", "try", "catch", "finally", "throw",
         "interface", "struct", "enum", "override", "virtual", "async", "await",
     ),
+    "kotlin" to setOf(
+        "fun", "val", "var", "class", "object", "interface", "enum", "data", "sealed", "if", "else", "when",
+        "for", "while", "do", "return", "import", "package", "private", "public", "internal", "protected",
+        "override", "suspend", "null", "true", "false", "this", "is", "in", "as", "try", "catch", "finally",
+        "throw", "init", "companion", "lateinit", "by", "constructor", "vararg", "typealias", "out", "infix",
+    ),
+    "java" to setOf(
+        "class", "interface", "enum", "record", "public", "private", "protected", "static", "final",
+        "abstract", "void", "int", "long", "boolean", "double", "float", "char", "byte", "short", "var",
+        "if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return",
+        "new", "this", "super", "import", "package", "try", "catch", "finally", "throw", "throws",
+        "extends", "implements", "instanceof", "null", "true", "false", "synchronized",
+    ),
     "json" to setOf("true", "false", "null"),
     "yaml" to setOf("true", "false", "null"),
     "shell" to setOf(
@@ -192,6 +205,21 @@ private val SYMBOL_PATTERNS: Map<String, List<SymbolPattern>> = mapOf(
         SymbolPattern(Regex("""^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?interface\s+(\w+)"""), "interface"),
         SymbolPattern(Regex("""^\s*(?:public|private|protected|internal)\s+[\w<>\[\]]+\s+(\w+)\s*\("""), "method"),
     ),
+    "kotlin" to listOf(
+        // enum before class — "enum class Mode" must not land in the class kind.
+        SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected)\s+)*enum\s+class\s+(\w+)"""), "enum"),
+        SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected|data|sealed|open|abstract|annotation|inner|value)\s+)*class\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected|suspend|inline|infix|tailrec|operator|external|open|override|abstract)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w]+\.)*(\w+)"""), "function"),
+        SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected)\s+)*interface\s+(\w+)"""), "interface"),
+        SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected)\s+)*object\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*(?:(?:public|private|internal|protected)\s+)*typealias\s+(\w+)"""), "type"),
+    ),
+    "java" to listOf(
+        SymbolPattern(Regex("""^\s*(?:public|private|protected)?\s*(?:abstract\s+|final\s+)?class\s+(\w+)"""), "class"),
+        SymbolPattern(Regex("""^\s*(?:public|private|protected)?\s*(?:abstract\s+)?interface\s+(\w+)"""), "interface"),
+        SymbolPattern(Regex("""^\s*(?:public|private|protected)?\s*enum\s+(\w+)"""), "enum"),
+        SymbolPattern(Regex("""^\s*(?:public|private|protected)\s+(?:static\s+)?[\w<>\[\], ?]+\s+(\w+)\s*\("""), "method"),
+    ),
 )
 
 /** Extracts an outline of top-level definitions, in source order. */
@@ -209,7 +237,7 @@ fun extractSymbols(code: String, language: String?): List<CodeSymbol> {
     return symbols
 }
 
-private val BRACE_LANGS = setOf("typescript", "javascript", "rust", "go", "c", "cpp", "csharp")
+private val BRACE_LANGS = setOf("typescript", "javascript", "rust", "go", "c", "cpp", "csharp", "kotlin", "java")
 
 /**
  * Code focus cards (spec §16): isolates one symbol's body by brace-matching

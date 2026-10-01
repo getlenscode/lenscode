@@ -2,6 +2,7 @@ package com.lenscode.app.net
 
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,153 +13,11 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-data class PaneInfo(
-    val terminalId: String,
-    val workspaceId: String?,
-    val cwd: String,
-    val title: String,
-    /** Paseo's terminal activity state (idle/working/attention), or null if unknown.
-     * Replaces the old Herdr "focused" flag — Paseo has no server-side terminal
-     * focus (docs/paseo-migration-plan.md, Phase 1), so this is what the status
-     * dot actually reflects now. */
-    val agentStatus: String?,
-    /** "local" or a connected remote machine id (spec §37) — carried per-terminal so
-     * terminal-scoped actions (read/close/interrupt) always target the right
-     * machine, regardless of which machine's terminal list is on screen. */
-    val machineId: String = "local",
-)
-
-data class DirEntry(val name: String, val isDir: Boolean, val language: String?)
-
-data class FileContent(val path: String, val content: String, val language: String?, val truncated: Boolean)
-
-/**
- * A first-class Paseo agent (docs/paseo-migration-plan.md, Phase 2/3) — not a
- * terminal pane. Herdr had no agent model at all; LensCode used to infer one by
- * scraping terminal output for a pane Herdr flagged as agent-shaped
- * (`AgentInfo` used to carry a `paneId` for exactly that reason). Paseo
- * tracks agents as their own objects instead.
- */
-data class AgentInfo(
-    val agentId: String,
-    val provider: String,
-    val model: String?,
-    val title: String?,
-    val status: String,
-    val cwd: String,
-    val workspaceId: String?,
-    val requiresAttention: Boolean,
-    val attentionReason: String?,
-    val pendingPermissionCount: Int,
-    val lastError: String?,
-    val costUsd: Double?,
-    /** "local" or the connected remote host this agent runs on. */
-    val machineId: String = "local",
-) {
-    /** Chip/card label — falls back to the provider name when the agent has no title. */
-    val label: String get() = title?.takeIf { it.isNotBlank() } ?: provider
-}
-
-/**
- * One archived/closed agent (docs/snip-and-agent-management-plan.md) — read
- * only, so it carries none of AgentInfo's live-only fields (pending
- * permissions, cost, attention). [toAgentInfo] adapts it into an [AgentInfo]
- * with `status = "closed"` so it can be shown through the existing
- * [com.lenscode.app.ui.AgentDetailOverlay] without a second card implementation —
- * that overlay already hides its prompt box for a closed agent.
- */
-data class AgentHistoryEntry(
-    val agentId: String,
-    val provider: String,
-    val model: String?,
-    val title: String?,
-    val status: String,
-    val cwd: String,
-    val createdAt: String,
-    val archivedAt: String?,
-) {
-    val label: String get() = title?.takeIf { it.isNotBlank() } ?: provider
-
-    fun toAgentInfo(): AgentInfo = AgentInfo(
-        agentId = agentId,
-        provider = provider,
-        model = model,
-        title = title,
-        status = "closed",
-        cwd = cwd,
-        workspaceId = null,
-        requiresAttention = false,
-        attentionReason = null,
-        pendingPermissionCount = 0,
-        lastError = null,
-        costUsd = null,
-    )
-}
-
-/**
- * One entry in an agent's own activity feed (docs/paseo-migration-plan.md
- * follow-up) — a message it sent/received, or a tool call it made. Until
- * this existed, the only way to see what an agent was actually doing (e.g.
- * which shell commands a voice-created agent ran) was querying the Paseo
- * daemon directly from a shell — there was no in-app view of it at all.
- */
-data class AgentTimelineEntry(
-    val kind: String,
-    val text: String?,
-    val toolName: String?,
-    val command: String?,
-    val output: String?,
-    val status: String?,
-    val timestamp: String,
-)
-
-/** One pending "approve this tool call" request (docs/paseo-migration-plan.md, Phase 3). */
-data class PermissionAction(val id: String, val label: String, val behavior: String)
-
-data class PermissionInfo(
-    val permissionRequestId: String,
-    val agentId: String,
-    val kind: String,
-    val title: String?,
-    val description: String?,
-    val actions: List<PermissionAction>,
-)
-
-data class WorktreeInfo(
-    val path: String,
-    val branch: String?,
-    val openWorkspaceId: String?,
-)
-
-data class GitFileStatus(val path: String, val oldPath: String?, val status: String)
-
-data class VoiceCandidate(val path: String, val score: Double, val preview: String?)
-
-/** A typed `search.files` hit (spec §13 back-end) — filename or ripgrep text match. */
-data class FileSearchHit(val path: String, val score: Double, val kind: String, val preview: String?, val line: Int?)
-
-data class VoiceResolution(val confident: Boolean, val resolvedPath: String?, val candidates: List<VoiceCandidate>)
-
-data class GitStatus(val branch: String?, val files: List<GitFileStatus>)
-
-/** One coding-agent provider from `provider.list`, with the model ids it offers. */
-data class ProviderInfo(val provider: String, val available: Boolean, val models: List<String>)
-
-data class MachineInfo(val id: String, val label: String, val connected: Boolean = false)
-
-/** Client-side view of the pairing handshake (spec §55) — drives the pairing card. */
-sealed class PairingState {
-    /** Not paired yet and no pairing in progress; unauthenticated in prod mode. */
-    object NeedsPairing : PairingState()
-    /** pair.begin succeeded; code is shown on the bridge's own console, not here. */
-    data class CodeSent(val deviceName: String) : PairingState()
-    data class Failed(val deviceName: String, val message: String) : PairingState()
-    /** Either dev mode (pairing skipped) or pair.complete already succeeded. */
-    object Authenticated : PairingState()
-}
 
 /**
  * WebSocket client for lenscode-bridge speaking XR protocol v3 (see ../protocol).
@@ -246,21 +105,90 @@ class BridgeClient(
     val gitDiffText: StateFlow<String?> = _gitDiffText
 
     private val http = OkHttpClient()
+
+    /** Read/written on both OkHttp's reader thread and the caller's — must be volatile. */
+    @Volatile
     private var ws: WebSocket? = null
     private val nextId = AtomicLong(1)
+    @Volatile
     private var closedByUs = false
-    private val callbacks = mutableMapOf<String, (JSONObject) -> Unit>()
-    private val errorCallbacks = mutableMapOf<String, (JSONObject) -> Unit>()
+
+    /** One in-flight request: its response callbacks plus the job that fails it on timeout. */
+    private class PendingRequest(
+        val onResult: ((JSONObject) -> Unit)?,
+        val onError: ((JSONObject) -> Unit)?,
+        val timeout: Job,
+    )
+
+    // OkHttp's listener thread and send() callers both mutate this — needs a
+    // thread-safe map, not mutableMapOf.
+    private val pending = ConcurrentHashMap<String, PendingRequest>()
+
+    @Volatile
+    private var reconnectJob: Job? = null
+    @Volatile
+    private var reconnectAttempt = 0
+    @Volatile
+    private var resyncJob: Job? = null
 
     fun connect() {
         closedByUs = false
+        reconnectJob?.cancel()
         val request = Request.Builder().url(url).build()
         ws = http.newWebSocket(request, Listener())
     }
 
     fun close() {
         closedByUs = true
+        reconnectJob?.cancel()
+        resyncJob?.cancel()
         ws?.close(1000, "bye")
+        ws = null
+        // We're shutting down — don't surface "connection lost" errors to a UI
+        // that is going away; just cancel the outstanding timeouts.
+        pending.values.forEach { it.timeout.cancel() }
+        pending.clear()
+    }
+
+    private fun scheduleReconnect() {
+        if (closedByUs || reconnectJob?.isActive == true) return
+        val attempt = reconnectAttempt++
+        // Exponential backoff capped at 30s (spec §59): a dead bridge shouldn't
+        // be hammered, and a recovering one shouldn't leave the client waiting.
+        val delayMs = minOf(RECONNECT_BASE_MS shl minOf(attempt, 10), RECONNECT_MAX_MS)
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            Log.d("LensCodeBridge", "reconnect attempt ${attempt + 1} after ${delayMs}ms")
+            connect()
+        }
+    }
+
+    /** Fails every in-flight request — the socket that would answer them is gone. */
+    private fun failAllPending(error: JSONObject) {
+        val drained = pending.values.toList()
+        pending.clear()
+        for (req in drained) {
+            req.timeout.cancel()
+            try {
+                req.onError?.invoke(error)
+            } catch (e: Exception) {
+                Log.e("LensCodeBridge", "error callback threw during disconnect", e)
+            }
+        }
+    }
+
+    private fun errorBody(code: String, message: String): JSONObject =
+        JSONObject().put("code", code).put("message", message).put("retryable", true)
+
+    private fun requestTimeout(id: String): Job = scope.launch {
+        delay(REQUEST_TIMEOUT_MS)
+        val req = pending.remove(id) ?: return@launch
+        Log.w("LensCodeBridge", "request $id timed out after ${REQUEST_TIMEOUT_MS}ms")
+        try {
+            req.onError?.invoke(errorBody("TIMEOUT", "The bridge did not respond in time."))
+        } catch (e: Exception) {
+            Log.e("LensCodeBridge", "timeout callback for $id threw", e)
+        }
     }
 
     private fun sendHello() {
@@ -280,6 +208,9 @@ class BridgeClient(
             fields,
             onResult = { helloResult ->
                 Log.d("LensCodeBridge", "hello result received: $helloResult")
+                // A completed handshake means the connection is healthy — reset
+                // the backoff so the next drop retries quickly, not at the cap.
+                reconnectAttempt = 0
                 _state.value = _state.value.copy(
                     bridgeConnected = true,
                     backendConnected = helloResult.optBoolean("backendConnected", false),
@@ -356,12 +287,24 @@ class BridgeClient(
         onResult: ((JSONObject) -> Unit)? = null,
         onError: ((JSONObject) -> Unit)? = null,
     ) {
+        val socket = ws
+        if (socket == null) {
+            // No socket — this request can never be answered. Fail fast rather
+            // than silently dropping it and leaving a pending entry to leak.
+            onError?.invoke(errorBody("UNAVAILABLE", "Not connected to lenscode-bridge."))
+            return
+        }
         val id = "a${nextId.getAndIncrement()}"
         fields.put("id", id)
         fields.put("type", type)
-        if (onResult != null) callbacks[id] = onResult
-        if (onError != null) errorCallbacks[id] = onError
-        ws?.send(fields.toString())
+        if (onResult != null || onError != null) {
+            pending[id] = PendingRequest(onResult, onError, requestTimeout(id))
+        }
+        if (!socket.send(fields.toString())) {
+            // OkHttp rejected the frame (queue full or socket shutting down).
+            pending.remove(id)?.timeout?.cancel()
+            onError?.invoke(errorBody("UNAVAILABLE", "Could not send to lenscode-bridge."))
+        }
     }
 
     // ── Terminals ────────────────────────────────────────────────────────
@@ -386,19 +329,9 @@ class BridgeClient(
             "terminal.list",
             JSONObject().put("machineId", machineId),
             onResult = { result ->
-                val arr = result.optJSONArray("terminals") ?: JSONArray()
-                val list = (0 until arr.length()).map { i ->
-                    val t = arr.getJSONObject(i)
-                    PaneInfo(
-                        terminalId = t.optString("terminalId"),
-                        workspaceId = if (t.isNull("workspaceId")) null else t.optString("workspaceId"),
-                        cwd = if (t.isNull("cwd")) "" else t.optString("cwd", ""),
-                        title = t.optString("name", t.optString("terminalId")),
-                        agentStatus = if (t.isNull("agentStatus")) null else t.optString("agentStatus"),
-                        machineId = machineId,
-                    )
+                _terminals.value = decodeList<PaneInfo>(result, "terminals").map { p ->
+                    p.copy(machineId = machineId, title = p.title.ifBlank { p.terminalId })
                 }
-                _terminals.value = list
                 onDone()
             },
         )
@@ -555,17 +488,8 @@ class BridgeClient(
             "dir.list",
             JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("path", path),
             onResult = { result ->
-                val arr = result.optJSONArray("entries") ?: JSONArray()
-                val list = (0 until arr.length()).map { i ->
-                    val e = arr.getJSONObject(i)
-                    DirEntry(
-                        name = e.optString("name"),
-                        isDir = e.optString("kind") == "dir",
-                        language = if (e.isNull("language")) null else e.optString("language"),
-                    )
-                }
                 _dirPath.value = path
-                _dirEntries.value = list
+                _dirEntries.value = decodeList<DirEntry>(result, "entries")
                 _openFile.value = null
                 _projectRootPath.value = if (result.isNull("root")) null else result.optString("root")
             },
@@ -577,12 +501,8 @@ class BridgeClient(
             "file.open",
             JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("path", path),
             onResult = { result ->
-                _openFile.value = FileContent(
-                    path = result.optString("path", path),
-                    content = result.optString("content", ""),
-                    language = if (result.isNull("language")) null else result.optString("language"),
-                    truncated = result.optBoolean("truncated", false),
-                )
+                val f = decodeResult<FileContent>(result)
+                _openFile.value = if (f.path.isEmpty()) f.copy(path = path) else f
             },
         )
     }
@@ -599,20 +519,7 @@ class BridgeClient(
             "voice.search",
             JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("query", query),
             onResult = { result ->
-                val arr = result.optJSONArray("candidates") ?: JSONArray()
-                val candidates = (0 until arr.length()).map { i ->
-                    val c = arr.getJSONObject(i)
-                    VoiceCandidate(
-                        path = c.optString("path"),
-                        score = c.optDouble("score", 0.0),
-                        preview = if (c.isNull("preview")) null else c.optString("preview"),
-                    )
-                }
-                _voiceResult.value = VoiceResolution(
-                    confident = result.optBoolean("confident", false),
-                    resolvedPath = if (result.isNull("resolvedPath")) null else result.optString("resolvedPath"),
-                    candidates = candidates,
-                )
+                _voiceResult.value = decodeResult<VoiceResolution>(result)
             },
         )
     }
@@ -634,17 +541,7 @@ class BridgeClient(
             "search.files",
             JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId).put("query", query).put("limit", 20),
             onResult = { result ->
-                val arr = result.optJSONArray("hits") ?: JSONArray()
-                _searchResults.value = (0 until arr.length()).map { i ->
-                    val h = arr.getJSONObject(i)
-                    FileSearchHit(
-                        path = h.optString("path"),
-                        score = h.optDouble("score", 0.0),
-                        kind = h.optString("kind", "filename"),
-                        preview = if (h.isNull("preview")) null else h.optString("preview"),
-                        line = if (h.isNull("line")) null else h.optInt("line"),
-                    )
-                }
+                _searchResults.value = decodeList<FileSearchHit>(result, "hits")
             },
         )
     }
@@ -662,19 +559,7 @@ class BridgeClient(
             "git.status",
             JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId),
             onResult = { result ->
-                val arr = result.optJSONArray("files") ?: JSONArray()
-                val files = (0 until arr.length()).map { i ->
-                    val f = arr.getJSONObject(i)
-                    GitFileStatus(
-                        path = f.optString("path"),
-                        oldPath = if (f.isNull("oldPath")) null else f.optString("oldPath"),
-                        status = f.optString("status"),
-                    )
-                }
-                _gitStatus.value = GitStatus(
-                    branch = if (result.isNull("branch")) null else result.optString("branch"),
-                    files = files,
-                )
+                _gitStatus.value = decodeResult<GitStatus>(result)
                 _gitDiffPath.value = null
                 _gitDiffText.value = null
             },
@@ -691,16 +576,7 @@ class BridgeClient(
         send(
             "provider.list",
             onResult = { result ->
-                val arr = result.optJSONArray("providers") ?: JSONArray()
-                _providers.value = (0 until arr.length()).map { i ->
-                    val p = arr.getJSONObject(i)
-                    val models = p.optJSONArray("models") ?: JSONArray()
-                    ProviderInfo(
-                        provider = p.optString("provider"),
-                        available = p.optBoolean("available", false),
-                        models = (0 until models.length()).map { models.getString(it) },
-                    )
-                }
+                _providers.value = decodeList<ProviderInfo>(result, "providers")
             },
         )
     }
@@ -785,21 +661,12 @@ class BridgeClient(
 
     fun refreshAgents() {
         send("agent.list", onResult = { result ->
-            val arr = result.optJSONArray("agents") ?: JSONArray()
-            _agents.value = (0 until arr.length()).map { i -> parseAgent(arr.getJSONObject(i)) }
+            val list = decodeList<AgentInfo>(result, "agents")
+            list.forEach { agentMachines[it.agentId] = it.machineId }
+            _agents.value = list
         })
     }
 
-    private fun parseHistoryEntry(e: JSONObject): AgentHistoryEntry = AgentHistoryEntry(
-        agentId = e.optString("agentId"),
-        provider = e.optString("provider", "agent"),
-        model = if (e.isNull("model")) null else e.optString("model"),
-        title = if (e.isNull("title")) null else e.optString("title"),
-        status = e.optString("status", "closed"),
-        cwd = e.optString("cwd", ""),
-        createdAt = e.optString("createdAt"),
-        archivedAt = if (e.isNull("archivedAt")) null else e.optString("archivedAt"),
-    )
 
     /** First page of agent history (docs/snip-and-agent-management-plan.md) — replaces whatever was there before. */
     fun refreshAgentHistory(search: String? = null) {
@@ -810,8 +677,7 @@ class BridgeClient(
             "agent.history",
             fields,
             onResult = { result ->
-                val arr = result.optJSONArray("entries") ?: JSONArray()
-                _agentHistory.value = (0 until arr.length()).map { i -> parseHistoryEntry(arr.getJSONObject(i)) }
+                _agentHistory.value = decodeList<AgentHistoryEntry>(result, "entries")
                 agentHistoryCursor = if (result.isNull("nextCursor")) null else result.optString("nextCursor")
                 _agentHistoryHasMore.value = result.optBoolean("hasMore", false)
             },
@@ -825,30 +691,16 @@ class BridgeClient(
             "agent.history",
             JSONObject().put("cursor", cursor),
             onResult = { result ->
-                val arr = result.optJSONArray("entries") ?: JSONArray()
-                val more = (0 until arr.length()).map { i -> parseHistoryEntry(arr.getJSONObject(i)) }
-                _agentHistory.value = _agentHistory.value + more
+                _agentHistory.value = _agentHistory.value + decodeList<AgentHistoryEntry>(result, "entries")
                 agentHistoryCursor = if (result.isNull("nextCursor")) null else result.optString("nextCursor")
                 _agentHistoryHasMore.value = result.optBoolean("hasMore", false)
             },
         )
     }
 
-    private fun parseAgent(a: JSONObject): AgentInfo = AgentInfo(
-        agentId = a.optString("agentId"),
-        provider = a.optString("provider", "agent"),
-        model = if (a.isNull("model")) null else a.optString("model"),
-        title = if (a.isNull("title")) null else a.optString("title"),
-        status = a.optString("status", "idle"),
-        cwd = a.optString("cwd", ""),
-        workspaceId = if (a.isNull("workspaceId")) null else a.optString("workspaceId"),
-        requiresAttention = a.optBoolean("requiresAttention", false),
-        attentionReason = if (a.isNull("attentionReason")) null else a.optString("attentionReason"),
-        pendingPermissionCount = a.optInt("pendingPermissionCount", 0),
-        lastError = if (a.isNull("lastError")) null else a.optString("lastError"),
-        costUsd = if (a.isNull("costUsd")) null else a.optDouble("costUsd"),
-        machineId = a.optString("machineId", "local").also { agentMachines[a.optString("agentId")] = it },
-    )
+    /** Decodes one agent payload and indexes its machine for [withMachine] lookups. */
+    private fun decodeAgent(json: JSONObject): AgentInfo =
+        decodeResult<AgentInfo>(json).also { agentMachines[it.agentId] = it.machineId }
 
     /** agentId → machine, learned from agent.list/agent.create, so follow-up requests reach the host the agent runs on. */
     private val agentMachines = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -876,19 +728,7 @@ class BridgeClient(
             "agent.timeline",
             withMachine(agentId, JSONObject().put("agentId", agentId).put("limit", 200)),
             onResult = { result ->
-                val arr = result.optJSONArray("entries") ?: JSONArray()
-                _agentTimeline.value = (0 until arr.length()).map { i ->
-                    val e = arr.getJSONObject(i)
-                    AgentTimelineEntry(
-                        kind = e.optString("kind", "other"),
-                        text = if (e.isNull("text")) null else e.optString("text"),
-                        toolName = if (e.isNull("toolName")) null else e.optString("toolName"),
-                        command = if (e.isNull("command")) null else e.optString("command"),
-                        output = if (e.isNull("output")) null else e.optString("output"),
-                        status = if (e.isNull("status")) null else e.optString("status"),
-                        timestamp = e.optString("timestamp"),
-                    )
-                }
+                _agentTimeline.value = decodeList<AgentTimelineEntry>(result, "entries")
             },
         )
     }
@@ -943,7 +783,7 @@ class BridgeClient(
             fields,
             onResult = { result ->
                 refreshAgents()
-                onCreated(parseAgent(result.getJSONObject("agent")))
+                onCreated(decodeAgent(result.getJSONObject("agent")))
             },
             onError = { error ->
                 // The bridge's own message ("Not connected to …", "Pick a folder…") beats a generic failure.
@@ -967,22 +807,7 @@ class BridgeClient(
 
     fun refreshPermissions() {
         send("permission.list", onResult = { result ->
-            val arr = result.optJSONArray("permissions") ?: JSONArray()
-            _permissions.value = (0 until arr.length()).map { i ->
-                val p = arr.getJSONObject(i)
-                val actionsArr = p.optJSONArray("actions") ?: JSONArray()
-                PermissionInfo(
-                    permissionRequestId = p.optString("permissionRequestId"),
-                    agentId = p.optString("agentId"),
-                    kind = p.optString("kind", "other"),
-                    title = if (p.isNull("title")) null else p.optString("title"),
-                    description = if (p.isNull("description")) null else p.optString("description"),
-                    actions = (0 until actionsArr.length()).map { j ->
-                        val a = actionsArr.getJSONObject(j)
-                        PermissionAction(a.optString("id"), a.optString("label"), a.optString("behavior"))
-                    },
-                )
-            }
+            _permissions.value = decodeList<PermissionInfo>(result, "permissions")
         })
     }
 
@@ -1010,15 +835,7 @@ class BridgeClient(
 
     fun refreshMachines() {
         send("machine.list", onResult = { result ->
-            val arr = result.optJSONArray("machines") ?: JSONArray()
-            _machines.value = (0 until arr.length()).map { i ->
-                val m = arr.getJSONObject(i)
-                MachineInfo(
-                    id = m.optString("id"),
-                    label = m.optString("label"),
-                    connected = m.optBoolean("connected", false),
-                )
-            }
+            _machines.value = decodeList<MachineInfo>(result, "machines")
         })
     }
 
@@ -1054,16 +871,7 @@ class BridgeClient(
     }
 
     // ── Remote folder browser (spec §37) — picks the folder that "Connect" opens into Code + Terminal ──
-
-    data class RemoteBrowseEntry(val name: String, val isDir: Boolean)
-
-    data class RemoteBrowseState(
-        val machineId: String,
-        val machineLabel: String,
-        val path: String,
-        val entries: List<RemoteBrowseEntry>,
-        val loading: Boolean,
-    )
+    // RemoteBrowseEntry/RemoteBrowseState live in ProtocolModels.kt.
 
     private val _remoteBrowse = MutableStateFlow<RemoteBrowseState?>(null)
     val remoteBrowse: StateFlow<RemoteBrowseState?> = _remoteBrowse
@@ -1093,11 +901,7 @@ class BridgeClient(
             "dir.list",
             JSONObject().put("machineId", machineId).put("workspaceId", path).put("path", "."),
             onResult = { result ->
-                val arr = result.optJSONArray("entries") ?: JSONArray()
-                val entries = (0 until arr.length()).map { i ->
-                    val e = arr.getJSONObject(i)
-                    RemoteBrowseEntry(name = e.optString("name"), isDir = e.optString("kind") == "dir")
-                }
+                val entries = decodeList<RemoteBrowseEntry>(result, "entries")
                 val current = _remoteBrowse.value
                 if (current != null && current.machineId == machineId) {
                     _remoteBrowse.value = current.copy(path = path, entries = entries, loading = false)
@@ -1249,16 +1053,7 @@ class BridgeClient(
     }
 
     private fun applyWorktrees(result: JSONObject) {
-        val arr = result.optJSONArray("worktrees") ?: JSONArray()
-        val list = (0 until arr.length()).map { i ->
-            val w = arr.getJSONObject(i)
-            WorktreeInfo(
-                path = w.optString("path"),
-                branch = if (w.isNull("branch")) null else w.optString("branch"),
-                openWorkspaceId = if (w.isNull("openWorkspaceId")) null else w.optString("openWorkspaceId"),
-            )
-        }
-        _worktrees.value = list
+        _worktrees.value = decodeList<WorktreeInfo>(result, "worktrees")
     }
 
     private inner class Listener : WebSocketListener() {
@@ -1268,21 +1063,28 @@ class BridgeClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            val msg = JSONObject(text)
+            val msg = try {
+                JSONObject(text)
+            } catch (e: JSONException) {
+                // A malformed frame must not propagate — OkHttp would surface it
+                // as onFailure and force a needless full reconnect/resync.
+                Log.e("LensCodeBridge", "dropping malformed frame", e)
+                return
+            }
             if (msg.optString("type") == "event") {
                 handleEvent(msg)
                 return
             }
             val id = if (msg.isNull("id")) null else msg.optString("id")
             if (id == null) return
-            val result = msg.optJSONObject("result")
+            val req = pending.remove(id) ?: return
+            req.timeout.cancel()
             try {
+                val result = msg.optJSONObject("result")
                 if (result != null) {
-                    errorCallbacks.remove(id)
-                    callbacks.remove(id)?.invoke(result)
+                    req.onResult?.invoke(result)
                 } else {
-                    callbacks.remove(id)
-                    errorCallbacks.remove(id)?.invoke(msg.optJSONObject("error") ?: JSONObject())
+                    req.onError?.invoke(msg.optJSONObject("error") ?: JSONObject())
                 }
             } catch (e: Exception) {
                 // A malformed/unexpected response must never take down the reader
@@ -1293,18 +1095,26 @@ class BridgeClient(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             Log.w("LensCodeBridge", "WebSocket failure: ${t.javaClass.simpleName}: ${t.message}", t)
-            _state.value = _state.value.copy(bridgeConnected = false)
-            if (closedByUs) return
+            // Ignore events from a stale socket already replaced by a reconnect —
+            // it must not clear state or schedule another reconnect for the live one.
+            if (webSocket !== ws) return
+            ws = null
+            _state.value = _state.value.copy(bridgeConnected = false, backendConnected = false)
+            // In-flight requests over this socket will never be answered.
+            failAllPending(errorBody("CONNECTION_LOST", "Lost the connection to lenscode-bridge."))
             // Spec §59: never assume backend processes stopped; retry and resync.
-            scope.launch {
-                delay(3000)
-                connect()
-            }
+            scheduleReconnect()
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             Log.d("LensCodeBridge", "onClosed: code=$code reason=$reason")
-            _state.value = _state.value.copy(bridgeConnected = false)
+            if (webSocket !== ws) return
+            ws = null
+            _state.value = _state.value.copy(bridgeConnected = false, backendConnected = false)
+            failAllPending(errorBody("CONNECTION_LOST", "The bridge closed the connection."))
+            // A graceful server-initiated close is still a disconnect — reconnect
+            // unless we were the ones who closed it.
+            scheduleReconnect()
         }
     }
 
@@ -1323,10 +1133,24 @@ class BridgeClient(
     private fun handleEvent(msg: JSONObject) {
         if (msg.optString("topic") != "backend") return
         _state.value = _state.value.copy(lastEvent = msg.optString("event", "—"))
-        send("snapshot.request", onResult = { snapshotResult -> applySnapshot(snapshotResult) })
-        refreshTerminals()
-        refreshAgents()
-        refreshPermissions()
-        trackedAgentId?.let { refreshAgentTimeline(it) }
+        // Backend events arrive in bursts (one user action → several events).
+        // Coalesce them into a single resync instead of a snapshot + 3 refreshes
+        // per event.
+        resyncJob?.cancel()
+        resyncJob = scope.launch {
+            delay(RESYNC_DEBOUNCE_MS)
+            send("snapshot.request", onResult = { snapshotResult -> applySnapshot(snapshotResult) })
+            refreshTerminals()
+            refreshAgents()
+            refreshPermissions()
+            trackedAgentId?.let { refreshAgentTimeline(it) }
+        }
+    }
+
+    private companion object {
+        const val REQUEST_TIMEOUT_MS = 30_000L
+        const val RECONNECT_BASE_MS = 1_000L
+        const val RECONNECT_MAX_MS = 30_000L
+        const val RESYNC_DEBOUNCE_MS = 150L
     }
 }

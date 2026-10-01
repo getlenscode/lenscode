@@ -16,6 +16,7 @@ const LANGUAGES: Record<string, string> = {
   ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
   ".py": "python", ".rs": "rust", ".go": "go", ".c": "c", ".h": "c",
   ".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp", ".cs": "csharp",
+  ".kt": "kotlin", ".kts": "kotlin", ".java": "java",
   ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".md": "markdown",
   ".sh": "shell", ".zsh": "shell", ".bash": "shell", ".toml": "toml",
 };
