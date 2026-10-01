@@ -32,13 +32,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.xr.scenecore.scene
 import androidx.lifecycle.lifecycleScope
 import androidx.xr.compose.spatial.ExperimentalFollowingSubspaceApi
-import androidx.xr.compose.spatial.FollowingSubspace
 import androidx.xr.compose.spatial.Subspace
-import androidx.xr.compose.platform.LocalSession
-import androidx.xr.compose.subspace.FollowBehavior
 import androidx.xr.compose.subspace.FollowTarget
+import androidx.xr.compose.subspace.FollowBehavior
+import androidx.xr.compose.spatial.FollowingSubspace
+import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.subspace.SpatialBox
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialRow
@@ -47,6 +48,7 @@ import androidx.xr.compose.subspace.layout.SpatialRoundedCornerShape
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.offset
+import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.padding
 import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.width
@@ -365,6 +367,27 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     // root as one rigid block on every head move, fighting manual
     // reposition/pin/resize — an opt-in for walking, not the default.
     var followMeEnabled by remember { mutableStateOf(false) }
+    // Metres in front of your face Follow Me holds the layout (tunable via the debug broadcast).
+    var followMeDistanceM by remember { mutableStateOf(0.6f) }
+    if (BuildConfig.DEBUG) {
+        // adb shell am broadcast -a com.lenscode.app.DEBUG_FOLLOW_ME --ez on true --ef m 0.6
+        DisposableEffect(Unit) {
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                    if (intent == null) return
+                    if (intent.hasExtra("on")) followMeEnabled = intent.getBooleanExtra("on", false)
+                    if (intent.hasExtra("m")) followMeDistanceM = intent.getFloatExtra("m", 0.6f)
+                    android.util.Log.d("LensCodeFollowMe", "debug: on=$followMeEnabled m=$followMeDistanceM")
+                }
+            }
+            context.registerReceiver(
+                receiver,
+                android.content.IntentFilter("com.lenscode.app.DEBUG_FOLLOW_ME"),
+                android.content.Context.RECEIVER_EXPORTED,
+            )
+            onDispose { context.unregisterReceiver(receiver) }
+        }
+    }
     var agentDetail by remember { mutableStateOf<com.lenscode.app.ui.AgentDetailState?>(null) }
     var agentPromptText by remember { mutableStateOf("") }
     // The one agent voice's "ask_agent" action talks to — like one running
@@ -1419,12 +1442,12 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     val panelSize = primaryLayout.size
 
     val xrSession = LocalSession.current
-    // FollowTarget.ArDevice needs Config.DeviceTrackingMode.SPATIAL enabled on
+    // ArDevice (Follow Me's head pose) needs Config.DeviceTrackingMode.SPATIAL enabled on
     // the session — DISABLED by default (confirmed live: constructing it threw
     // IllegalStateException before this). SPATIAL also needs the HEAD_TRACKING
     // runtime permission on immersive devices (developer.android.com/develop/
     // xr/jetpack-xr-sdk/arcore/device-pose) — request that first, then
-    // configure once permission is granted. FollowingSubspace below only ever
+    // configure once permission is granted. Follow Me below only ever
     // fires once this has actually succeeded, so there's no race with the toggle.
     var deviceTrackingReady by remember { mutableStateOf(false) }
     // Bumped after a permission grant to retry configure() — LaunchedEffect
@@ -1457,8 +1480,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
         }
     }
 
-    // Factored out so both the plain Subspace and the "Follow me" FollowingSubspace
-    // below can render identical content — only the root wrapper differs.
+    // Factored out so the spatial root below stays a one-liner.
     @Composable
     fun androidx.xr.compose.subspace.SpatialBoxScope.spatialContent() {
             // ── Agent strip — real Paseo agent.list, honestly empty if none ──
@@ -1942,19 +1964,44 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
             }
     }
 
+    // ── Follow Me ───────────────────────────────────────────────────────
+    // The platform's own FollowingSubspace, configured the way its source
+    // requires: FollowTarget.ArDevice is NOT compatible with
+    // FollowBehavior.Tight (that's why Follow Me never showed anything — the
+    // original code used Tight). Soft is the system-tuned lazy follow: content
+    // glides back in front of you instead of being glued to every head twitch.
+    // Tracks position + yaw only, so nodding/tilting doesn't swing the panels.
+    // ArDevice(session) has no offset in this version and the subspace origin
+    // sits at your head, so the layout is pushed out in front explicitly
+    // (~0.6 m — tuned on-device to match how close the non-following layout feels).
+    //
+    // References:
+    //   FollowingSubspace KDoc ("ArDevice is not compatible with Tight", Soft default):
+    //     https://github.com/androidx/androidx/blob/androidx-main/xr/compose/compose/src/main/kotlin/androidx/xr/compose/spatial/Subspace.kt
+    //   FollowBehavior (Soft / Static / Tight):
+    //     https://developer.android.com/reference/kotlin/androidx/xr/compose/subspace/FollowBehavior
+    //   XR Compose release notes (FollowingSubspace experimental in alpha17, UserSubspace soft locking):
+    //     https://developer.android.com/jetpack/androidx/releases/xr-compose
+    //   Device pose / HEAD_TRACKING + DeviceTrackingMode setup:
+    //     https://developer.android.com/develop/xr/jetpack-xr-sdk/arcore/device-pose
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val dpPerMeter = remember(xrSession) {
+        xrSession?.let { it.scene.virtualPixelDensity.pixelsPerMeter / density } ?: 1000f
+    }
+    LaunchedEffect(followMeEnabled, deviceTrackingReady) {
+        android.util.Log.d("LensCodeFollowMe", "followMe=$followMeEnabled trackingReady=$deviceTrackingReady distance=${followMeDistanceM}m")
+    }
     if (followMeEnabled && xrSession != null && deviceTrackingReady) {
-        // Positional args, not named — androidx.xr.compose's public parameter
-        // names for this experimental alpha API aren't available offline.
-        // TrackedDimensions.All (full 6 DOF) explicitly, not the default —
-        // confirmed live that a translation-only default followed you walking
-        // forward but never re-faced you after a turn.
         FollowingSubspace(
             FollowTarget.ArDevice(xrSession),
-            FollowBehavior.Tight,
+            FollowBehavior.Soft(),
             SubspaceModifier,
-            androidx.xr.compose.subspace.TrackedDimensions.All,
+            // translation x/y/z, rotation x (pitch) / y (yaw) / z (roll)
+            androidx.xr.compose.subspace.TrackedDimensions(true, true, true, false, true, false),
         ) {
-            spatialContent()
+            SpatialBox(SubspaceModifier.offset(0.dp, 0.dp, (-followMeDistanceM * dpPerMeter).dp)) {
+                spatialContent()
+            }
         }
     } else {
         Subspace {
