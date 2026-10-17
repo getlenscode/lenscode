@@ -8,9 +8,16 @@ import androidx.compose.ui.unit.dp
 
 /** Match Compose clipping to the XR compositor so neither adds extra rounding. */
 object LensCodeCorners {
-    val Panel = 10.dp
-    val Card = 8.dp
-    val Control = 6.dp
+    var Panel by mutableStateOf(10.dp); private set
+    var Card by mutableStateOf(8.dp); private set
+    var Control by mutableStateOf(6.dp); private set
+
+    fun apply(id: ThemeId) {
+        val glass = id == ThemeId.AURA_GLASS
+        Panel = if (glass) 22.dp else 10.dp
+        Card = if (glass) 18.dp else 8.dp
+        Control = if (glass) 28.dp else 6.dp
+    }
 }
 
 /** One selectable app-wide color scheme — see [applyAppTheme]. */
@@ -19,6 +26,7 @@ enum class ThemeId(val label: String) {
     DRACULA("Dracula"),
     SOLARIZED_DARK("Solarized Dark"),
     DEEP_BLACK("Deep Black"),
+    AURA_GLASS("Aura Glass"),
 }
 
 /** App-chrome colors for one theme — see [LensCodeColors]. */
@@ -138,11 +146,38 @@ val DEEP_BLACK_CODE = CodePalette(
     number = Color(0xFFFFD60A), typeName = Color(0xFFBF5AF2), plain = Color(0xFFFFFFFF),
 )
 
+// Reference-inspired neutral glass: translucent smoke, white rim lighting,
+// and soft ice accents. Transparency lets the XR environment show through;
+// editor surfaces retain more tint for readable code over busy surroundings.
+@Suppress("MagicNumber") // Literal ARGB values define the named theme palette.
+val AURA_GLASS_PALETTE = LensCodePalette(
+    text = Color(0xFFFAFAF8), muted = Color(0xFFD1D0CB), blue = Color(0xFFBCD9F8),
+    green = Color(0xFF9ADBB3), red = Color(0xFFFF726C), amber = Color(0xFFE8CD97),
+    purple = Color(0xFFD0C2EA), cyan = Color(0xFFD4E8FA), eyebrow = Color(0xFFE2E1DC),
+    idle = Color(0xFFAAA9A4), activeDock = Color(0xFFFFFFFF),
+    panelGradTop = Color(0x80514F49), panelGradBottom = Color(0xA62A2A27),
+    panelGlow = Color(0x18FFFFFF), panelBorder = Color(0x38FFFFFF), panelBorderTop = Color(0xB8FFFFFF),
+    sheenWhite = Color(0x1AFFFFFF), sheenBlue = Color(0x08E5E2D9),
+    cardBorder = Color(0x60E8E7E1), cardBg = Color(0x7033322E), cardGradTop = Color(0x805B5952),
+    dockIdle = Color(0xFFE8E7E2), dockActiveGradTop = Color(0x887B7971), dockActiveGradBottom = Color(0x88514F49),
+    dockActiveBorder = Color(0xB8ECF3FC), dockBg = Color(0x7044403A),
+    logoBg = Color(0x70504E47), logoBorder = Color(0x60FFFFFF),
+)
+
+@Suppress("MagicNumber") // Literal ARGB values define the named syntax palette.
+val AURA_GLASS_CODE = CodePalette(
+    editorBg = Color(0xC22C2C29), sidebarBg = Color(0x8A373631), tabBarBg = Color(0xA641403A),
+    activeTabBg = Color(0xB45C5A52), lineNumber = Color(0xFFB8B6AD), hoverRow = Color(0x407B7971),
+    keyword = Color(0xFFBCD9F8), stringLit = Color(0xFFE8CD97), comment = Color(0xFFB4BFAE),
+    number = Color(0xFFD0C2EA), typeName = Color(0xFFACE0CD), plain = Color(0xFFFAFAF8),
+)
+
 fun lensCodePaletteFor(id: ThemeId): LensCodePalette = when (id) {
     ThemeId.CURSOR -> CURSOR_PALETTE
     ThemeId.DRACULA -> DRACULA_PALETTE
     ThemeId.SOLARIZED_DARK -> SOLARIZED_DARK_PALETTE
     ThemeId.DEEP_BLACK -> DEEP_BLACK_PALETTE
+    ThemeId.AURA_GLASS -> AURA_GLASS_PALETTE
 }
 
 fun codePaletteFor(id: ThemeId): CodePalette = when (id) {
@@ -150,6 +185,7 @@ fun codePaletteFor(id: ThemeId): CodePalette = when (id) {
     ThemeId.DRACULA -> DRACULA_CODE
     ThemeId.SOLARIZED_DARK -> SOLARIZED_DARK_CODE
     ThemeId.DEEP_BLACK -> DEEP_BLACK_CODE
+    ThemeId.AURA_GLASS -> AURA_GLASS_CODE
 }
 
 /**
@@ -236,6 +272,7 @@ object LensCodeColors {
 
 /** Applies one theme's colors to both app chrome ([LensCodeColors]) and the code editor ([VsCodeColors]). */
 fun applyAppTheme(id: ThemeId) {
+    LensCodeCorners.apply(id)
     LensCodeColors.apply(lensCodePaletteFor(id))
     VsCodeColors.apply(codePaletteFor(id))
 }

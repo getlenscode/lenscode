@@ -24,11 +24,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-internal val PanelCorner = LensCodeCorners.Panel
+internal val PanelCorner get() = LensCodeCorners.Panel
 
-internal val CardCorner = LensCodeCorners.Card
+internal val CardCorner get() = LensCodeCorners.Card
 
-internal val DockCorner = LensCodeCorners.Control
+internal val DockCorner get() = LensCodeCorners.Control
 
 /** Cache reflection brushes at the panel's size instead of allocating each frame. */
 internal fun Modifier.glassFinish(corner: Dp, compact: Boolean = false): Modifier {

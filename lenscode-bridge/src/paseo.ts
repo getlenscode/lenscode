@@ -12,8 +12,25 @@
  */
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { DaemonClient, type DaemonEvent } from "@getpaseo/client/internal/daemon-client";
 import { log } from "./log.ts";
+
+/** `major.minor` — paseo is pre-1.0, so minor bumps are the breaking boundary (0.7 → 0.8 → 0.10 all moved semantics). */
+function majorMinor(version: string | null): string | null {
+  return version?.match(/^(\d+)\.(\d+)/)?.[0] ?? null;
+}
+
+/** The @getpaseo/client pin this bridge was built against, read from our own package.json (the package doesn't export its manifest). Works from both src/ and dist/. */
+function sdkPinnedVersion(): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const range: unknown = pkg?.dependencies?.["@getpaseo/client"];
+    return typeof range === "string" ? (range.match(/\d+\.\d+(\.\d+)?/)?.[0] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface PaseoConfig {
   url: string;
@@ -89,6 +106,16 @@ export class PaseoClient extends EventEmitter {
       log("warn", "paseo daemon status unavailable", { error: String(e) });
     }
     log("info", "paseo daemon reachable", { protocol: this.protocol });
+    // Wire calls have held across daemon bumps so far, but semantics haven't
+    // (0.10 mints branch-1 duplicates where 0.8 errored) — a version skew is
+    // worth a loud line, not a silent shrug.
+    const pinned = sdkPinnedVersion();
+    if (majorMinor(this.protocol) !== majorMinor(pinned)) {
+      log("warn", "paseo daemon/SDK version mismatch — expected drift bugs; bump @getpaseo/* pins or the daemon", {
+        daemonVersion: this.protocol,
+        sdkPinned: pinned,
+      });
+    }
   }
 
   private onDaemonEvent(event: DaemonEvent): void {

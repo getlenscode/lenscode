@@ -19,3 +19,6 @@ client-unity/Assets/Screenshots/
 
 # OS
 .DS_Store
+
+# Marketing assets
+marketing/

@@ -5,6 +5,19 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import com.lenscode.app.ui.glassFinish
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -22,6 +35,8 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.xr.compose.platform.LocalSession
@@ -194,6 +209,10 @@ internal class WorkspaceUiState(
     var pairingDeviceName by mutableStateOf("LensCode XR Glasses")
     var pairingCode by mutableStateOf("")
     var isListening by mutableStateOf(false)
+    /** Open dictation session for composer/agentPrompt modes — non-null means
+     * the mic stays open until the user taps it again. Not observed by Compose;
+     * stopping it doesn't need a recompose. */
+    var dictationSession: com.lenscode.app.voice.VoiceRecognizer.DictationSession? = null
     var voicePartial by mutableStateOf("")
     var voiceError by mutableStateOf<String?>(null)
     var voiceMode by mutableStateOf("fileSearch")
@@ -233,7 +252,7 @@ internal class WorkspaceUiState(
  */
 @OptIn(ExperimentalFollowingSubspaceApi::class)
 @Composable
-fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
+fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnterFullSpace: (() -> Unit)? = null) {
     val state by bridge.state.collectAsState()
     val terminals by bridge.terminals.collectAsState()
     val terminalOutput by bridge.terminalOutput.collectAsState()
@@ -448,6 +467,29 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
         }
     }
 
+    // An open dictation session owns the mic — it must not outlive this screen.
+    DisposableEffect(Unit) {
+        onDispose { ui.dictationSession?.stop(); ui.dictationSession = null }
+    }
+
+
+    fun stopVoice() {
+        ui.dictationSession?.stop()
+        ui.dictationSession = null
+        ui.isListening = false
+        ui.voicePartial = ""
+    }
+
+    /**
+     * Inserts dictation at the box's current selection — so pinch-dragging the
+     * cursor mid-dictation decides where the next utterance lands, and the
+     * cursor advances past each committed segment.
+     */
+    fun insertDictationAtCursor(v: TextFieldValue, s: String): TextFieldValue {
+        val sel = v.selection
+        val merged = v.text.substring(0, sel.min) + s + v.text.substring(sel.max)
+        return TextFieldValue(merged, selection = TextRange(sel.min + s.length))
+    }
 
     fun startListening(mode: String) {
         ui.voiceMode = mode
@@ -456,11 +498,45 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
         ui.isListening = true
         if (mode == "fileSearch") bridge.clearVoiceResult()
         if (mode == "command") ui.voiceCommandReview = null
+
+        if (mode == "composer" || mode == "agentPrompt") {
+            // Dictation modes keep the mic open until the mic button is tapped
+            // again — SpeechRecognizer's ~5s endpointing is worked around by
+            // transparent restarts inside the session (see VoiceRecognizer).
+            ui.dictationSession = voiceRecognizer.startDictation(
+                onPartial = { text -> ui.voicePartial = text },
+                onSegment = { text ->
+                    android.util.Log.d("LensCodeVoice", "dictation segment ($mode): \"$text\"")
+                    ui.voicePartial = ""
+                    if (mode == "composer") {
+                        // Lands in the box for review, never sends by itself —
+                        // except the bare word "send", so a fully hands-free
+                        // round trip is still possible.
+                        val cleaned = text.trim().trimEnd('.', '!', '?').lowercase()
+                        if (cleaned in setOf("send", "send it", "submit", "go")) {
+                            ui.composerSendRequested = true
+                        } else {
+                            composer.prompt = insertDictationAtCursor(composer.prompt, text.trim() + " ")
+                        }
+                    } else {
+                        // agentPrompt's field is a plain String — segments append at the end.
+                        ui.agentPromptText = listOf(ui.agentPromptText.trim(), text.trim())
+                            .filter { it.isNotEmpty() }.joinToString(" ")
+                    }
+                },
+                onError = { message ->
+                    android.util.Log.d("LensCodeVoice", "dictation error ($mode): $message")
+                    ui.dictationSession = null
+                    ui.isListening = false
+                    ui.voiceError = message
+                },
+            )
+            return
+        }
+
         voiceRecognizer.listen(
             onPartial = { text ->
                 ui.voicePartial = text
-                if (mode == "agentPrompt") ui.agentPromptText = text // live feedback right in the field being filled
-                if (mode == "composer") composer.prompt = text
                 if (mode == "browserUrl") ui.browserUrl = com.lenscode.app.voice.normalizeSpokenAddress(text)
             },
             onResult = { text ->
@@ -468,18 +544,6 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 ui.isListening = false
                 when (mode) {
                     "fileSearch" -> bridge.voiceSearch(text)
-                    "agentPrompt" -> ui.agentPromptText = text
-                    // Dictation into the Code composer: lands in the box for
-                    // review, never sends by itself — except the bare word
-                    // "send", so a fully hands-free round trip is possible.
-                    "composer" -> {
-                        val cleaned = text.trim().trimEnd('.', '!', '?').lowercase()
-                        if (cleaned in setOf("send", "send it", "submit", "go")) {
-                            ui.composerSendRequested = true // handled once startVoiceAgent exists — see LaunchedEffect below
-                        } else {
-                            composer.prompt = text
-                        }
-                    }
                     // An address, not a sentence — "one nine two dot one six
                     // eight..." needs the digit/symbol-word collapsing, not
                     // the raw transcript.
@@ -556,7 +620,17 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     }
 
     fun requestVoice(mode: String) {
-        if (ui.isListening) return // already listening — a second tap shouldn't restart the session mid-capture
+        if (ui.isListening) {
+            // A dictation session stays open until tapped again — the tap is
+            // "done talking". Tapping a different mic switches to that mode.
+            if (ui.dictationSession != null) {
+                val sameMode = ui.voiceMode == mode
+                stopVoice()
+                if (sameMode) return
+            } else {
+                return // single-shot session ends on its own within seconds
+            }
+        }
         ui.pendingVoiceMode = mode
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
@@ -803,9 +877,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     fun norm(text: String) = text.lowercase().filter { it.isLetterOrDigit() }
 
     fun sendComposer() {
-        val text = composer.prompt.trim()
+        val text = composer.prompt.text.trim()
         if (text.isEmpty()) return
-        composer.prompt = ""
+        composer.prompt = TextFieldValue("")
         composer.menu = null
         showToast("Starting agent…")
         startVoiceAgent(instruction = text)
@@ -907,6 +981,79 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
             )
         }
         attempt(null)
+    }
+
+    /**
+     * Creates a worktree for [branch] and opens it in Code — shared by the
+     * composer's "+ New worktree" picker and voice's create_worktree.
+     */
+    fun createWorktreeFlow(branch: String) {
+        bridge.createWorktree(
+            branch,
+            onCreated = { workspaceId, machineId ->
+                if (workspaceId != null) {
+                    bridge.openWorkspaceInFiles(workspaceId, branch, machineId)
+                    ui.activeView = "code"
+                    showToast("Worktree → $branch")
+                } else {
+                    showToast("Worktree created for $branch.")
+                }
+            },
+            onError = { msg -> showToast(msg) },
+        )
+    }
+
+    /** §57 confirm card for worktree removal — shared by the composer's × and voice's remove_worktree. */
+    fun confirmRemoveWorktree(wt: com.lenscode.app.net.WorktreeInfo) {
+        ui.deleteConfirm = com.lenscode.app.ui.DeleteConfirmState(
+            title = "Remove worktree?",
+            message = "This deletes the checkout at ${wt.path}. " +
+                "Any uncommitted changes there are lost.",
+            confirmLabel = "Remove",
+            onConfirm = {
+                bridge.removeWorktree(
+                    wt,
+                    onDone = {
+                        ui.deleteConfirm = null
+                        // If Code was rooted inside the removed checkout, its
+                        // root is now dead — re-root rather than leaving the
+                        // file browser on a ghost dir. Local goes back to the
+                        // project root; remote has no "local" alias, so land
+                        // on the worktree's parent folder.
+                        if (wt.openWorkspaceId == bridge.currentWorkspaceId ||
+                            wt.path == bridge.currentWorkspaceId
+                        ) {
+                            if (filesMachineIdFlow == "local") {
+                                bridge.openWorkspaceInFiles("local", "local")
+                            } else {
+                                val parent = wt.path.substringBeforeLast('/', "/")
+                                bridge.openRemoteFolderInFiles(
+                                    filesMachineIdFlow,
+                                    parent,
+                                    parent.substringAfterLast('/'),
+                                )
+                            }
+                        }
+                        showToast("Worktree removed.")
+                    },
+                    onError = { msg ->
+                        ui.deleteConfirm = null
+                        showToast(msg)
+                    },
+                )
+            },
+            onCancel = { ui.deleteConfirm = null },
+        )
+    }
+
+    /** Loose worktree match for speech — branch name, then checkout-folder name, ignoring punctuation and case. */
+    fun resolveWorktree(heard: String): com.lenscode.app.net.WorktreeInfo? {
+        val want = norm(heard)
+        if (want.isEmpty()) return null
+        fun key(wt: com.lenscode.app.net.WorktreeInfo) = norm(wt.branch ?: wt.path.substringAfterLast('/'))
+        return worktrees.firstOrNull { key(it) == want }
+            ?: worktrees.firstOrNull { key(it).startsWith(want) }
+            ?: worktrees.firstOrNull { key(it).contains(want) }
     }
 
     /** Loose branch-name match for speech: exact, then prefix, then substring, ignoring punctuation and case. */
@@ -1242,6 +1389,38 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 }
             }
 
+            is com.lenscode.app.voice.VoiceAction.CreateWorktree -> {
+                val match = resolveBranch(action.branch)
+                val existing = resolveWorktree(action.branch)
+                when {
+                    existing != null -> {
+                        // Already has a worktree — creating would just redirect to it anyway.
+                        bridge.openWorktreeInCode(existing) { ui.activeView = "code" }
+                        showToast("${existing.branch ?: action.branch} already has a worktree — opening it.")
+                    }
+                    match == null -> {
+                        ui.activeView = "code"
+                        composer.menu = "newworktree"
+                        showToast("No branch matching \"${action.branch}\" — pick one, or say its name.")
+                    }
+                    match == currentBranch -> {
+                        showToast("$match is the current checkout — it can't also live in a worktree.")
+                    }
+                    else -> createWorktreeFlow(match)
+                }
+            }
+
+            is com.lenscode.app.voice.VoiceAction.RemoveWorktree -> {
+                val wt = resolveWorktree(action.branch)
+                if (wt == null) {
+                    ui.activeView = "code"
+                    composer.menu = "branch"
+                    showToast("No worktree matching \"${action.branch}\".")
+                } else {
+                    confirmRemoveWorktree(wt)
+                }
+            }
+
             com.lenscode.app.voice.VoiceAction.ComposerStatus -> {
                 val modeLabel = com.lenscode.app.ui.composerModeFor(composer.modeId).label
                 showToast(
@@ -1429,44 +1608,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
         }
     }
 
-    // Factored out so the spatial root below stays a one-liner.
+    // Shared by the spatial panels and the flat Home Space layout.
     @Composable
-    fun androidx.xr.compose.subspace.SpatialBoxScope.spatialContent() {
-            // ── Agent strip — real Paseo agent.list, honestly empty if none ──
-            // All three rows share the main panel's horizontal/depth anchor.
-            // A 12 dp gap separates each accessory row from its visible edge.
-            SpatialRow(SubspaceModifier.offset(
-                x = panelOffset.x.dp,
-                y = (panelOffset.y + panelSize.height / 2f + 12f + 55f).dp,
-                z = panelOffset.z.dp,
-            )) {
-                if (agents.isEmpty()) {
-                    SpatialPanel(
-                        SubspaceModifier.width(460.dp).height(110.dp).padding(horizontal = 8.dp),
-                        shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Card)),
-                    ) {
-                        SnipRegion(snipController, "agents", "empty") {
-                            AgentChipContent("—", "No agents running", LensCodeColors.Idle)
-                        }
-                    }
-                } else {
-                    for (agent in agents) {
-                        androidx.compose.runtime.key(agent.agentId) {
-                            SpatialPanel(
-                                SubspaceModifier.width(220.dp).height(110.dp).padding(horizontal = 8.dp),
-                                shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Card)),
-                            ) {
-                                SnipRegion(snipController, "agents", agent.agentId, Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
-                                    AgentChipContent(agent.label, agent.status, LensCodeColors.agentStatusColor(agent.status), agent.provider)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Primary panel ──────────────────────────────────────────────
-            SpatialPanel(primaryLayout.toModifier(0.dp), shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Panel))) {
+    fun primaryContent() {
                 SnipRegion(snipController, "primary", "main", Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
                 when (ui.activeView) {
@@ -1538,10 +1682,14 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                                 worktrees = worktrees,
                                 providers = providers,
                                 isListening = ui.isListening && ui.voiceMode == "composer",
+                                dictationHint =
+                                    if (ui.isListening && ui.voiceMode == "composer") ui.voicePartial else null,
                                 onMic = { requestVoice("composer") },
                                 onSend = { sendComposer() },
                                 onSwitchBranch = { switchBranchFlow(it) },
                                 onOpenWorktree = { wt -> bridge.openWorktreeInCode(wt) { ui.activeView = "code" } },
+                                onCreateWorktree = { branch -> createWorktreeFlow(branch) },
+                                onRemoveWorktree = { wt -> confirmRemoveWorktree(wt) },
                                 onModeChosen = { chooseMode(it) },
                                 onModelChosen = { provider, model -> chooseModel(provider, model) },
                             )
@@ -1653,6 +1801,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                         followMeEnabled = ui.followMeEnabled,
                         onToggleFollowMe = { ui.followMeEnabled = !ui.followMeEnabled },
                         onEnterPip = onEnterPip,
+                        // Pin / depth / Follow Me / PiP only mean something for spatial panels.
+                        showSpatialControls = androidx.xr.compose.platform.LocalSpatialCapabilities.current.isSpatialUiEnabled,
                         pairingState = pairingState,
                         deviceName = ui.pairingDeviceName,
                         onDeviceNameChange = { ui.pairingDeviceName = it },
@@ -1855,21 +2005,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                 }
                 }
                 }
-            }
+    }
 
-            // ── Quick dock ────────────────────────────────────────────────
-            run {
-                // Follow the main panel's bottom edge, including live moves
-                // and resizes, rather than anchoring to a separate world pose.
-                SpatialPanel(
-                    SubspaceModifier.width(panelSize.width.dp).height(76.dp)
-                        .offset(
-                            x = panelOffset.x.dp,
-                            y = (panelOffset.y - panelSize.height / 2f - 12f - 38f).dp,
-                            z = panelOffset.z.dp,
-                        ),
-                    shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Control)),
-                ) {
+    @Composable
+    fun dockContent() {
                     SnipRegion(snipController, "dock", "main", Modifier.fillMaxSize()) {
                     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for ((id, label) in listOf(
@@ -1909,6 +2048,113 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
                         }
                     }
                     }
+    }
+
+    // Home Space has no Subspace, so lay the same content out as one flat 2D
+    // screen: agent strip, primary panel, dock.
+    @Composable
+    fun flatContent() {
+        androidx.compose.foundation.layout.Column(
+            Modifier.fillMaxSize().background(Color(0xFF0B1118)).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().height(96.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier.weight(1f).fillMaxHeight().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (agents.isEmpty()) {
+                        Box(Modifier.width(300.dp).fillMaxHeight().glassFinish(LensCodeCorners.Card, compact = true)) {
+                            AgentChipContent("—", "No agents running", LensCodeColors.Idle)
+                        }
+                    } else {
+                        for (agent in agents) {
+                            androidx.compose.runtime.key(agent.agentId) {
+                                Box(
+                                    Modifier.width(220.dp).fillMaxHeight()
+                                        .glassFinish(LensCodeCorners.Card, compact = true)
+                                        .clickable { openAgentDetail(agent) },
+                                ) {
+                                    AgentChipContent(agent.label, agent.status, LensCodeColors.agentStatusColor(agent.status), agent.provider)
+                                }
+                            }
+                        }
+                    }
+                }
+                if (onEnterFullSpace != null) {
+                    androidx.compose.material3.Button(onClick = onEnterFullSpace) {
+                        androidx.compose.material3.Text("Full Space")
+                    }
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(LensCodeCorners.Panel))) {
+                primaryContent()
+            }
+            Box(Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(LensCodeCorners.Control))) {
+                dockContent()
+            }
+        }
+    }
+
+    // Factored out so the spatial root below stays a one-liner.
+    @Composable
+    fun androidx.xr.compose.subspace.SpatialBoxScope.spatialContent() {
+            // ── Agent strip — real Paseo agent.list, honestly empty if none ──
+            // All three rows share the main panel's horizontal/depth anchor.
+            // A 12 dp gap separates each accessory row from its visible edge.
+            SpatialRow(SubspaceModifier.offset(
+                x = panelOffset.x.dp,
+                y = (panelOffset.y + panelSize.height / 2f + 12f + 55f).dp,
+                z = panelOffset.z.dp,
+            )) {
+                if (agents.isEmpty()) {
+                    SpatialPanel(
+                        SubspaceModifier.width(460.dp).height(110.dp).padding(horizontal = 8.dp),
+                        shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Card)),
+                    ) {
+                        SnipRegion(snipController, "agents", "empty") {
+                            AgentChipContent("—", "No agents running", LensCodeColors.Idle)
+                        }
+                    }
+                } else {
+                    for (agent in agents) {
+                        androidx.compose.runtime.key(agent.agentId) {
+                            SpatialPanel(
+                                SubspaceModifier.width(220.dp).height(110.dp).padding(horizontal = 8.dp),
+                                shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Card)),
+                            ) {
+                                SnipRegion(snipController, "agents", agent.agentId, Modifier.fillMaxSize().clickable { openAgentDetail(agent) }) {
+                                    AgentChipContent(agent.label, agent.status, LensCodeColors.agentStatusColor(agent.status), agent.provider)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Primary panel ──────────────────────────────────────────────
+            SpatialPanel(primaryLayout.toModifier(0.dp), shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Panel))) {
+                primaryContent()
+            }
+
+            // ── Quick dock ────────────────────────────────────────────────
+            run {
+                // Follow the main panel's bottom edge, including live moves
+                // and resizes, rather than anchoring to a separate world pose.
+                SpatialPanel(
+                    SubspaceModifier.width(panelSize.width.dp).height(76.dp)
+                        .offset(
+                            x = panelOffset.x.dp,
+                            y = (panelOffset.y - panelSize.height / 2f - 12f - 38f).dp,
+                            z = panelOffset.z.dp,
+                        ),
+                    shape = SpatialRoundedCornerShape(CornerSize(LensCodeCorners.Control)),
+                ) {
+                    dockContent()
                 }
             }
     }
@@ -1940,7 +2186,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}) {
     LaunchedEffect(ui.followMeEnabled, ui.deviceTrackingReady) {
         android.util.Log.d("LensCodeFollowMe", "followMe=$ui.followMeEnabled trackingReady=$ui.deviceTrackingReady distance=${ui.followMeDistanceM}m")
     }
-    if (ui.followMeEnabled && xrSession != null && ui.deviceTrackingReady) {
+    if (!androidx.xr.compose.platform.LocalSpatialCapabilities.current.isSpatialUiEnabled) {
+        flatContent()
+    } else if (ui.followMeEnabled && xrSession != null && ui.deviceTrackingReady) {
         FollowingSubspace(
             FollowTarget.ArDevice(xrSession),
             FollowBehavior.Soft(),

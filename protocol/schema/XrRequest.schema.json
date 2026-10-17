@@ -1159,7 +1159,41 @@
         },
         "type": {
           "type": "string",
+          "const": "worktree.create"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "workspaceId",
+        "branch"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
           "const": "worktree.remove"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
         },
         "workspaceId": {
           "type": "string",
@@ -1171,8 +1205,7 @@
       },
       "required": [
         "id",
-        "type",
-        "workspaceId"
+        "type"
       ],
       "additionalProperties": false
     },

@@ -627,6 +627,9 @@ class BridgeClient(
                 when {
                     result.optBoolean("worktreeCreated", false) -> {
                         val wsId = if (result.isNull("workspaceId")) null else result.optString("workspaceId")
+                        // A worktree for `target` was created (or found) — the
+                        // daemon's list lags the disk, so poll until it shows.
+                        pollWorktrees(WORKTREE_POLL_ATTEMPTS) { list -> list.any { it.branch == target } }
                         onWorktreeCreated(wsId, machineId)
                     }
                     result.optBoolean("switched", false) -> {
@@ -778,11 +781,20 @@ class BridgeClient(
         if (modeId != null) fields.put("modeId", modeId)
         if (worktree) fields.put("worktree", true)
         if (machineId != "local") fields.put("machineId", machineId)
+        // Captured before the request: the poll's "did it show up" check is a
+        // count bump — Paseo names the worktree's branch itself, so there's
+        // no branch to match on.
+        val worktreesBefore = _worktrees.value.size
         send(
             "agent.create",
             fields,
             onResult = { result ->
                 refreshAgents()
+                if (worktree) {
+                    // A new Paseo worktree exists now — same list lag as
+                    // worktree.create/remove, so poll rather than refresh once.
+                    pollWorktrees(WORKTREE_POLL_ATTEMPTS) { it.size > worktreesBefore }
+                }
                 onCreated(decodeAgent(result.getJSONObject("agent")))
             },
             onError = { error ->
@@ -997,25 +1009,72 @@ class BridgeClient(
     }
 
     /**
+     * Creates a worktree checking out [branch] inside the repo Code is rooted
+     * at, and hands back the workspace Paseo opened for it (or the existing
+     * one, if the branch already had a worktree — same redirect the bridge
+     * applies to git.branch.switch).
+     */
+    fun createWorktree(
+        branch: String,
+        onCreated: (workspaceId: String?, machineId: String) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val machineId = filesMachineId
+        send(
+            "worktree.create",
+            JSONObject().put("machineId", machineId).put("workspaceId", filesWorkspaceId).put("branch", branch),
+            onResult = { result ->
+                val workspaceId = if (result.isNull("workspaceId")) null else result.optString("workspaceId")
+                // Creation lags getPaseoWorktreeList by seconds — poll until the
+                // new row shows up instead of leaving the menu stale.
+                pollWorktrees(WORKTREE_POLL_ATTEMPTS) { list -> list.any { it.branch == branch } }
+                onCreated(workspaceId, machineId)
+            },
+            onError = { error -> onError(error.optString("message", "Could not create a worktree for $branch.")) },
+        )
+    }
+
+    /**
      * Removes a worktree's checkout (spec §57 — destructive, caller must have
-     * already shown a confirmation card). Only works for a worktree that's
-     * currently open (has a live workspace_id) — matches what the Git view
-     * can already show/act on.
+     * already shown a confirmation card). Sent by path, not workspace id —
+     * archivePaseoWorktree requires the path anyway, and path-based removal
+     * works for worktrees that have no open workspace.
      */
     fun removeWorktree(worktree: WorktreeInfo, onDone: () -> Unit, onError: (String) -> Unit) {
-        val workspaceId = worktree.openWorkspaceId
-        if (workspaceId == null) {
-            onError("That worktree isn't currently open.")
-            return
-        }
         send(
             "worktree.remove",
-            JSONObject().put("machineId", filesMachineId).put("workspaceId", workspaceId),
+            JSONObject().put("machineId", filesMachineId).put("path", worktree.path),
             onResult = {
-                refreshWorktrees()
+                // Same daemon lag as creation — without polling, the just-removed
+                // row lingers (or reappears) for several seconds.
+                pollWorktrees(WORKTREE_POLL_ATTEMPTS) { list -> list.none { it.path == worktree.path } }
                 onDone()
             },
             onError = { onError("Could not remove that worktree.") },
+        )
+    }
+
+    /**
+     * Re-lists worktrees until [condition] holds (or attempts run out).
+     * getPaseoWorktreeList trails real disk changes by seconds — the bridge
+     * test suite polls for exactly this reason — so a single post-mutation
+     * refresh would paint a stale list.
+     */
+    private fun pollWorktrees(attemptsLeft: Int, condition: (List<WorktreeInfo>) -> Boolean) {
+        send(
+            "worktree.list",
+            JSONObject().put("machineId", filesMachineId).put("workspaceId", filesWorkspaceId),
+            onResult = { result ->
+                val list = decodeList<WorktreeInfo>(result, "worktrees")
+                _worktrees.value = list
+                if (!condition(list) && attemptsLeft > 1) {
+                    scope.launch {
+                        delay(WORKTREE_POLL_DELAY_MS)
+                        pollWorktrees(attemptsLeft - 1, condition)
+                    }
+                }
+            },
+            onError = { _worktrees.value = emptyList() },
         )
     }
 
@@ -1152,5 +1211,8 @@ class BridgeClient(
         const val RECONNECT_BASE_MS = 1_000L
         const val RECONNECT_MAX_MS = 30_000L
         const val RESYNC_DEBOUNCE_MS = 150L
+        /** getPaseoWorktreeList lags mutations by seconds on 0.10.x (observed ~16s) — poll for ~20s. */
+        const val WORKTREE_POLL_ATTEMPTS = 40
+        const val WORKTREE_POLL_DELAY_MS = 500L
     }
 }

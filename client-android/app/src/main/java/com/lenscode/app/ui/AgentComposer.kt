@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +21,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -70,7 +73,8 @@ class ComposerState {
     /** null = the provider's own default model. */
     var model by mutableStateOf<String?>(null)
     var worktree by mutableStateOf(false)
-    var prompt by mutableStateOf("")
+    /** TextFieldValue (not String) so dictation can insert at the pinch-dragged cursor. */
+    var prompt by mutableStateOf(TextFieldValue(""))
 
     /** Which inline menu is open: "machine" | "branch" | "mode" | "model" | null. */
     var menu by mutableStateOf<String?>(null)
@@ -113,6 +117,8 @@ private fun MenuRow(
     subtitle: String? = null,
     selected: Boolean = false,
     hint: String? = null,
+    dotColor: Color? = null,
+    onRemove: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -122,6 +128,10 @@ private fun MenuRow(
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (dotColor != null) {
+            StatusDot(dotColor, size = 7.dp)
+            Spacer(Modifier.width(8.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(title, color = LensCodeColors.Text, fontSize = 14.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
             if (subtitle != null) Text(subtitle, color = LensCodeColors.Muted, fontSize = 12.sp)
@@ -130,6 +140,19 @@ private fun MenuRow(
         if (selected) {
             Spacer(Modifier.width(8.dp))
             Text("✓", color = LensCodeColors.Blue, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+        if (onRemove != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "×",
+                color = LensCodeColors.Muted,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onRemove)
+                    .padding(horizontal = 6.dp),
+            )
         }
     }
 }
@@ -174,10 +197,13 @@ fun AgentComposer(
     worktrees: List<WorktreeInfo>,
     providers: List<ProviderInfo>,
     isListening: Boolean,
+    dictationHint: String? = null,
     onMic: () -> Unit,
     onSend: () -> Unit,
     onSwitchBranch: (String) -> Unit,
     onOpenWorktree: (WorktreeInfo) -> Unit,
+    onCreateWorktree: (String) -> Unit,
+    onRemoveWorktree: (WorktreeInfo) -> Unit,
     onModeChosen: (ComposerMode) -> Unit,
     onModelChosen: (provider: String, model: String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -210,26 +236,72 @@ fun AgentComposer(
                 }
             }
             "branch" -> MenuCard("switch to <branch>") {
-                if (branches.isEmpty()) MenuRow("No branches found", onClick = { state.menu = null })
-                for (b in branches) {
-                    MenuRow(b, selected = b == currentBranch) {
+                // A branch already checked out in a worktree can't be switched
+                // to (git refuses outright) — it lives in WORKTREES below and
+                // tapping it opens that checkout instead.
+                val worktreeBranches = worktrees.mapNotNull { it.branch }.toSet()
+                val switchable = branches.filter { it != currentBranch && it !in worktreeBranches }
+                // Worktree checkouts usually share a parent dir — strip the
+                // common prefix so the subtitle shows what distinguishes them.
+                val sharedPrefix = worktrees.map { it.path }
+                    .reduceOrNull { a, b -> a.commonPrefixWith(b) }
+                    ?.substringBeforeLast('/')
+                    ?: ""
+                fun shortPath(path: String) =
+                    if (sharedPrefix.length > 1 && path.startsWith(sharedPrefix))
+                        "…${path.removePrefix(sharedPrefix)}"
+                    else path
+                if (currentBranch != null) {
+                    // Not always the main checkout — Code can be rooted in a
+                    // worktree, in which case that branch shows up here too.
+                    MenuRow(currentBranch, "current checkout", selected = true, onClick = { state.menu = null })
+                }
+                for (b in switchable) {
+                    MenuRow(b) {
                         state.menu = null
-                        if (b != currentBranch) onSwitchBranch(b)
+                        onSwitchBranch(b)
                     }
                 }
-                if (worktrees.isNotEmpty()) {
-                    Text(
-                        "WORKTREES",
-                        color = LensCodeColors.Eyebrow,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 14.dp, top = 8.dp),
-                    )
-                    for (wt in worktrees) {
-                        MenuRow(wt.branch ?: wt.path.substringAfterLast('/'), wt.path, hint = "open") {
-                            state.menu = null
-                            onOpenWorktree(wt)
-                        }
+                if (currentBranch == null && switchable.isEmpty() && worktrees.isEmpty()) {
+                    MenuRow("No branches found", onClick = { state.menu = null })
+                }
+                Text(
+                    "WORKTREES",
+                    color = LensCodeColors.Eyebrow,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 14.dp, top = 8.dp),
+                )
+                for (wt in worktrees) {
+                    val open = wt.openWorkspaceId != null
+                    MenuRow(
+                        wt.branch ?: wt.path.substringAfterLast('/'),
+                        shortPath(wt.path),
+                        hint = if (open) "open" else null,
+                        dotColor = if (open) LensCodeColors.Cyan else LensCodeColors.Muted,
+                        onRemove = { onRemoveWorktree(wt) },
+                    ) {
+                        state.menu = null
+                        onOpenWorktree(wt)
+                    }
+                }
+                MenuRow(
+                    "+ New worktree",
+                    "check out a branch in its own worktree",
+                ) { state.menu = "newworktree" }
+            }
+            "newworktree" -> MenuCard("create a worktree for <branch>") {
+                val worktreeBranches = worktrees.mapNotNull { it.branch }.toSet()
+                // The current branch is checked out in the main checkout — git
+                // refuses to give it a second checkout, same as worktree'd branches.
+                val candidates = branches.filter { it != currentBranch && it !in worktreeBranches }
+                if (candidates.isEmpty()) {
+                    MenuRow("Every other branch already has a worktree", onClick = { state.menu = "branch" })
+                }
+                for (b in candidates) {
+                    MenuRow(b) {
+                        state.menu = null
+                        onCreateWorktree(b)
                     }
                 }
             }
@@ -330,7 +402,7 @@ fun AgentComposer(
         ) {
             Box(Modifier.weight(1f).heightIn(min = 44.dp)) {
                 val shown = state.prompt
-                if (shown.isEmpty()) {
+                if (shown.text.isEmpty()) {
                     Text(
                         if (isListening) "Listening…" else "Speak or type a task for a new agent…",
                         color = LensCodeColors.Muted,
@@ -345,27 +417,48 @@ fun AgentComposer(
                     // The keyboard's Enter key sends (it used to just add a newline,
                     // so typing a task and hitting Enter did nothing).
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (state.prompt.isNotBlank()) onSend() }),
+                    keyboardActions = KeyboardActions(onSend = { if (state.prompt.text.isNotBlank()) onSend() }),
                     modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (state.prompt.text.isNotBlank()) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "✕",
+                    color = LensCodeColors.Muted,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { state.prompt = TextFieldValue("") }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
             Spacer(Modifier.width(8.dp))
             Text(
                 "⏎",
-                color = if (state.prompt.isBlank()) LensCodeColors.Muted else LensCodeColors.ActiveDock,
+                color = if (state.prompt.text.isBlank()) LensCodeColors.Muted else LensCodeColors.ActiveDock,
                 fontSize = 20.sp,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = state.prompt.isNotBlank(), onClick = onSend)
+                    .clickable(enabled = state.prompt.text.isNotBlank(), onClick = onSend)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
 
+        // In-flight dictation shown under the box, not inside it — writing the
+        // partial into the field would corrupt the cursor's selection indexes.
+        if (isListening && !dictationHint.isNullOrBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text("…$dictationHint", color = LensCodeColors.Muted, fontSize = 12.sp, maxLines = 2)
+        }
+
         // ── Bottom row: mic · mode ······ model ──────────────────────
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            // The mic is the primary control (voice-first): large, and lit while listening.
+            // The mic is the primary control (voice-first): large, and lit while
+            // listening — dictation stays open until this is tapped again.
             Text(
-                if (isListening) "🎙 Listening…" else "🎤 Speak",
+                if (isListening) "🎙 Stop" else "🎤 Speak",
                 color = if (isListening) LensCodeColors.ActiveDock else LensCodeColors.Text,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,

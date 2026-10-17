@@ -635,9 +635,15 @@ fun AgentDetailOverlay(
                         Spacer(Modifier.width(8.dp))
                         // Voice fills the field above rather than sending on its
                         // own — always something to review before Send actually
-                        // reaches the agent.
+                        // reaches the agent. Dictation stays open until tapped
+                        // again — the red dot is the stop control.
                         if (isListeningForPrompt) {
-                            StatusDot(LensCodeColors.Red, size = 8.dp)
+                            Text(
+                                "⏹",
+                                color = LensCodeColors.Red,
+                                fontSize = 15.sp,
+                                modifier = Modifier.clickable(onClick = onVoiceInput).padding(8.dp),
+                            )
                         } else {
                             Text(
                                 "🎤",

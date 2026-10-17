@@ -462,30 +462,16 @@ export class BridgeServer {
               return;
             }
             try {
-              const created = await client.daemon.createPaseoWorktree({
-                cwd,
-                refName: req.target,
-                action: "checkout",
-              });
-              if (created.error || !created.workspace) throw new Error(created.error ?? "unknown error");
+              const { workspaceId } = await this.openOrCreateWorktreeWorkspace(client, cwd, req.target);
               this.send(ws, {
                 id: req.id,
-                result: { switched: false, worktreeCreated: true, workspaceId: created.workspace.id },
+                result: { switched: false, worktreeCreated: true, workspaceId },
               });
             } catch (e) {
-              // A worktree for this branch already exists (spec §28's model —
-              // branches created via this UI each get their own persistent
-              // worktree) — open the existing one instead of failing to make
-              // a duplicate.
-              const existing = await this.findExistingWorktreeWorkspace(client, cwd, req.target);
-              if (existing) {
-                this.send(ws, { id: req.id, result: { switched: false, worktreeCreated: true, workspaceId: existing } });
-              } else {
-                this.send(ws, {
-                  id: req.id,
-                  error: err("internal", `Could not open a worktree for ${req.target}.`, true, String(e)),
-                });
-              }
+              this.send(ws, {
+                id: req.id,
+                error: err("internal", `Could not open a worktree for ${req.target}.`, true, String(e)),
+              });
             }
             return;
           }
@@ -585,7 +571,15 @@ export class BridgeServer {
               }
             }),
           );
-          this.send(ws, { id: req.id, result: { agents: [...local, ...remote.flat()] } });
+          // The same physical daemon can be reached through two connection
+          // identities — a Host alias pointing back at this machine, or two
+          // aliases for one remote host — and then every agent shows up twice.
+          // Dedupe on agent id; the local listing wins.
+          const seen = new Set<string>();
+          const agents = [...local, ...remote.flat()].filter((a) =>
+            seen.has(a.agentId) ? false : (seen.add(a.agentId), true),
+          );
+          this.send(ws, { id: req.id, result: { agents } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -721,7 +715,13 @@ export class BridgeServer {
           const remote = await Promise.all(
             this.remote.connectedIds().map((machineId) => this.agentsFor(machineId).pendingPermissions().catch(() => [])),
           );
-          this.send(ws, { id: req.id, result: { permissions: [...local, ...remote.flat()] } });
+          // Same double-reach dedupe as agent.list — a pending permission shown
+          // twice would get answered twice.
+          const seen = new Set<string>();
+          const permissions = [...local, ...remote.flat()].filter((p) =>
+            seen.has(p.permissionRequestId) ? false : (seen.add(p.permissionRequestId), true),
+          );
+          this.send(ws, { id: req.id, result: { permissions } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -819,6 +819,28 @@ export class BridgeServer {
         }
         return;
       }
+      case "worktree.create": {
+        const machineId = req.machineId ?? "local";
+        let client: PaseoClient;
+        try {
+          client = await this.paseoClientFor(machineId);
+        } catch (e) {
+          this.send(ws, { id: req.id, error: err("backend_unavailable", String(e), true) });
+          return;
+        }
+        try {
+          const isRemote = machineId !== "local";
+          const cwd = isRemote ? req.workspaceId : await this.resolveWorkspaceRoot(req.workspaceId);
+          const { workspaceId, created } = await this.openOrCreateWorktreeWorkspace(client, cwd, req.branch);
+          this.send(ws, { id: req.id, result: { created, workspaceId } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("backend_error", `Could not create a worktree for ${req.branch}.`, true, String(e)),
+          });
+        }
+        return;
+      }
       case "worktree.remove": {
         const machineId = req.machineId ?? "local";
         let client: PaseoClient;
@@ -831,16 +853,21 @@ export class BridgeServer {
         try {
           // archivePaseoWorktree's `workspaceId` field alone isn't enough — the
           // live daemon requires worktreePath/worktreeSlug/repoRoot+branchName
-          // (confirmed live against paseo 0.7.2); resolve the path first.
-          const { entries } = await client.daemon.fetchWorkspaces({ page: { limit: 200 } });
-          const workspace = entries.find((e) => e.id === req.workspaceId);
-          const worktreePath = workspace?.workspaceDirectory ?? workspace?.projectRootPath;
+          // (confirmed live against paseo 0.7.2). Clients send the worktree's
+          // own path, which needs no lookup and also works for worktrees with
+          // no open workspace; the workspaceId form stays for older clients.
+          let worktreePath = req.path;
+          if (!worktreePath) {
+            const { entries } = await client.daemon.fetchWorkspaces({ page: { limit: 200 } });
+            const workspace = entries.find((e) => e.id === req.workspaceId);
+            worktreePath = workspace?.workspaceDirectory ?? workspace?.projectRootPath;
+          }
           if (!worktreePath) {
             throw new Error("That worktree's checkout path could not be resolved.");
           }
           const result = await client.daemon.archivePaseoWorktree({ worktreePath, scope: "worktree" });
           if (!result.success) throw new Error(result.error?.message ?? "unknown error");
-          this.send(ws, { id: req.id, result: { removed: req.workspaceId } });
+          this.send(ws, { id: req.id, result: { removed: worktreePath } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -1019,6 +1046,42 @@ export class BridgeServer {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Opens the workspace for `branch`'s existing worktree, or creates both
+   * when none exists. paseo ≥0.10 no longer errors on a duplicate branch —
+   * it mints `branch-1` on disk — so the existence check must happen *before*
+   * createPaseoWorktree, not in its error path (the redirect used to live
+   * there). The worktree list lags fresh creations by several seconds, so
+   * back-to-back creates within that window can still double up; that needs
+   * a daemon-side lock to fully close.
+   */
+  private async openOrCreateWorktreeWorkspace(
+    client: PaseoClient,
+    cwd: string,
+    branch: string,
+  ): Promise<{ workspaceId: string | null; created: boolean }> {
+    const [{ worktrees }, { entries }] = await Promise.all([
+      client.daemon.getPaseoWorktreeList({ cwd }),
+      client.daemon.fetchWorkspaces({ page: { limit: 200 } }),
+    ]);
+    const existing = worktrees.find((w) => w.branchName === branch);
+    if (existing) {
+      const workspace = entries.find(
+        (e) => e.workspaceDirectory === existing.worktreePath || e.projectRootPath === existing.worktreePath,
+      );
+      if (workspace) return { workspaceId: workspace.id, created: false };
+      // Worktree on disk but no workspace record — open one for the existing
+      // path rather than letting createPaseoWorktree mint a second checkout.
+      const opened = await client.daemon.createWorkspace({
+        source: { kind: "directory", path: existing.worktreePath },
+      });
+      return { workspaceId: opened.workspace?.id ?? null, created: false };
+    }
+    const created = await client.daemon.createPaseoWorktree({ cwd, refName: branch, action: "checkout" });
+    if (created.error || !created.workspace) throw new Error(created.error ?? "unknown error");
+    return { workspaceId: created.workspace.id, created: true };
   }
 
   /** Full worktree list for a repo, cross-referenced against fetchWorkspaces for each one's live workspace id (spec §26, worktree.list). */

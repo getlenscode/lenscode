@@ -130,6 +130,11 @@ This switches between local AI conversations that may operate over SSH. It does 
 
 ## 6. Try Voice without confusing navigation and AI prompts
 
+![Code view composer — the Speak mic, task field, and mode/model chips](images/code-composer-dictation.png)
+
+*The Code view's composer: dictate a task with **Speak**, review the transcript
+in the field, then send it — the spoken text never dispatches on its own.*
+
 1. Click **Voice** in the dock.
 2. Say “open code” or “open remote.”
 3. Check the **Did I get that right?** transcript and click **Submit**. Click **Cancel** if it is wrong.

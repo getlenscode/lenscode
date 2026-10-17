@@ -42,6 +42,7 @@ fun PrimaryPanelContent(
     followMeEnabled: Boolean = false,
     onToggleFollowMe: () -> Unit = {},
     onEnterPip: () -> Unit = {},
+    showSpatialControls: Boolean = true,
     pairingState: PairingState = PairingState.Authenticated,
     deviceName: String = "",
     onDeviceNameChange: (String) -> Unit = {},
@@ -138,7 +139,7 @@ fun PrimaryPanelContent(
                 // Panel layout controls (spec §52): pin locks move/resize off,
                 // bring-closer/push-farther nudge depth, reset clears everything
                 // back to defaults. Position/size/pin all persist across restarts.
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (showSpatialControls) Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         if (pinned) "📌 Pinned" else "📌 Pin",
                         color = if (pinned) LensCodeColors.Green else LensCodeColors.Eyebrow,

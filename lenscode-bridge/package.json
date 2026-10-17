@@ -13,9 +13,9 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@getpaseo/client": "^0.10.2",
+    "@getpaseo/protocol": "^0.10.2",
     "@lenscode/protocol": "file:../protocol",
-    "@getpaseo/client": "^0.7.2",
-    "@getpaseo/protocol": "^0.7.2",
     "ws": "^8.21.3",
     "zod": "^4.4.3"
   },

@@ -34,10 +34,13 @@
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.LensCodeXr">
 
-        <!-- Start directly in full space so Subspace content is spatialized. -->
+        <!-- Default to Home Space. Full space (needed to spatialize Subspace
+             content) is opt-in: launch with the boolean intent extra fullSpace=true, see
+             MainActivity. To make full space the default again, set this to
+             XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED and flip EXTRA_FULL_SPACE. -->
         <property
             android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
-            android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_MANAGED" />
+            android:value="XR_ACTIVITY_START_MODE_HOME_SPACE" />
 
         <activity
             android:name=".MainActivity"

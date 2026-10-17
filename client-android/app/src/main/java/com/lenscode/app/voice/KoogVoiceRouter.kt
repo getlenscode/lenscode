@@ -174,6 +174,33 @@ sealed class VoiceAction {
     data class SwitchBranch(@property:LLMDescription("the branch name as heard") val branch: String) : VoiceAction()
 
     @Serializable
+    @SerialName("create_worktree")
+    @LLMDescription(
+        "Create a git worktree checking out a named branch — \"make a worktree for " +
+            "feature-x\", \"spin up a worktree on the auth branch\", \"create a worktree " +
+            "for bugfix-7\". Different from set_worktree (a persistent checkbox for new " +
+            "agents) and switch_branch (moves the current checkout) — this makes a " +
+            "separate checkout that stays put. If the branch already has a worktree " +
+            "the app just opens it.",
+    )
+    data class CreateWorktree(
+        @property:LLMDescription("the branch name the worktree should check out, as heard")
+        val branch: String,
+    ) : VoiceAction()
+
+    @Serializable
+    @SerialName("remove_worktree")
+    @LLMDescription(
+        "Remove/delete a git worktree — \"remove the feature-x worktree\", \"delete that " +
+            "worktree\", \"clean up the worktree for the auth branch\". Destructive — the " +
+            "app always confirms with the user first.",
+    )
+    data class RemoveWorktree(
+        @property:LLMDescription("the worktree's branch name (or checkout-folder name), as heard")
+        val branch: String,
+    ) : VoiceAction()
+
+    @Serializable
     @SerialName("confirm")
     @LLMDescription(
         "Say yes to whatever confirmation card is on screen — \"confirm\", \"yes\", \"do it\", " +
@@ -243,7 +270,7 @@ data class VoiceStep(
         "one of: navigate, open_file, accept_changes, discard_changes, new_terminal, " +
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
             "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
-            "switch_branch, composer_status, confirm",
+            "switch_branch, create_worktree, remove_worktree, composer_status, confirm",
     )
     val type: String,
     @property:LLMDescription(
@@ -278,7 +305,10 @@ data class VoiceStep(
             "named for just this request, else null. Null otherwise.",
     )
     val model: String? = null,
-    @property:LLMDescription("type=switch_branch: the branch name as heard (required). Null otherwise.")
+    @property:LLMDescription(
+        "type=switch_branch / create_worktree / remove_worktree: the branch name as heard " +
+            "(required). Null otherwise.",
+    )
     val branch: String? = null,
     @property:LLMDescription(
         "type=set_worktree: true to enable, false to disable (required). type=ask_agent: true if " +
@@ -304,6 +334,8 @@ data class VoiceStep(
         "set_model" -> model?.takeIf { it.isNotBlank() }?.let { VoiceAction.SetModel(it) }
         "set_worktree" -> worktree?.let { VoiceAction.SetWorktree(it) }
         "switch_branch" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.SwitchBranch(it) }
+        "create_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.CreateWorktree(it) }
+        "remove_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.RemoveWorktree(it) }
         "composer_status" -> VoiceAction.ComposerStatus
         "confirm" -> VoiceAction.Confirm
         "respond_permission" -> behavior?.let { VoiceAction.RespondPermission(it) }
@@ -376,9 +408,10 @@ an ordered list of actions from the fixed grammar. Rules:
 - The Code view has a composer with mode / model / branch / worktree settings for new agents.
   "plan mode", "accept edits", "manual mode", "bypass permissions" -> set_mode; "use Opus",
   "switch to Sonnet" -> set_model; "use a new worktree" / "no worktree" -> set_worktree;
-  "switch to <branch>" / "checkout <branch>" -> switch_branch; "open git", "show branches" or
-  "show worktrees" -> navigate with view=code (the branch menu lives there now); "what mode /
-  model / branch am I on" -> composer_status.
+  "switch to <branch>" / "checkout <branch>" -> switch_branch; "make/create a worktree for
+  <branch>" -> create_worktree; "remove/delete the <branch> worktree" -> remove_worktree;
+  "open git", "show branches" or "show worktrees" -> navigate with view=code (the branch
+  menu lives there now); "what mode / model / branch am I on" -> composer_status.
 - When ONE sentence both names settings and a task ("in a new worktree using Opus in plan
   mode, add retry logic") return a single ask_agent with the task in `instruction` and the
   named settings in its mode/model/worktree fields — do NOT split them into set_* steps, which
@@ -462,6 +495,8 @@ class KoogVoiceRouter(apiKey: String, modelId: String) {
             VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
             VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "remove_worktree", branch = "feature-x"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
             VoiceCommandPlan(

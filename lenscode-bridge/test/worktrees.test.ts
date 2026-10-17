@@ -58,6 +58,7 @@ before(async () => {
   git("add", "-A");
   git("commit", "-q", "-m", "init");
   git("branch", "feature-x");
+  git("branch", "wt-created");
 
   server = new BridgeServer(loadConfig({ LENSCODE_PORT: String(PORT) } as NodeJS.ProcessEnv));
   await server.start();
@@ -107,22 +108,62 @@ test("worktree.list, worktree.open, worktree.remove round-trip against a live Pa
   const opened = await rpc(ws, { id: nextId(), type: "worktree.open", path: wt.path });
   assert.equal(opened.result.workspaceId, wt.openWorkspaceId, "worktree.open reuses the existing workspace");
 
-  const removed = await rpc(ws, { id: nextId(), type: "worktree.remove", workspaceId: opened.result.workspaceId });
-  assert.equal(removed.result.removed, opened.result.workspaceId);
+  // worktree.create checks out an existing branch in a new Paseo worktree —
+  // the same shape the composer's "+ New worktree" picker uses.
+  const create = await rpc(ws, { id: nextId(), type: "worktree.create", workspaceId, branch: "wt-created" });
+  assert.equal(create.result.created, true);
+  assert.ok(create.result.workspaceId, "worktree.create returned the new workspace id");
+
+  // Same creation lag as removal, and worse on paseo 0.10.x — observed ~16s
+  // for the second worktree on a repo. Poll generously.
+  let listedTwo = 1;
+  for (let attempt = 0; attempt < 40 && listedTwo !== 2; attempt++) {
+    const relisted = await rpc(ws, { id: nextId(), type: "worktree.list", workspaceId });
+    listedTwo = relisted.result.worktrees.length;
+    if (listedTwo === 2) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  assert.equal(listedTwo, 2, "created worktree appears in worktree.list");
+
+  // Creating again for the same branch redirects to the existing worktree
+  // instead of duplicating it. (After the poll above, so the daemon's lagging
+  // worktree list already knows the branch — otherwise the redirect lookup
+  // can miss it and this races.)
+  const dupe = await rpc(ws, { id: nextId(), type: "worktree.create", workspaceId, branch: "wt-created" });
+  assert.equal(dupe.result.created, false);
+  assert.equal(dupe.result.workspaceId, create.result.workspaceId);
+
+  // Path form: removal works without resolving through a workspace id at all.
+  const removed = await rpc(ws, { id: nextId(), type: "worktree.remove", path: wt.path });
+  assert.equal(removed.result.removed, wt.path);
 
   // archivePaseoWorktree does a real `git worktree remove` on disk, and
   // getPaseoWorktreeList lags that change — under this suite's own
   // concurrent load (other files hammering the same live daemon) that lag
   // can run several seconds, so poll generously rather than asserting
   // instant consistency.
-  let worktreesAfter = 1;
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const listedAfter = await rpc(ws, { id: nextId(), type: "worktree.list", workspaceId });
-    worktreesAfter = listedAfter.result.worktrees.length;
+  const listCount = async () =>
+    (await rpc(ws, { id: nextId(), type: "worktree.list", workspaceId })).result.worktrees.length;
+  let worktreesAfter = 2;
+  for (let attempt = 0; attempt < 40 && worktreesAfter !== 1; attempt++) {
+    worktreesAfter = await listCount();
+    if (worktreesAfter === 1) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  assert.equal(worktreesAfter, 1, "removed worktree no longer appears");
+
+  // The worktree.create'd one never had a workspace opened through the
+  // client — removal by path still works.
+  const createdRow = (await rpc(ws, { id: nextId(), type: "worktree.list", workspaceId })).result.worktrees[0];
+  assert.equal(createdRow.branch, "wt-created");
+  const removed2 = await rpc(ws, { id: nextId(), type: "worktree.remove", path: createdRow.path });
+  assert.equal(removed2.result.removed, createdRow.path);
+  for (let attempt = 0; attempt < 40 && worktreesAfter !== 0; attempt++) {
+    worktreesAfter = await listCount();
     if (worktreesAfter === 0) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  assert.equal(worktreesAfter, 0, "removed worktree no longer appears");
+  assert.equal(worktreesAfter, 0, "created worktree removed cleanly");
 
   await rpc(ws, { id: nextId(), type: "terminal.close", terminalId: terminal.result.terminal.terminalId });
   ws.close();

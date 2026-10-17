@@ -455,12 +455,32 @@ export const WorktreeOpenRequest = z.object({
   ...machineScope,
 });
 
+/**
+ * Creates a Paseo-owned worktree checking out `branch` inside the workspace's
+ * repo and returns the workspace Paseo opened for it. If the branch already
+ * has a worktree, the existing workspace is returned instead — same redirect
+ * as git.branch.switch's onDirty:"worktree" path.
+ */
+export const WorktreeCreateRequest = z.object({
+  ...requestBase,
+  type: z.literal("worktree.create"),
+  workspaceId: z.string(),
+  branch: z.string().min(1),
+  ...machineScope,
+});
+
 /** Destructive (spec §57) — only ever sent after the client's own confirmation card. */
 export const WorktreeRemoveRequest = z.object({
   ...requestBase,
   type: z.literal("worktree.remove"),
-  /** The worktree's own open workspace id (from worktree.list's openWorkspaceId). */
-  workspaceId: z.string().min(1),
+  /**
+   * The worktree's checkout path — preferred, since archivePaseoWorktree
+   * requires a path anyway. Works whether or not the worktree has an open
+   * workspace.
+   */
+  path: z.string().min(1).optional(),
+  /** Legacy form: the worktree's open workspace id (from worktree.list's openWorkspaceId), resolved to a path server-side. */
+  workspaceId: z.string().min(1).optional(),
   ...machineScope,
 });
 
@@ -545,6 +565,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   ProviderListRequest,
   WorktreeListRequest,
   WorktreeOpenRequest,
+  WorktreeCreateRequest,
   WorktreeRemoveRequest,
   SnipUploadRequest,
 ]);

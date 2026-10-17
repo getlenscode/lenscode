@@ -45,17 +45,28 @@ class MainActivity : ComponentActivity() {
                 // has no visible effect — every visible panel renders through
                 // SceneCore's spatial compositor, not this transparent 2D
                 // Activity window, so shrinking it changes nothing on screen.
+                onEnterFullSpace = if (FULL_SPACE_ENABLED) {
+                    { lifecycleScope.launch { requestFullSpace() } }
+                } else null,
                 onEnterPip = {
                     enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build())
                 },
             )
         }
 
-        // The manifest's FULL_SPACE_MANAGED start mode only sets the default
-        // launch mode — actually entering full space (so SpatialPanel content
-        // attaches to a real scene node instead of the system Home
-        // environment staying HOME_VISIBLE) requires this explicit call.
-        lifecycleScope.launch { requestFullSpace() }
+        // Home space is the default (manifest start mode). Entering full space
+        // — required for SpatialPanel content to attach to a real scene node —
+        // is opt-in: `adb shell am start -n com.lenscode.app/.MainActivity --ez fullSpace true`.
+        if (FULL_SPACE_ENABLED && intent.getBooleanExtra(EXTRA_FULL_SPACE, false)) {
+            lifecycleScope.launch { requestFullSpace() }
+        }
+    }
+
+    private companion object {
+        // Full space is switched off for now: no Full Space button, and the
+        // fullSpace launch extra is ignored. Flip to true to bring both back.
+        const val FULL_SPACE_ENABLED = false
+        const val EXTRA_FULL_SPACE = "fullSpace"
     }
 
     // No onDestroy cleanup — WorkspaceViewModel.onCleared closes the bridge.
