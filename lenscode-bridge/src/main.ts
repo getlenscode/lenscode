@@ -3,11 +3,20 @@ import { loadConfig } from "./config.ts";
 import { BridgeServer, BRIDGE_VERSION } from "./server.ts";
 import { lanAddresses } from "./geminiHttp.ts";
 import { log } from "./log.ts";
+import { ensureSelfSignedCert, shortFingerprint, type SelfSignedCert } from "./selfSigned.ts";
 
 const cli = applyCliArgs(process.argv.slice(2), process.env, BRIDGE_VERSION);
 if (cli.action === "exit") {
   (cli.code === 0 ? process.stdout : process.stderr).write(cli.message);
   process.exit(cli.code);
+}
+
+// --secure: make (or reuse) the bridge's own certificate and serve it, in place of a user-supplied one.
+let selfSigned: SelfSignedCert | undefined;
+if (process.env.LENSCODE_SECURE === "1") {
+  selfSigned = await ensureSelfSignedCert();
+  process.env.LENSCODE_TLS_CERT = selfSigned.certPath;
+  process.env.LENSCODE_TLS_KEY = selfSigned.keyPath;
 }
 
 let cfg;
@@ -30,6 +39,12 @@ process.stdout.write(
     addresses.length > 0
       ? `In the app: Settings → Bridge connection → ${addresses.join("  or  ")}`
       : "No network address found — connect this machine to your network.",
+    ...(selfSigned
+      ? [
+          `Certificate fingerprint: ${shortFingerprint(selfSigned.fingerprint)}`,
+          "  The headset shows this when it first connects. Confirm they match, then pair with the code below.",
+        ]
+      : []),
     server.backendConnected
       ? "Paseo daemon: connected."
       : `Paseo daemon: NOT reachable at ${cfg.paseoUrl}. Install and start Paseo on this machine (the bridge keeps retrying).`,

@@ -25,7 +25,7 @@ import { GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
 import { GeminiHttp, lanSetupUrls } from "./geminiHttp.ts";
 import { log } from "./log.ts";
 
-export const BRIDGE_VERSION = "0.1.0-alpha.1";
+export const BRIDGE_VERSION = "0.1.0-alpha.2";
 
 function err(
   code: StructuredError["code"],

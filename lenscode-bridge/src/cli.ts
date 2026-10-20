@@ -10,18 +10,22 @@ export const USAGE = `lenscode-bridge — connects the LensCode headset app to y
 Usage: lenscode-bridge [options]
 
   --port <n>          port to listen on (default 8137)
-  --tls-cert <file>   TLS certificate (PEM, full chain). With --tls-key this turns on
-  --tls-key <file>    prod mode: secure wss://, and headsets must pair with a code.
+  --secure            secure mode with a certificate the bridge makes itself: wss://, and a
+                      headset pairs with a code and confirms the certificate fingerprint once.
+                      No domain or certificate authority needed.
+  --tls-cert <file>   TLS certificate (PEM, full chain) from a public authority. With --tls-key
+  --tls-key <file>    this also turns on secure mode.
   --paseo-url <url>   Paseo daemon WebSocket (default ws://127.0.0.1:6767/ws)
   --project-root <d>  folder the "local" workspace's files are served from (default: cwd)
   -v, --version       print the version
   -h, --help          show this help
 
 Without TLS flags the bridge runs in dev mode: plain ws://, open to your local network.
-That is fine for a debug build of the app; a store build only connects over wss://.
+That is fine for a debug build of the app; a store build only connects over wss://
+(use --secure, or your own certificate).
 
 Environment: LENSCODE_PORT, LENSCODE_MODE, LENSCODE_TLS_CERT, LENSCODE_TLS_KEY,
-LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY.
+LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY, LENSCODE_SECURE=1.
 `;
 
 const VALUE_FLAGS: Record<string, string> = {
@@ -43,6 +47,10 @@ export type CliResult =
 export function applyCliArgs(argv: string[], env: NodeJS.ProcessEnv, version: string): CliResult {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === "--secure") {
+      env.LENSCODE_SECURE = "1";
+      continue;
+    }
     if (arg === "-h" || arg === "--help") return { action: "exit", code: 0, message: USAGE };
     if (arg === "-v" || arg === "--version") return { action: "exit", code: 0, message: `${version}\n` };
 
@@ -64,10 +72,15 @@ export function applyCliArgs(argv: string[], env: NodeJS.ProcessEnv, version: st
   }
   const hasCert = Boolean(env.LENSCODE_TLS_CERT);
   const hasKey = Boolean(env.LENSCODE_TLS_KEY);
+  if (env.LENSCODE_SECURE === "1" && (hasCert || hasKey)) {
+    return { action: "exit", code: 2, message: "--secure makes its own certificate; don't combine it with --tls-cert/--tls-key.\n" };
+  }
   if (hasCert !== hasKey) {
     return { action: "exit", code: 2, message: "--tls-cert and --tls-key must be given together.\n" };
   }
   // Giving a certificate means the user wants the secure setup; don't make them also know about a mode.
-  if (hasCert && hasKey && env.LENSCODE_MODE === undefined) env.LENSCODE_MODE = "prod";
+  if ((hasCert && hasKey) || env.LENSCODE_SECURE === "1") {
+    if (env.LENSCODE_MODE === undefined) env.LENSCODE_MODE = "prod";
+  }
   return { action: "run" };
 }

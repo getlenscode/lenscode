@@ -1,6 +1,6 @@
 {
   "name": "lenscode-bridge",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Bridges the LensCode Android XR app to your Paseo coding agents.",
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@getpaseo/client": "^0.10.2",
     "@getpaseo/protocol": "^0.10.2",
+    "selfsigned": "^5.5.0",
     "ws": "^8.21.3",
     "zod": "^4.4.3"
   },

@@ -40,6 +40,15 @@ test("an explicit LENSCODE_MODE is not overridden by the TLS flags", () => {
   assert.equal(env.LENSCODE_MODE, "dev");
 });
 
+test("--secure turns on secure mode and refuses to be mixed with your own certificate", () => {
+  const { result, env } = run(["--secure"]);
+  assert.equal(result.action, "run");
+  assert.equal(env.LENSCODE_SECURE, "1");
+  assert.equal(env.LENSCODE_MODE, "prod");
+  const mixed = run(["--secure", "--tls-cert", "a", "--tls-key", "b"]).result;
+  assert.match(mixed.action === "exit" ? mixed.message : "", /don't combine/);
+});
+
 test("--help and --version exit cleanly with their text", () => {
   assert.deepEqual(run(["--help"]).result, { action: "exit", code: 0, message: USAGE });
   assert.deepEqual(run(["-v"]).result, { action: "exit", code: 0, message: "9.9.9\n" });

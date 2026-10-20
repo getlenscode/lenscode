@@ -265,6 +265,7 @@ internal class WorkspaceUiState(
 fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnterFullSpace: (() -> Unit)? = null) {
     val state by bridge.state.collectAsState()
     val bridgeGemini by bridge.geminiStatus.collectAsState()
+    val certPrompt by bridge.certPrompt.collectAsState()
     val terminals by bridge.terminals.collectAsState()
     val terminalOutput by bridge.terminalOutput.collectAsState()
     val dirPath by bridge.dirPath.collectAsState()
@@ -2017,6 +2018,12 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 // archive, Bypass enable. Voice answers them with "confirm"/"cancel".
                 com.lenscode.app.ui.BranchConflictCard(ui.branchConflict)
                 com.lenscode.app.ui.DeleteConfirmCard(ui.deleteConfirm)
+                // A bridge using its own certificate (--secure): confirm its fingerprint once.
+                com.lenscode.app.ui.CertTrustOverlay(
+                    prompt = certPrompt,
+                    onTrust = { bridge.trustCertificate() },
+                    onDecline = { bridge.declineCertificate() },
+                )
                 // Shown right after a successful Connect (spec §37) — picking a
                 // folder here re-roots both Code and a fresh Terminal at it.
                 RemoteBrowseOverlay(

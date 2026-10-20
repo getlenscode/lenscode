@@ -2,12 +2,12 @@ package com.lenscode.app.net
 
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -15,6 +15,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -34,6 +35,7 @@ class BridgeClient(
     private val deviceId: String,
     private val pairingStore: PairingStore,
     private val addressStore: BridgeAddressStore? = null,
+    private val pinStore: PinStore? = null,
 ) {
     /** The bridge WebSocket URL; changed at runtime by [setAddress]. Read from the OkHttp and UI threads. */
     @Volatile
@@ -133,7 +135,21 @@ class BridgeClient(
     private val _gitDiffText = MutableStateFlow<String?>(null)
     val gitDiffText: StateFlow<String?> = _gitDiffText
 
-    private val http = OkHttpClient()
+    // A certificate the system trusts connects as usual; a bridge's own (--secure) certificate
+    // connects only once the user has confirmed its fingerprint (see certPrompt).
+    private val http = PinnedTls.okHttpClient { pinStore?.pinFor(bridgeHostPort(url)) }
+
+    private val _certPrompt = MutableStateFlow<CertPrompt?>(null)
+
+    /** Set when the bridge presents a certificate the user hasn't confirmed (or one that changed). */
+    val certPrompt: StateFlow<CertPrompt?> = _certPrompt
+
+    /** A certificate the user declined; not asked about again until the address changes. */
+    @Volatile
+    private var declinedFingerprint: String? = null
+
+    @Volatile
+    private var probingCertificate = false
 
     /** Read/written on both OkHttp's reader thread and the caller's — must be volatile. */
     @Volatile
@@ -185,6 +201,8 @@ class BridgeClient(
         old?.close(1000, "switching bridge")
         failAllPending(errorBody("CONNECTION_LOST", "Switched to a different bridge."))
         _geminiStatus.value = BridgeGeminiStatus()
+        _certPrompt.value = null
+        declinedFingerprint = null
         _state.value = _state.value.copy(
             bridgeConnected = false,
             backendConnected = false,
@@ -193,6 +211,47 @@ class BridgeClient(
         )
         reconnectAttempt = 0
         connect()
+    }
+
+    /** The user confirmed the fingerprint shown in [certPrompt]: pin that certificate and connect. */
+    fun trustCertificate() {
+        val prompt = _certPrompt.value ?: return
+        pinStore?.save(prompt.hostPort, prompt.fingerprint)
+        _certPrompt.value = null
+        declinedFingerprint = null
+        reconnectJob?.cancel()
+        reconnectAttempt = 0
+        connect()
+    }
+
+    fun declineCertificate() {
+        declinedFingerprint = _certPrompt.value?.fingerprint
+        _certPrompt.value = null
+    }
+
+    /**
+     * After a handshake failed on the certificate, read what the bridge presents (without trusting
+     * it) and ask the user to confirm its fingerprint — once per unknown or changed certificate.
+     */
+    private fun offerCertificate() {
+        if (_certPrompt.value != null || probingCertificate) return
+        probingCertificate = true
+        val target = url
+        scope.launch(Dispatchers.IO) {
+            try {
+                val uri = URI(target)
+                val der = PinnedTls.probeCertificate(uri.host, if (uri.port >= 0) uri.port else DEFAULT_WSS_PORT)
+                    ?: return@launch
+                val fingerprint = CertFingerprint.sha256Hex(der)
+                val pinned = pinStore?.pinFor(bridgeHostPort(target))
+                val stale = url != target || fingerprint == declinedFingerprint
+                if (!stale && pinState(pinned, fingerprint) != PinState.MATCHES) {
+                    _certPrompt.value = CertPrompt(bridgeHostPort(target), fingerprint, changed = pinned != null)
+                }
+            } finally {
+                probingCertificate = false
+            }
+        }
     }
 
     fun close() {
@@ -1224,6 +1283,7 @@ class BridgeClient(
             )
             // In-flight requests over this socket will never be answered.
             failAllPending(errorBody("CONNECTION_LOST", "Lost the connection to lenscode-bridge."))
+            if (url.startsWith("wss://") && isCertificateProblem(t)) offerCertificate()
             // Spec §59: never assume backend processes stopped; retry and resync.
             scheduleReconnect()
         }
@@ -1274,6 +1334,7 @@ class BridgeClient(
     }
 
     private companion object {
+        const val DEFAULT_WSS_PORT = 443
         const val REQUEST_TIMEOUT_MS = 30_000L
         const val RECONNECT_BASE_MS = 1_000L
         const val RECONNECT_MAX_MS = 30_000L

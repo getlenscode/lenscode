@@ -25,3 +25,11 @@ marketing/
 
 # Private YC application draft
 ycr.md
+
+# TLS certificates and private keys — a leaked private key lets anyone impersonate the server
+*.pem
+*.key
+*.crt
+*.p12
+privkey*
+fullchain*

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.lenscode.app.net.BridgeAddressStore
 import com.lenscode.app.net.BridgeClient
 import com.lenscode.app.net.PairingStore
+import com.lenscode.app.net.PinStore
 
 /**
  * Owns the bridge connection for the workspace UI. Living in a ViewModel (with
@@ -32,6 +33,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         deviceId,
         PairingStore(app.applicationContext),
         addressStore,
+        PinStore(app.applicationContext),
     )
 
     init {
