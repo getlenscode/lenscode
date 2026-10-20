@@ -13,15 +13,36 @@ adb -s 192.168.1.166:34347 shell monkey -p com.lenscode.app -c android.intent.ca
 ```
 
 - Last used (2026-09-30): Mac/bridge `192.168.1.157:8137`, XR device `192.168.1.166:34347`.
-- `bridgeUrl` is the Mac's LAN IP (a literal IP; `adb reverse` can't help). It changes with the network, so re-check it.
+- `bridgeUrl` is the Mac's LAN IP (a literal IP; `adb reverse` can't help). It changes with the network, so re-check it. It is only the first-run default now: the address saved in the app (Settings → Bridge connection, typed or dictated) wins, so a changed IP no longer needs a rebuild.
 - The wireless-debugging port changes on every restart: run `adb devices` for the current address, and update the values above.
 - Reinstalling resets the Follow Me toggle to off.
+
+## Release build (Play Store)
+
+- Play takes an **AAB**: `cd client-android && ./gradlew :app:bundleRelease` → `app/build/outputs/bundle/release/app-release.aab`. (`:app:assembleRelease` gives an APK for side-loading.)
+- Signing reads `client-android/keystore.properties` (gitignored, as are `*.jks`): `storeFile=` (relative to `client-android/`), `storePassword=`, `keyAlias=`, `keyPassword=`. Without that file the release build still works but is **unsigned**, and Play/adb will reject it.
+- Create the upload key once and back it up (losing it means a support request to Google): `keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`. Enroll in Play App Signing so Google holds the real app-signing key.
+- Bump `versionCode` in `app/build.gradle.kts` for every upload (Play rejects a repeat); `versionName` is the semver shown to people (currently `0.1.0-alpha.N`).
+- The bridge address is set on the headset (Settings → Bridge connection; the Speak button takes a dictated IP), so no address is baked into the release. Release builds deny cleartext: the app refuses `ws://` there with an explanation, so the bridge must run in prod mode with TLS and be entered as `wss://host:8137`. The debug network config (`app/src/debug/res/xml/network_security_config.xml`) permits cleartext to any host, which is why debug accepts any LAN IP.
+- TLS bridge for testing: `./scripts/make-dev-tls.sh <mac-ip>` makes a local CA + server cert in `~/.config/lenscode-bridge/tls/` (the cert is only valid for the address you give it). Run the bridge with `LENSCODE_MODE=prod LENSCODE_TLS_CERT=…/server.pem LENSCODE_TLS_KEY=…/server.key npm run dev`, enter `wss://<mac-ip>:8137` in the app, then pair on Home (the 6-digit code is printed in the bridge console). `test/tls.test.ts` covers this path automatically.
+- Verified 2026-10-20: a debug build connected, paired and used the Gemini proxy over wss:// against a prod-mode bridge using that local CA. Debug builds only trust it if it is installed on the device (debug-only `user` trust in the debug network config; Android needs a screen lock before it installs a CA).
+- Still open for a store release: users' bridges need a certificate from a **public** CA (a domain + Let's Encrypt, `tailscale cert`, or a tunnel such as Cloudflare), because a release build cannot trust a private CA. Not tried yet.
 
 ## Bridge and Paseo
 
 - Paseo daemon: `paseo daemon` (listens on `ws://127.0.0.1:6767/ws`).
-- Bridge: `./scripts/setup-single-pc.sh` (port 8137). Config via `LENSCODE_PORT`, `LENSCODE_PASEO_URL`.
+- Bridge: `./scripts/setup-single-pc.sh` (port 8137). Config via `LENSCODE_PORT`, `LENSCODE_PASEO_URL`. That script exits if the `paseo` CLI isn't on PATH even when the daemon is running; in that case `cd lenscode-bridge && npm run dev` does the same job.
+- The bridge takes flags too (`npm run dev -- --port 9000`, `--tls-cert/--tls-key` for secure mode; `--help` lists them) and prints the address to enter in the app on startup.
+- Distribution: `cd lenscode-bridge && npm run build` bundles `dist/lenscode-bridge.js` (esbuild; `@lenscode/protocol` is bundled in, the npm deps stay external), and `npm pack` makes the tarball. Verified 2026-10-20 by installing that tarball into an empty folder and running `lenscode-bridge` in dev and TLS modes. Published as the unscoped `lenscode-bridge` (the `@lenscode` npm scope does not exist, so `@lenscode/bridge` was refused with "Scope not found"); users run `npx lenscode-bridge`. **Not published yet** — manual: `npm login` then `cd lenscode-bridge && npm publish` (unscoped packages are public by default). Bump `version` in `lenscode-bridge/package.json` and `BRIDGE_VERSION` in `src/server.ts` together (a test checks they match).
 - Remote machines are all registered hosts reached over SSH; there is no special "local" machine in the app.
+
+## Gemini key (voice routing)
+
+- Normal path: the key lives on the **bridge**, not the headset. Open `http://<mac-ip>:8137/setup` on a phone or PC and paste it (the headset's Settings panel shows this URL; the bridge also logs it at startup while no key is set). Saved to `~/.config/lenscode-bridge/gemini.json` (0600); a `GEMINI_API_KEY` env var also works, and a page-saved key wins over it.
+- The headset calls Gemini through the bridge's `/gemini/*` proxy, which swaps in the real key. Settings turns green by itself via the `gemini_key_changed` event.
+- Key precedence on the headset (`resolveGeminiKeySource`): adb-pushed `lenscode-config.json` > bridge key > build-time `-PgeminiApiKey`.
+- Dev mode (default): `/setup` and the proxy are open to the LAN, like the WebSocket. Prod mode: `/setup` needs the 6-digit code the bridge prints, and the proxy needs a paired device's token.
+- Non-obvious: Koog's base URL must end in `/` (`.../gemini/`). Ktor resolves its relative `v1beta/...` path like a browser, so without the slash it drops `/gemini` and the bridge 404s.
 
 ## Follow Me (non-obvious)
 

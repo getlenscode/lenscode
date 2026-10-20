@@ -1,12 +1,12 @@
 {
-  "name": "@lenscode/bridge",
-  "version": "0.1.0",
-  "description": "",
-  "main": "index.js",
+  "name": "lenscode-bridge",
+  "version": "0.1.0-alpha.1",
+  "description": "Bridges the LensCode Android XR app to your Paseo coding agents.",
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "dev": "node --experimental-strip-types src/main.ts",
-    "build": "tsc -p ."
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build"
   },
   "keywords": [],
   "author": "",
@@ -15,13 +15,24 @@
   "dependencies": {
     "@getpaseo/client": "^0.10.2",
     "@getpaseo/protocol": "^0.10.2",
-    "@lenscode/protocol": "file:../protocol",
     "ws": "^8.21.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@lenscode/protocol": "file:../protocol",
     "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.25.12",
     "typescript": "^5.9.3"
+  },
+  "bin": {
+    "lenscode-bridge": "dist/lenscode-bridge.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
   }
 }

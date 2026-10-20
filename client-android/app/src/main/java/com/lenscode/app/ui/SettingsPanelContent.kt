@@ -27,7 +27,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lenscode.app.net.BridgeGeminiStatus
 import com.lenscode.app.net.GeminiConfigResult
+import com.lenscode.app.net.GeminiKeySource
 
 /** One line of a monospace instruction block — a shell command, a path, or a JSON snippet. */
 @Composable
@@ -49,8 +51,9 @@ private fun CodeBlock(lines: List<String>) {
     }
 }
 
+@Suppress("FunctionNaming")
 @Composable
-private fun SettingsSection(title: String, content: @Composable () -> Unit) {
+internal fun SettingsSection(title: String, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 22.dp)) {
         Text(title, color = LensCodeColors.Eyebrow, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Spacer(Modifier.height(10.dp))
@@ -59,16 +62,21 @@ private fun SettingsSection(title: String, content: @Composable () -> Unit) {
 }
 
 /**
- * Settings panel (dock → Settings). Currently one thing lives here: how to
- * point voice routing (com.lenscode.app.voice.KoogVoiceRouter) at a Gemini API key
- * without rebuilding the APK. See net/GeminiConfigStore.kt for the file this
- * reads and MainActivity's `koogVoiceRouter` for how the result is applied —
- * config file wins over the build-time `-PgeminiApiKey` gradle property.
+ * Settings panel (dock → Settings): theme, and how to give voice routing
+ * (com.lenscode.app.voice.KoogVoiceRouter) a Gemini API key without typing it in
+ * AR. The normal path is the bridge's /setup page, opened on a phone or PC — this
+ * panel only shows its address and whether a key has arrived. Pushing a key file
+ * with adb (net/GeminiConfigStore.kt) still works as an override. Which source is
+ * live is decided by net/GeminiBridge.kt's resolveGeminiKeySource.
  */
 @Composable
 fun SettingsPanelContent(
+    bridge: BridgeSettingsUi,
     geminiResult: GeminiConfigResult,
-    buildKeyPresent: Boolean,
+    geminiKeySource: GeminiKeySource,
+    bridgeGemini: BridgeGeminiStatus,
+    bridgeConnected: Boolean,
+    setupUrl: String,
     configPath: String,
     onReload: () -> Unit,
     currentThemeId: ThemeId = ThemeId.CURSOR,
@@ -79,6 +87,9 @@ fun SettingsPanelContent(
             item {
                 Eyebrow("SETTINGS")
                 Spacer(Modifier.height(16.dp))
+
+                BridgeConnectionSection(bridge)
+
 
                 SettingsSection("APP THEME") {
                     FlowRow(
@@ -103,34 +114,37 @@ fun SettingsPanelContent(
                     }
                 }
 
-                val (dotColor, statusText, detail) = when (geminiResult) {
-                    is GeminiConfigResult.Loaded -> if (!geminiResult.config.apiKey.isNullOrBlank()) {
+                val parseError = (geminiResult as? GeminiConfigResult.ParseError)?.message
+                val (dotColor, statusText, detail) = when (geminiKeySource) {
+                    GeminiKeySource.CONFIG_FILE ->
                         Triple(LensCodeColors.Green, "Gemini voice routing: active (config file)", null)
-                    } else if (buildKeyPresent) {
+                    GeminiKeySource.BRIDGE ->
+                        Triple(LensCodeColors.Green, "Gemini voice routing: active (key on the bridge)", null)
+                    GeminiKeySource.BUILD ->
                         Triple(LensCodeColors.Green, "Gemini voice routing: active (build key)", null)
+                    GeminiKeySource.NONE -> if (parseError != null) {
+                        Triple(LensCodeColors.Red, "Gemini voice routing: config file error", null)
                     } else {
-                        Triple(LensCodeColors.Idle, "Gemini voice routing: off", "No key in the config file or the build. Voice falls back to the local command matcher.")
+                        Triple(
+                            LensCodeColors.Idle,
+                            "Gemini voice routing: off",
+                            "No key yet. Voice falls back to the local command matcher.",
+                        )
                     }
-                    GeminiConfigResult.Missing -> if (buildKeyPresent) {
-                        Triple(LensCodeColors.Green, "Gemini voice routing: active (build key)", null)
-                    } else {
-                        Triple(LensCodeColors.Idle, "Gemini voice routing: off", "No config file found and no key baked into the build.")
-                    }
-                    is GeminiConfigResult.ParseError -> Triple(
-                        LensCodeColors.Red,
-                        "Gemini voice routing: config file error",
-                        "Couldn't read lenscode-config.json: ${geminiResult.message}",
-                    )
                 }
+                val detailText = listOfNotNull(
+                    detail,
+                    parseError?.let { "Couldn't read lenscode-config.json: $it" },
+                ).joinToString("\n").ifEmpty { null }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StatusDot(dotColor)
                     Spacer(Modifier.width(8.dp))
                     Text(statusText, color = LensCodeColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
-                if (detail != null) {
+                if (detailText != null) {
                     Spacer(Modifier.height(6.dp))
-                    Text(detail, color = LensCodeColors.Muted, fontSize = 12.5.sp)
+                    Text(detailText, color = LensCodeColors.Muted, fontSize = 12.5.sp)
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -144,7 +158,44 @@ fun SettingsPanelContent(
                         .padding(vertical = 4.dp),
                 )
 
-                SettingsSection("SET A GEMINI KEY WITHOUT REBUILDING") {
+                SettingsSection("ADD YOUR GEMINI KEY FROM A PHONE OR PC") {
+                    Text(
+                        "Open this address in a browser on your phone or computer (same network as the " +
+                            "bridge) and paste your key. There's nothing to type here — this panel " +
+                            "updates by itself once it's saved.",
+                        color = LensCodeColors.Muted,
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    CodeBlock(listOf(setupUrl))
+                    if (!bridgeConnected) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Bridge not connected. Start it on your computer with " +
+                                "./scripts/setup-single-pc.sh, then open the address above.",
+                            color = LensCodeColors.Red,
+                            fontSize = 12.sp,
+                        )
+                    } else if (bridgeGemini.configured) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "A key is saved on the bridge. Open the page again to replace or remove it.",
+                            color = LensCodeColors.Green,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Get a key at aistudio.google.com/apikey. It stays on the computer running " +
+                            "lenscode-bridge — voice requests go through it, so the headset never holds the key.",
+                        color = LensCodeColors.Muted,
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                    )
+                }
+
+                SettingsSection("OR: PUSH A KEY FILE TO THIS HEADSET WITH ADB") {
                     Text(
                         "Without a key, voice commands still work through the deterministic " +
                             "local matcher (navigate, open a named file, accept/discard, etc.) — " +

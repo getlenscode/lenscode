@@ -46,10 +46,15 @@ import com.lenscode.app.net.DirEntry
 import com.lenscode.app.net.FileContent
 import kotlinx.coroutines.launch
 
+/** Line-number gutter width at the default font size; scaled with the font. */
+private const val GUTTER_WIDTH_DP = 44f
+
 /**
  * Code view styled like VS Code: an Explorer sidebar, a tab bar for the open
  * file, a breadcrumb showing its full path, and a gutter + syntax-highlighted
  * editor pane. Backed by real dir.list / file.open results from lenscode-bridge.
+ *
+ * [fullscreen] hides the composer (chat + mic); the caller hides the dock around us.
  */
 @Composable
 fun FilesPanelContent(
@@ -64,6 +69,9 @@ fun FilesPanelContent(
     onSearchQueryChange: (String) -> Unit = {},
     searchResults: List<com.lenscode.app.net.FileSearchHit> = emptyList(),
     composer: (@Composable () -> Unit)? = null,
+    fullscreen: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
+    codeFontSize: Int = EditorFontSize.DEFAULT,
 ) {
     Box(
         Modifier.fillMaxSize().glassFinish(PanelCorner),
@@ -340,6 +348,8 @@ fun FilesPanelContent(
                     }
 
                     val currentMatchLine = findMatches.getOrNull(findIndex)
+                    // Line numbers widen with the font so 4-digit lines don't wrap at large sizes.
+                    val gutterWidth = (GUTTER_WIDTH_DP * codeFontSize / EditorFontSize.DEFAULT).dp
                     Box(Modifier.fillMaxSize()) {
                         LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp), state = listState) {
                             itemsIndexed(annotatedLines) { idx, lineText ->
@@ -359,11 +369,11 @@ fun FilesPanelContent(
                                     Text(
                                         (idx + 1).toString(),
                                         color = VsCodeColors.LineNumber,
-                                        fontSize = 12.sp,
+                                        fontSize = codeFontSize.sp,
                                         fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.width(44.dp).padding(end = 12.dp),
+                                        modifier = Modifier.width(gutterWidth).padding(end = 12.dp),
                                     )
-                                    Text(lineText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                    Text(lineText, fontSize = codeFontSize.sp, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }
@@ -477,11 +487,15 @@ fun FilesPanelContent(
                                                 Text(
                                                     (idx + 1).toString(),
                                                     color = VsCodeColors.LineNumber,
-                                                    fontSize = 12.sp,
+                                                    fontSize = codeFontSize.sp,
                                                     fontFamily = FontFamily.Monospace,
-                                                    modifier = Modifier.width(44.dp).padding(end = 12.dp),
+                                                    modifier = Modifier.width(gutterWidth).padding(end = 12.dp),
                                                 )
-                                                Text(annotatedLines[idx], fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                                Text(
+                                                    annotatedLines[idx],
+                                                    fontSize = codeFontSize.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                )
                                             }
                                         }
                                     }
@@ -500,8 +514,25 @@ fun FilesPanelContent(
                 }
                 }
                 // Claude Code–style composer, pinned under the editor (see AgentComposer).
-                composer?.invoke()
+                if (!fullscreen) composer?.invoke()
             }
+        }
+        // Always reachable — in full screen the dock (and its mic) is gone, so this
+        // is the only way back besides navigating away by voice.
+        if (onToggleFullscreen != null) {
+            Text(
+                if (fullscreen) "Exit full screen" else "Full screen",
+                color = LensCodeColors.Blue,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 6.dp, end = 10.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(VsCodeColors.TabBarBg)
+                    .clickable(onClick = onToggleFullscreen)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
         }
     }
 }

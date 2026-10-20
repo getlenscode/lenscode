@@ -596,6 +596,19 @@ export type XrServerMessage = z.infer<typeof XrServerMessage>;
 // Result payloads (M1–M2 subset; grows per milestone)
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether the bridge holds a Gemini key for voice routing. The key itself never
+ * leaves the bridge: the headset calls Gemini through the bridge's /gemini proxy
+ * and is pointed at its /setup page to add one from a phone or PC.
+ */
+export const GeminiStatus = z.object({
+  configured: z.boolean(),
+  source: z.enum(["file", "env"]).nullable(),
+  /** Model override chosen on the setup page; null = use the client default. */
+  model: z.string().nullable(),
+});
+export type GeminiStatus = z.infer<typeof GeminiStatus>;
+
 export const HelloResult = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string(),
@@ -603,6 +616,8 @@ export const HelloResult = z.object({
   /** Paseo daemon version string (e.g. "0.7.2"), null if never connected. */
   backendProtocol: z.string().nullable(),
   backendConnected: z.boolean(),
+  /** Absent on bridges that predate the Gemini proxy. */
+  gemini: GeminiStatus.optional(),
 });
 export type HelloResult = z.infer<typeof HelloResult>;
 

@@ -4,6 +4,7 @@ import android.app.Application
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.lenscode.app.net.BridgeAddressStore
 import com.lenscode.app.net.BridgeClient
 import com.lenscode.app.net.PairingStore
 
@@ -22,11 +23,15 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     // BuildConfig.BRIDGE_URL defaults to 10.0.2.2 (emulator host-loopback
     // alias); pass -PbridgeUrl=ws://<lan-ip>:8137 to gradle for a real device.
+    private val addressStore = BridgeAddressStore(app.applicationContext)
+
+    // The address saved in Settings wins; the build-time default is only the first-run fallback.
     val bridge = BridgeClient(
         viewModelScope,
-        BuildConfig.BRIDGE_URL,
+        addressStore.load() ?: BuildConfig.BRIDGE_URL,
         deviceId,
         PairingStore(app.applicationContext),
+        addressStore,
     )
 
     init {

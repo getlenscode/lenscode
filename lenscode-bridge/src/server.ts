@@ -21,9 +21,11 @@ import { GitService, worktreeConflictPath } from "./git.ts";
 import { listMachines } from "./machines.ts";
 import { RemoteManager } from "./remote.ts";
 import { RemoteFiles } from "./remoteFiles.ts";
+import { GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
+import { GeminiHttp, lanSetupUrls } from "./geminiHttp.ts";
 import { log } from "./log.ts";
 
-const BRIDGE_VERSION = "0.1.0";
+export const BRIDGE_VERSION = "0.1.0-alpha.1";
 
 function err(
   code: StructuredError["code"],
@@ -56,6 +58,8 @@ export class BridgeServer {
   private cfg: BridgeConfig;
   private httpServer: ReturnType<typeof createHttpServer>;
   private pairing: PairingRegistry;
+  private geminiKey: GeminiKeyStore;
+  private geminiHttp: GeminiHttp;
   /** workspaceId → file service rooted at that workspace's directory. */
   private workspaces = new Map<string, WorkspaceFiles>();
   /** workspaceId → git service rooted at that same directory. */
@@ -74,6 +78,17 @@ export class BridgeServer {
   constructor(cfg: BridgeConfig) {
     this.cfg = cfg;
     this.pairing = new PairingRegistry(cfg.pairingStorePath);
+    this.geminiKey = new GeminiKeyStore(cfg.geminiStorePath, {
+      apiKey: cfg.geminiApiKey,
+      model: cfg.geminiModel,
+    });
+    this.geminiHttp = new GeminiHttp({
+      store: this.geminiKey,
+      mode: cfg.mode,
+      upstream: cfg.geminiUpstream,
+      authorizeDevice: (deviceId, token) => this.pairing.isAuthorized(deviceId, token),
+      onChange: (status) => this.broadcastEvent("connection", "gemini_key_changed", status),
+    });
     this.paseo = new PaseoClient({ url: cfg.paseoUrl, password: cfg.paseoPassword });
     this.terminals = new Terminals(this.paseo);
     this.agents = new Agents(this.paseo);
@@ -88,6 +103,10 @@ export class BridgeServer {
           })
         : createHttpServer();
     this.httpServer = httpServer;
+    httpServer.on("request", (req, res) => {
+      if (this.geminiHttp.handle(req, res)) return;
+      res.writeHead(404, { "content-type": "text/plain" }).end("lenscode-bridge: not found\n");
+    });
     this.wss = new WebSocketServer({ server: httpServer });
     this.wss.on("connection", (ws) => this.onConnection(ws));
     httpServer.listen(cfg.port, () => {
@@ -96,11 +115,21 @@ export class BridgeServer {
         mode: cfg.mode,
         tls: cfg.mode === "prod",
       });
+      if (!this.geminiKey.status().configured) {
+        log("info", "Gemini key not set — open this on your phone or PC to add it", {
+          urls: lanSetupUrls(cfg.port, cfg.mode === "prod" && !cfg.insecureProd),
+        });
+      }
     });
     this.paseo.on("paseo-event", (ev) => this.broadcastPaseoEvent(ev));
     this.paseo.on("disconnected", () =>
       this.broadcastEvent("connection", "backend_disconnected", {}),
     );
+  }
+
+  /** Whether the Paseo daemon is reachable right now (main.ts uses it for the startup hint). */
+  get backendConnected(): boolean {
+    return this.paseo.connected;
   }
 
   async start(): Promise<void> {
@@ -172,6 +201,7 @@ export class BridgeServer {
             authenticated,
             backendProtocol: this.paseo.protocol,
             backendConnected: this.paseo.connected,
+            gemini: this.geminiKey.status(),
           },
         });
         return;
@@ -1202,6 +1232,11 @@ export class BridgeServer {
 
   private send(ws: WebSocket, msg: unknown): void {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  /** Test access to the Gemini /setup + proxy handler (setup code, status). */
+  get gemini(): { http: GeminiHttp; status: () => GeminiStatus } {
+    return { http: this.geminiHttp, status: () => this.geminiKey.status() };
   }
 
   /** Test/CLI access to the pairing registry (codes are read locally only). */

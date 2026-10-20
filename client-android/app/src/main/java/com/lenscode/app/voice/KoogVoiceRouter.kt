@@ -9,6 +9,8 @@ import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.structure.executeStructured
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.request.header
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -217,6 +219,19 @@ sealed class VoiceAction {
     data object ComposerStatus : VoiceAction()
 
     @Serializable
+    @SerialName("set_font_size")
+    @LLMDescription(
+        "Change the code editor's font size — \"set font size to 16\", \"make the code bigger\", " +
+            "\"text size smaller\", \"reset the font\". Give an absolute size OR a relative change.",
+    )
+    data class SetFontSize(
+        @property:LLMDescription("absolute size as a number (8-32) when one was named; null otherwise")
+        val size: Int? = null,
+        @property:LLMDescription("when no number was named: \"larger\", \"smaller\" or \"reset\"; null otherwise")
+        val change: String? = null,
+    ) : VoiceAction()
+
+    @Serializable
     @SerialName("open_agent")
     @LLMDescription(
         "Open a specific agent's detail card by name/label, as heard — e.g. \"show me the " +
@@ -270,7 +285,7 @@ data class VoiceStep(
         "one of: navigate, open_file, accept_changes, discard_changes, new_terminal, " +
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
             "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
-            "switch_branch, create_worktree, remove_worktree, composer_status, confirm",
+            "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size",
     )
     val type: String,
     @property:LLMDescription(
@@ -315,6 +330,14 @@ data class VoiceStep(
             "a new worktree was asked for just this request, else null. Null otherwise.",
     )
     val worktree: Boolean? = null,
+    @property:LLMDescription(
+        "type=set_font_size: the absolute font size as a number when one was named. Null otherwise.",
+    )
+    val fontSize: Int? = null,
+    @property:LLMDescription(
+        "type=set_font_size: \"larger\", \"smaller\" or \"reset\" when no number was named. Null otherwise.",
+    )
+    val change: String? = null,
 ) {
     fun toVoiceAction(): VoiceAction? = when (type) {
         "navigate" -> view?.let { VoiceAction.Navigate(it) }
@@ -337,6 +360,7 @@ data class VoiceStep(
         "create_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.CreateWorktree(it) }
         "remove_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.RemoveWorktree(it) }
         "composer_status" -> VoiceAction.ComposerStatus
+        "set_font_size" -> if (fontSize != null || change != null) VoiceAction.SetFontSize(fontSize, change) else null
         "confirm" -> VoiceAction.Confirm
         "respond_permission" -> behavior?.let { VoiceAction.RespondPermission(it) }
         else -> null
@@ -416,6 +440,13 @@ an ordered list of actions from the fixed grammar. Rules:
   mode, add retry logic") return a single ask_agent with the task in `instruction` and the
   named settings in its mode/model/worktree fields — do NOT split them into set_* steps, which
   would change the defaults permanently.
+- Font size: "set the font size to 16", "text size 20" -> set_font_size with fontSize=16 / 20.
+  "bigger", "larger", "zoom in on the code", "increase the font" -> set_font_size with
+  change="larger"; "smaller", "decrease", "shrink the text" -> change="smaller"; "reset the
+  font" / "default font size" -> change="reset". Give fontSize OR change, never both.
+- A name with a file extension ("open main.ts", "show server.ts") is open_file with that name as
+  the path — never navigate. "main" in a filename is not the home view; the leading "open"
+  is not part of the path.
 - Speech-to-text transcripts can be rough (dropped words, filenames spoken oddly, e.g.
   "package json" for "package.json") — use judgment.
 - Only use confirm when the context says a confirmation card is open ("confirm", "yes do
@@ -429,12 +460,28 @@ an ordered list of actions from the fixed grammar. Rules:
  * Wraps a single Gemini call (via Koog's structured-output executor) that
  * classifies a voice transcript into a [VoiceCommandPlan]. One instance per
  * app process — cheap to hold, the underlying client is just an HTTP client.
+ *
+ * By default it talks to Google directly with [apiKey]. Pass [baseUrl] to send
+ * the same requests through lenscode-bridge's /gemini proxy instead: the bridge
+ * holds the real key, so [apiKey] is just a placeholder Koog insists on, and
+ * [extraHeaders] (read per request) carries this device's credentials.
  */
-class KoogVoiceRouter(apiKey: String, modelId: String) {
+class KoogVoiceRouter(
+    apiKey: String,
+    modelId: String,
+    baseUrl: String? = null,
+    extraHeaders: () -> Map<String, String> = { emptyMap() },
+) {
     // See the build.gradle.kts comment on the ktor-client-okhttp dependency —
     // Koog's default Ktor engine crashes on Android once a custom
     // network_security_config.xml is present in the app, regardless of host.
-    private val executor = SingleLLMPromptExecutor(GoogleLLMClient(apiKey, GoogleClientSettings(), HttpClient(OkHttp)))
+    // Koog adds its own defaultRequest (base URL + key) on top of this one; ktor
+    // chains the blocks, so these headers survive.
+    private val httpClient = HttpClient(OkHttp) {
+        defaultRequest { extraHeaders().forEach { (name, value) -> header(name, value) } }
+    }
+    private val settings = if (baseUrl == null) GoogleClientSettings() else GoogleClientSettings(baseUrl = baseUrl)
+    private val executor = SingleLLMPromptExecutor(GoogleLLMClient(apiKey, settings, httpClient))
 
     // Cloning a known-good Gemini model's capabilities/limits rather than
     // hand-picking a capability list: GoogleLLMClient does its own
@@ -498,6 +545,8 @@ class KoogVoiceRouter(apiKey: String, modelId: String) {
             VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "remove_worktree", branch = "feature-x"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", fontSize = 18))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", change = "larger"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
             VoiceCommandPlan(
                 listOf(

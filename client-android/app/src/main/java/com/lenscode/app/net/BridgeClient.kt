@@ -30,10 +30,15 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class BridgeClient(
     private val scope: CoroutineScope,
-    private val url: String,
+    initialUrl: String,
     private val deviceId: String,
     private val pairingStore: PairingStore,
+    private val addressStore: BridgeAddressStore? = null,
 ) {
+    /** The bridge WebSocket URL; changed at runtime by [setAddress]. Read from the OkHttp and UI threads. */
+    @Volatile
+    private var url: String = initialUrl
+
     private val _pairingState = MutableStateFlow<PairingState>(PairingState.NeedsPairing)
     val pairingState: StateFlow<PairingState> = _pairingState
     data class UiState(
@@ -43,10 +48,34 @@ class BridgeClient(
         val panes: Int = 0,
         val agents: Int = 0,
         val lastEvent: String = "—",
+        /** The address being dialed — shown in Settings. */
+        val bridgeUrl: String = "",
+        /** Why the last connection attempt failed, in words; null while connected or not yet tried. */
+        val connectError: String? = null,
     )
 
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(UiState(bridgeUrl = initialUrl))
     val state: StateFlow<UiState> = _state
+
+    private val _geminiStatus = MutableStateFlow(BridgeGeminiStatus())
+
+    /** Whether the bridge holds a Gemini key; refreshed by hello and by `gemini_key_changed` events. */
+    val geminiStatus: StateFlow<BridgeGeminiStatus> = _geminiStatus
+
+    /** Koog's base URL for the bridge's Gemini proxy (see lenscode-bridge/src/geminiHttp.ts). */
+    val geminiProxyBase: String get() = GeminiBridgeUrls.proxyBase(url)
+
+    /** The page to open on a phone/PC to add the key — shown in Settings. */
+    val geminiSetupUrl: String get() = GeminiBridgeUrls.setupPage(url)
+
+    /**
+     * Proxy credentials, read per request so a token issued by pairing after the
+     * router was built still applies. Dev-mode bridges ignore them.
+     */
+    fun geminiAuthHeaders(): Map<String, String> = buildMap {
+        put("X-LensCode-Device", deviceId)
+        pairingStore.loadToken()?.let { put("X-LensCode-Token", it) }
+    }
 
     private val _terminals = MutableStateFlow<List<PaneInfo>>(emptyList())
     val terminals: StateFlow<List<PaneInfo>> = _terminals
@@ -138,6 +167,34 @@ class BridgeClient(
         ws = http.newWebSocket(request, Listener())
     }
 
+    /**
+     * Points the app at a different bridge (Settings → Bridge connection): saves the
+     * address, drops the current socket and dials the new one straight away. The device
+     * token is kept — a different bridge simply answers `authenticated=false` and the
+     * normal pairing flow takes over.
+     */
+    fun setAddress(newUrl: String) {
+        addressStore?.save(newUrl)
+        if (newUrl == url && ws != null) return
+        url = newUrl
+        reconnectJob?.cancel()
+        resyncJob?.cancel()
+        // Detach first so the old socket's late onClosed/onFailure is ignored as stale.
+        val old = ws
+        ws = null
+        old?.close(1000, "switching bridge")
+        failAllPending(errorBody("CONNECTION_LOST", "Switched to a different bridge."))
+        _geminiStatus.value = BridgeGeminiStatus()
+        _state.value = _state.value.copy(
+            bridgeConnected = false,
+            backendConnected = false,
+            bridgeUrl = newUrl,
+            connectError = null,
+        )
+        reconnectAttempt = 0
+        connect()
+    }
+
     fun close() {
         closedByUs = true
         reconnectJob?.cancel()
@@ -214,7 +271,9 @@ class BridgeClient(
                 _state.value = _state.value.copy(
                     bridgeConnected = true,
                     backendConnected = helloResult.optBoolean("backendConnected", false),
+                    connectError = null,
                 )
+                _geminiStatus.value = BridgeGeminiStatus.fromJson(helloResult.optJSONObject("gemini"))
                 if (helloResult.optBoolean("authenticated", false)) {
                     _pairingState.value = PairingState.Authenticated
                     onAuthenticated()
@@ -1158,7 +1217,11 @@ class BridgeClient(
             // it must not clear state or schedule another reconnect for the live one.
             if (webSocket !== ws) return
             ws = null
-            _state.value = _state.value.copy(bridgeConnected = false, backendConnected = false)
+            _state.value = _state.value.copy(
+                bridgeConnected = false,
+                backendConnected = false,
+                connectError = describeConnectError(t),
+            )
             // In-flight requests over this socket will never be answered.
             failAllPending(errorBody("CONNECTION_LOST", "Lost the connection to lenscode-bridge."))
             // Spec §59: never assume backend processes stopped; retry and resync.
@@ -1190,6 +1253,10 @@ class BridgeClient(
     }
 
     private fun handleEvent(msg: JSONObject) {
+        if (msg.optString("topic") == "connection" && msg.optString("event") == "gemini_key_changed") {
+            _geminiStatus.value = BridgeGeminiStatus.fromJson(msg.optJSONObject("data"))
+            return
+        }
         if (msg.optString("topic") != "backend") return
         _state.value = _state.value.copy(lastEvent = msg.optString("event", "—"))
         // Backend events arrive in bursts (one user action → several events).

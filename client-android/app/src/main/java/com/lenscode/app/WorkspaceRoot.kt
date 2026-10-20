@@ -165,9 +165,13 @@ private fun rememberPanelLayoutState(
 internal class WorkspaceUiState(
     initialBrowserUrl: String = "",
     initialThemeId: com.lenscode.app.ui.ThemeId,
+    initialEditorFontSize: Int = com.lenscode.app.ui.EditorFontSize.DEFAULT,
+    initialBridgeAddress: String = "",
 ) {
     var layoutGeneration by mutableStateOf(0)
     var activeView by mutableStateOf("home")
+    /** Code editor full screen: hides the dock and composer. Only honored while activeView == "code". */
+    var codeFullscreen by mutableStateOf(false)
     var selectedPane by mutableStateOf<PaneInfo?>(null)
     var stopConfirm by mutableStateOf<com.lenscode.app.ui.StopConfirmState?>(null)
     var branchConflict by mutableStateOf<com.lenscode.app.ui.BranchConflictState?>(null)
@@ -182,6 +186,11 @@ internal class WorkspaceUiState(
     var browserOverlayOpen by mutableStateOf(false)
     var browserUrl by mutableStateOf(initialBrowserUrl)
     var currentThemeId by mutableStateOf(initialThemeId)
+    /** Code editor font size in sp; changed by voice (VoiceAction.SetFontSize), persisted by EditorPrefsStore. */
+    var editorFontSize by mutableStateOf(initialEditorFontSize)
+    /** Settings → Bridge connection: the address field and its validation message. */
+    var bridgeAddressInput by mutableStateOf(initialBridgeAddress)
+    var bridgeAddressError by mutableStateOf<String?>(null)
     // "Follow me" — Jetpack XR's app-side equivalent of the pin-to-headset
     // button a Home Space window gets from the OS; this Full Space app renders
     // its own panels instead of a system-managed window, so it never gets
@@ -254,6 +263,7 @@ internal class WorkspaceUiState(
 @Composable
 fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnterFullSpace: (() -> Unit)? = null) {
     val state by bridge.state.collectAsState()
+    val bridgeGemini by bridge.geminiStatus.collectAsState()
     val terminals by bridge.terminals.collectAsState()
     val terminalOutput by bridge.terminalOutput.collectAsState()
     val dirPath by bridge.dirPath.collectAsState()
@@ -279,8 +289,16 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     val context = LocalContext.current
     val browserUrlStore = remember { com.lenscode.app.net.BrowserUrlStore(context) }
     val themeStore = remember { com.lenscode.app.net.ThemeStore(context) }
+    val editorPrefs = remember { com.lenscode.app.net.EditorPrefsStore(context) }
     // Ephemeral UI state — see WorkspaceUiState below.
-    val ui = remember { WorkspaceUiState(browserUrlStore.load() ?: "", themeStore.load()) }
+    val ui = remember {
+        WorkspaceUiState(
+            browserUrlStore.load() ?: "",
+            themeStore.load(),
+            editorPrefs.loadFontSize(),
+            bridge.state.value.bridgeUrl,
+        )
+    }
     fun resetLayout() {
         layoutStore.resetAll()
         ui.layoutGeneration++ // re-center the main panel and its attached rows
@@ -538,6 +556,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             onPartial = { text ->
                 ui.voicePartial = text
                 if (mode == "browserUrl") ui.browserUrl = com.lenscode.app.voice.normalizeSpokenAddress(text)
+                if (mode == "bridgeAddress") {
+                    ui.bridgeAddressInput = com.lenscode.app.voice.normalizeSpokenAddress(text)
+                }
             },
             onResult = { text ->
                 android.util.Log.d("LensCodeVoice", "recognized ($mode): \"$text\"")
@@ -548,6 +569,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                     // eight..." needs the digit/symbol-word collapsing, not
                     // the raw transcript.
                     "browserUrl" -> ui.browserUrl = com.lenscode.app.voice.normalizeSpokenAddress(text)
+                    "bridgeAddress" -> ui.bridgeAddressInput = com.lenscode.app.voice.normalizeSpokenAddress(text)
                     // Never dispatches straight from speech — always lands in
                     // the review card first so a misheard word can't fire a
                     // destructive command (spec §57's confirmation discipline,
@@ -635,6 +657,24 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         if (granted) startListening(mode) else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    fun saveBridgeAddress() {
+        when (
+            val result = com.lenscode.app.net.normalizeBridgeAddress(
+                ui.bridgeAddressInput,
+                // Release builds forbid cleartext, so only wss:// can work there.
+                secureOnly = !BuildConfig.DEBUG,
+            )
+        ) {
+            is com.lenscode.app.net.BridgeAddressResult.Invalid -> ui.bridgeAddressError = result.message
+            is com.lenscode.app.net.BridgeAddressResult.Ok -> {
+                ui.bridgeAddressError = null
+                ui.bridgeAddressInput = result.url
+                bridge.setAddress(result.url)
+                showToast("Connecting to ${result.url}…")
+            }
+        }
     }
 
     fun requestVoiceSearch() = requestVoice("fileSearch")
@@ -1421,6 +1461,13 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 }
             }
 
+            is com.lenscode.app.voice.VoiceAction.SetFontSize -> {
+                val next = com.lenscode.app.ui.EditorFontSize.resolve(ui.editorFontSize, action.size, action.change)
+                ui.editorFontSize = next
+                editorPrefs.saveFontSize(next)
+                showToast("Editor font size: $next")
+            }
+
             com.lenscode.app.voice.VoiceAction.ComposerStatus -> {
                 val modeLabel = com.lenscode.app.ui.composerModeFor(composer.modeId).label
                 showToast(
@@ -1457,25 +1504,52 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         is com.lenscode.app.voice.VoiceCommand.OpenAgent -> com.lenscode.app.voice.VoiceAction.OpenAgent(name)
         com.lenscode.app.voice.VoiceCommand.Dismiss -> com.lenscode.app.voice.VoiceAction.Dismiss
         is com.lenscode.app.voice.VoiceCommand.Search -> com.lenscode.app.voice.VoiceAction.Search(query)
+        is com.lenscode.app.voice.VoiceCommand.SetFontSize ->
+            com.lenscode.app.voice.VoiceAction.SetFontSize(size, change)
     }
 
     val geminiConfigResult = remember(ui.geminiConfigReloadKey) {
         com.lenscode.app.net.GeminiConfigStore.load(context)
     }
 
+    val geminiKeySource = com.lenscode.app.net.resolveGeminiKeySource(
+        file = geminiConfigResult,
+        buildKeyPresent = BuildConfig.GEMINI_API_KEY.isNotBlank(),
+        bridge = bridgeGemini,
+    )
+
     /**
      * Koog/Gemini router — null (and every call skipped) when no API key is
      * configured, so an un-keyed build/device degrades straight to the
      * deterministic local router rather than making a doomed network call.
-     * A key can come from either place, config file wins:
-     *   - on-device: Settings panel → lenscode-config.json (no rebuild needed)
+     * The key can come from three places (see resolveGeminiKeySource):
+     *   - on-device: lenscode-config.json pushed with adb
+     *   - the bridge: pasted once at its /setup page from a phone or PC — the
+     *     normal path, since typing a key in AR is miserable; calls then go
+     *     through the bridge's /gemini proxy and the key never reaches the headset
      *   - build-time: ./gradlew :app:assembleDebug -PgeminiApiKey=AIza...
      */
-    val koogVoiceRouter = remember(ui.geminiConfigReloadKey) {
+    val koogVoiceRouter = remember(ui.geminiConfigReloadKey, geminiKeySource, bridgeGemini.model) {
         val fileConfig = (geminiConfigResult as? com.lenscode.app.net.GeminiConfigResult.Loaded)?.config
-        val apiKey = fileConfig?.apiKey?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_API_KEY
-        val model = fileConfig?.model?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_MODEL
-        if (apiKey.isBlank()) null else com.lenscode.app.voice.KoogVoiceRouter(apiKey, model)
+        val fileModel = fileConfig?.model?.takeIf { it.isNotBlank() }
+        when (geminiKeySource) {
+            com.lenscode.app.net.GeminiKeySource.NONE -> null
+            com.lenscode.app.net.GeminiKeySource.BRIDGE -> com.lenscode.app.voice.KoogVoiceRouter(
+                // Koog requires a key; the bridge discards this one and adds the real one.
+                apiKey = "via-lenscode-bridge",
+                modelId = fileModel ?: bridgeGemini.model ?: BuildConfig.GEMINI_MODEL,
+                baseUrl = bridge.geminiProxyBase,
+                extraHeaders = bridge::geminiAuthHeaders,
+            )
+            com.lenscode.app.net.GeminiKeySource.CONFIG_FILE -> com.lenscode.app.voice.KoogVoiceRouter(
+                apiKey = checkNotNull(fileConfig?.apiKey),
+                modelId = fileModel ?: BuildConfig.GEMINI_MODEL,
+            )
+            com.lenscode.app.net.GeminiKeySource.BUILD -> com.lenscode.app.voice.KoogVoiceRouter(
+                apiKey = BuildConfig.GEMINI_API_KEY,
+                modelId = fileModel ?: BuildConfig.GEMINI_MODEL,
+            )
+        }
     }
     val voiceScope = rememberCoroutineScope()
 
@@ -1578,6 +1652,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     }
 
     val primaryLayout = rememberPanelLayoutState(layoutStore, "primary", 900f, 520f, ui.layoutGeneration)
+    // Tied to the Code view so navigating away (dock, voice) always brings the dock back.
+    val codeFullscreen = ui.codeFullscreen && ui.activeView == "code"
     val panelOffset = primaryLayout.offset
     val panelSize = primaryLayout.size
 
@@ -1666,6 +1742,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             bridge.searchFiles(q)
                         },
                         searchResults = fileSearchResults,
+                        fullscreen = codeFullscreen,
+                        onToggleFullscreen = { ui.codeFullscreen = !ui.codeFullscreen },
+                        codeFontSize = ui.editorFontSize,
                         composer = {
                             com.lenscode.app.ui.AgentComposer(
                                 state = composer,
@@ -1717,8 +1796,27 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                         },
                     )
                     "settings" -> com.lenscode.app.ui.SettingsPanelContent(
+                        bridge = com.lenscode.app.ui.BridgeSettingsUi(
+                            currentUrl = state.bridgeUrl,
+                            connected = state.bridgeConnected,
+                            connectError = state.connectError,
+                            input = ui.bridgeAddressInput,
+                            // A recognizer failure ("Didn't catch that") would otherwise be invisible here.
+                            inputError = ui.bridgeAddressError
+                                ?: ui.voiceError.takeIf { ui.voiceMode == "bridgeAddress" },
+                            listening = ui.isListening && ui.voiceMode == "bridgeAddress",
+                            onInputChange = {
+                                ui.bridgeAddressInput = it
+                                ui.bridgeAddressError = null
+                            },
+                            onSpeak = { requestVoice("bridgeAddress") },
+                            onSave = { saveBridgeAddress() },
+                        ),
                         geminiResult = geminiConfigResult,
-                        buildKeyPresent = BuildConfig.GEMINI_API_KEY.isNotBlank(),
+                        geminiKeySource = geminiKeySource,
+                        bridgeGemini = bridgeGemini,
+                        bridgeConnected = state.bridgeConnected,
+                        setupUrl = bridge.geminiSetupUrl,
                         configPath = com.lenscode.app.net.GeminiConfigStore.configFile(context).absolutePath,
                         onReload = { ui.geminiConfigReloadKey++ },
                         currentThemeId = ui.currentThemeId,
@@ -2094,8 +2192,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(LensCodeCorners.Panel))) {
                 primaryContent()
             }
-            Box(Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(LensCodeCorners.Control))) {
-                dockContent()
+            if (!codeFullscreen) {
+                Box(Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(LensCodeCorners.Control))) {
+                    dockContent()
+                }
             }
         }
     }
@@ -2142,7 +2242,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             }
 
             // ── Quick dock ────────────────────────────────────────────────
-            run {
+            if (!codeFullscreen) run {
                 // Follow the main panel's bottom edge, including live moves
                 // and resizes, rather than anchoring to a separate world pose.
                 SpatialPanel(

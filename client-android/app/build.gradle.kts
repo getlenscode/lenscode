@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,6 +15,16 @@ detekt {
     buildUponDefaultConfig = true
 }
 
+// Release signing comes from client-android/keystore.properties (gitignored):
+//   storeFile=../../path/to/upload.jks   (relative to client-android/)
+//   storePassword=...  keyAlias=...  keyPassword=...
+// Without that file the release build still works but is left unsigned, so a
+// plain checkout never needs (or sees) the key.
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
 android {
     namespace = "com.lenscode.app"
     compileSdk = 36
@@ -22,8 +34,10 @@ android {
         // Android XR baseline (XR preview images are API 34).
         minSdk = 34
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // versionCode must rise with every build handed to anyone (Android uses it to
+        // decide what is an upgrade); versionName is the semver shown to people.
+        versionCode = 2
+        versionName = "0.1.0-alpha.1"
         // lenscode-bridge WebSocket URL. Defaults to 10.0.2.2 (the emulator's
         // host-loopback alias); override for a real device on the same LAN
         // with -PbridgeUrl="ws://<host-lan-ip>:8137" (adb reverse can't help
@@ -33,17 +47,30 @@ android {
         // Agentic voice routing (com.lenscode.app.voice.KoogVoiceRouter) — Gemini
         // via Koog, on-device. Empty key = the router falls back to the
         // deterministic local one (VoiceCommandRouter.kt), no network call
-        // attempted. Set with:
+        // attempted. Prefer pasting the key at the bridge's /setup page (see CLAUDE.md)
+        // so it never lands in an APK; this is the leftover fallback. To bake one in:
         //   ./gradlew :app:assembleDebug -PbridgeUrl=... -PgeminiApiKey=AIza...
-        // then adb install -r the resulting APK — see MEMORY/plan docs.
+        // then adb install -r the resulting APK.
         val geminiApiKey = (project.findProperty("geminiApiKey") as String?) ?: ""
         val geminiModel = (project.findProperty("geminiModel") as String?) ?: "gemini-3.8-flash"
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         buildConfigField("String", "GEMINI_MODEL", "\"$geminiModel\"")
     }
 
+    signingConfigs {
+        if (keystoreProps.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             // R8 is off until keep rules are tested — kotlinx-serialization and
             // Koog's reflective internals will strip/break without them.
             isMinifyEnabled = false

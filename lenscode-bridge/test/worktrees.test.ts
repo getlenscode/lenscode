@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { BridgeServer } from "../src/server.ts";
 import { loadConfig } from "../src/config.ts";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { removeFixturesFromPaseo } from "./paseoCleanup.ts";
 
 const PORT = 18142;
 let server: BridgeServer;
@@ -64,7 +65,11 @@ before(async () => {
   await server.start();
 });
 
-after(() => server.close());
+after(async () => {
+  server.close();
+  // Take the fixture repo back out of the developer's real Paseo daemon (see paseoCleanup.ts).
+  await removeFixturesFromPaseo([repo]);
+});
 
 // Requires a live local Paseo daemon (ws://127.0.0.1:6767/ws by default, or
 // LENSCODE_PASEO_URL); self-skips otherwise. Replaces Herdr's worktree.* proxy

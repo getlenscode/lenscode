@@ -83,9 +83,19 @@ fun PrimaryPanelContent(
                 Text("Connection lost.", color = LensCodeColors.Amber, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Agents and terminals may still be running.\nReconnecting…",
+                    "Agents and terminals may still be running.\nReconnecting to ${state.bridgeUrl}…",
                     color = LensCodeColors.Muted,
                     fontSize = 15.sp,
+                )
+                if (state.connectError != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(state.connectError, color = LensCodeColors.Amber, fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Wrong address? Change it in Settings → Bridge connection.",
+                    color = LensCodeColors.Muted,
+                    fontSize = 13.sp,
                 )
             } else {
                 val (batteryPercent, batteryCharging) = rememberBatteryState()
