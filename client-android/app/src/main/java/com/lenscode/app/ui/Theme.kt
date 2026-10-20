@@ -1,9 +1,19 @@
 package com.lenscode.app.ui
 
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Match Compose clipping to the XR compositor so neither adds extra rounding. */
@@ -12,22 +22,85 @@ object LensCodeCorners {
     var Card by mutableStateOf(8.dp); private set
     var Control by mutableStateOf(6.dp); private set
 
+    /** True for themes with square corners everywhere, including the small hard-coded radii — see [lensShape]. */
+    var sharp by mutableStateOf(false); private set
+
     fun apply(id: ThemeId) {
         val glass = id == ThemeId.AURA_GLASS
-        Panel = if (glass) 22.dp else 10.dp
-        Card = if (glass) 18.dp else 8.dp
-        Control = if (glass) 28.dp else 6.dp
+        sharp = id == ThemeId.TERMINAL
+        Panel = if (sharp) 0.dp else if (glass) 22.dp else 10.dp
+        Card = if (sharp) 0.dp else if (glass) 18.dp else 8.dp
+        Control = if (sharp) 0.dp else if (glass) 28.dp else 6.dp
+    }
+}
+
+/**
+ * The corner shape for a small control. Themes with [LensCodeCorners.sharp] get square
+ * corners; the rest keep [radius]. Use this instead of RoundedCornerShape so a sharp
+ * theme has no stray rounded corners.
+ */
+fun lensShape(radius: Dp): RoundedCornerShape = RoundedCornerShape(if (LensCodeCorners.sharp) 0.dp else radius)
+
+/** Which corner of the OS-drawn window a box touches. */
+enum class WindowCorner { TOP_START, BOTTOM_START, BOTTOM_END }
+
+/** Outer-corner radius for a box that touches the window's rounded frame, so it follows the curve. */
+private val WINDOW_FOLLOW_RADIUS = 22.dp
+
+/**
+ * [lensShape] for a box that may sit in a corner of the window. In a square theme the one outer
+ * corner that touches the OS-rounded frame is softened to follow it; every other corner (and every
+ * corner in themes that are already rounded) is unchanged.
+ */
+fun lensCornerShape(base: Dp, touching: WindowCorner?): RoundedCornerShape {
+    if (!LensCodeCorners.sharp || touching == null) return lensShape(base)
+    val r = WINDOW_FOLLOW_RADIUS
+    val none = 0.dp
+    fun shape(topStart: Dp = none, bottomEnd: Dp = none, bottomStart: Dp = none) =
+        RoundedCornerShape(topStart = topStart, topEnd = none, bottomEnd = bottomEnd, bottomStart = bottomStart)
+    return when (touching) {
+        WindowCorner.TOP_START -> shape(topStart = r)
+        WindowCorner.BOTTOM_START -> shape(bottomStart = r)
+        WindowCorner.BOTTOM_END -> shape(bottomEnd = r)
+    }
+}
+
+/** True inside the flat (Home Space) layout, whose boxes sit against the OS-rounded window frame. */
+val LocalWindowCornerFollow = compositionLocalOf { false }
+
+/** Status dots and other "round" marks: square in a sharp theme. */
+val LensCircle: Shape get() = if (LensCodeCorners.sharp) RectangleShape else CircleShape
+
+/** App-wide text font; null keeps the platform default. The Terminal theme is monospace. */
+object LensCodeFonts {
+    var Body: FontFamily? by mutableStateOf(null); private set
+
+    fun apply(id: ThemeId) {
+        Body = if (id == ThemeId.TERMINAL) FontFamily.Monospace else null
     }
 }
 
 /** One selectable app-wide color scheme — see [applyAppTheme]. */
 enum class ThemeId(val label: String) {
+    TERMINAL("Terminal"),
     CURSOR("Cursor"),
     DRACULA("Dracula"),
     SOLARIZED_DARK("Solarized Dark"),
     DEEP_BLACK("Deep Black"),
     AURA_GLASS("Aura Glass"),
 }
+
+/** Gives everything inside the theme's font (a no-op for themes that keep the platform default). */
+@Suppress("FunctionNaming")
+@Composable
+fun ProvideLensFont(content: @Composable () -> Unit) {
+    val family = LensCodeFonts.Body
+    if (family == null) content() else ProvideTextStyle(TextStyle(fontFamily = family), content)
+}
+
+/** The navy behind the panels in every theme but Terminal. */
+@Suppress("MagicNumber") // A literal ARGB value naming the default backdrop.
+private val DEFAULT_WINDOW_BG = Color(0xFF0B1118)
 
 /** App-chrome colors for one theme — see [LensCodeColors]. */
 data class LensCodePalette(
@@ -39,6 +112,10 @@ data class LensCodePalette(
     val cardBorder: Color, val cardBg: Color, val cardGradTop: Color,
     val dockIdle: Color, val dockActiveGradTop: Color, val dockActiveGradBottom: Color,
     val dockActiveBorder: Color, val dockBg: Color, val logoBg: Color, val logoBorder: Color,
+    /** The fill behind every panel in the flat (Home Space) layout; transparent lets the room show through. */
+    val windowBg: Color = DEFAULT_WINDOW_BG,
+    /** Second stop of the backdrop gradient behind the panels; equal to [windowBg] for a flat backdrop. */
+    val windowBgAlt: Color = windowBg,
 )
 
 /** Code-editor syntax colors for one theme — see [VsCodeColors]. */
@@ -172,7 +249,36 @@ val AURA_GLASS_CODE = CodePalette(
     number = Color(0xFFD0C2EA), typeName = Color(0xFFACE0CD), plain = Color(0xFFFAFAF8),
 )
 
+// Terminal — a tiling-window-manager look: square corners, thin pale outlines and flat,
+// translucent fills, in warm brown and amber tones.
+@Suppress("MagicNumber") // Literal ARGB values define the named theme palette.
+val TERMINAL_PALETTE = LensCodePalette(
+    text = Color(0xFFDDD3C2), muted = Color(0xFF9A8B78), blue = Color(0xFF8FB5C4),
+    green = Color(0xFF9CBF84), red = Color(0xFFD9776F), amber = Color(0xFFE3B04F),
+    purple = Color(0xFFC09BD4), cyan = Color(0xFF7FC4C9), eyebrow = Color(0xFFB5A58F),
+    idle = Color(0xFF7A6D5E), activeDock = Color(0xFFEFE6D6),
+    panelGradTop = Color(0xAD130E0B), panelGradBottom = Color(0xAD130E0B),
+    panelGlow = Color(0x00000000), panelBorder = Color(0x80B8A48C), panelBorderTop = Color(0x80B8A48C),
+    sheenWhite = Color(0x00FFFFFF), sheenBlue = Color(0x00FFFFFF),
+    cardBorder = Color(0x80B8A48C), cardBg = Color(0xAD130E0B), cardGradTop = Color(0xAD130E0B),
+    dockIdle = Color(0xFFB5A58F), dockActiveGradTop = Color(0xB0463A2E), dockActiveGradBottom = Color(0xB0463A2E),
+    dockActiveBorder = Color(0xE0DDD3C2), dockBg = Color(0x99100C09),
+    logoBg = Color(0xAD130E0B), logoBorder = Color(0x80B8A48C),
+    // A Home Space window is opaque (transparent pixels render black), so give the translucent
+    // panels a dark-brown backdrop to show through instead of flat black.
+    windowBg = Color(0xFF0B0806), windowBgAlt = Color(0xFF2A2018),
+)
+
+@Suppress("MagicNumber") // Literal ARGB values define the named syntax palette.
+val TERMINAL_CODE = CodePalette(
+    editorBg = Color(0xC00F0B08), sidebarBg = Color(0x99130E0B), tabBarBg = Color(0xA6191410),
+    activeTabBg = Color(0xB0292019), lineNumber = Color(0xFF7A6D5E), hoverRow = Color(0x55453A2E),
+    keyword = Color(0xFFD9917A), stringLit = Color(0xFFA9BF8A), comment = Color(0xFF7A6D5E),
+    number = Color(0xFFE3B04F), typeName = Color(0xFF7FC4C9), plain = Color(0xFFDDD3C2),
+)
+
 fun lensCodePaletteFor(id: ThemeId): LensCodePalette = when (id) {
+    ThemeId.TERMINAL -> TERMINAL_PALETTE
     ThemeId.CURSOR -> CURSOR_PALETTE
     ThemeId.DRACULA -> DRACULA_PALETTE
     ThemeId.SOLARIZED_DARK -> SOLARIZED_DARK_PALETTE
@@ -181,6 +287,7 @@ fun lensCodePaletteFor(id: ThemeId): LensCodePalette = when (id) {
 }
 
 fun codePaletteFor(id: ThemeId): CodePalette = when (id) {
+    ThemeId.TERMINAL -> TERMINAL_CODE
     ThemeId.CURSOR -> CURSOR_CODE
     ThemeId.DRACULA -> DRACULA_CODE
     ThemeId.SOLARIZED_DARK -> SOLARIZED_DARK_CODE
@@ -229,6 +336,9 @@ object LensCodeColors {
     var DockActiveBorder by mutableStateOf(CURSOR_PALETTE.dockActiveBorder); private set
     var DockBg by mutableStateOf(CURSOR_PALETTE.dockBg); private set
 
+    var WindowBg by mutableStateOf(CURSOR_PALETTE.windowBg); private set
+    var WindowBgAlt by mutableStateOf(CURSOR_PALETTE.windowBgAlt); private set
+
     var LogoBg by mutableStateOf(CURSOR_PALETTE.logoBg); private set
     var LogoBorder by mutableStateOf(CURSOR_PALETTE.logoBorder); private set
 
@@ -243,6 +353,7 @@ object LensCodeColors {
         DockIdle = p.dockIdle; DockActiveGradTop = p.dockActiveGradTop; DockActiveGradBottom = p.dockActiveGradBottom
         DockActiveBorder = p.dockActiveBorder; DockBg = p.dockBg
         LogoBg = p.logoBg; LogoBorder = p.logoBorder
+        WindowBg = p.windowBg; WindowBgAlt = p.windowBgAlt
     }
 
     /** Per-agent accent, matching .logo.claude/.codex/.hermes/.pi — provider branding, kept theme-independent on purpose. */
@@ -273,6 +384,7 @@ object LensCodeColors {
 /** Applies one theme's colors to both app chrome ([LensCodeColors]) and the code editor ([VsCodeColors]). */
 fun applyAppTheme(id: ThemeId) {
     LensCodeCorners.apply(id)
+    LensCodeFonts.apply(id)
     LensCodeColors.apply(lensCodePaletteFor(id))
     VsCodeColors.apply(codePaletteFor(id))
 }

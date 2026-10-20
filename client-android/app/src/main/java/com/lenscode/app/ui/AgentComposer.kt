@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -99,12 +98,12 @@ private fun Chip(
         fontSize = 13.sp,
         maxLines = 1,
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(lensShape(8.dp))
             .background(if (highlighted) LensCodeColors.DockActiveGradTop else LensCodeColors.CardBg)
             .border(
                 1.dp,
                 if (highlighted) LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder,
-                RoundedCornerShape(8.dp),
+                lensShape(8.dp),
             )
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -149,7 +148,7 @@ private fun MenuRow(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(lensShape(6.dp))
                     .clickable(onClick = onRemove)
                     .padding(horizontal = 6.dp),
             )
@@ -163,9 +162,9 @@ private fun MenuCard(speakHint: String, content: @Composable () -> Unit) {
         Modifier
             .fillMaxWidth()
             .heightIn(max = 220.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(lensShape(10.dp))
             .background(LensCodeColors.CardBg)
-            .border(1.dp, LensCodeColors.CardBorder, RoundedCornerShape(10.dp)),
+            .border(1.dp, LensCodeColors.CardBorder, lensShape(10.dp)),
     ) {
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) { content() }
         // Voice-first: every menu says how to drive it by voice.
@@ -357,9 +356,9 @@ fun AgentComposer(
             Chip("📁 $folderLabel")
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(lensShape(8.dp))
                     .background(if (state.flash == "branch") LensCodeColors.DockActiveGradTop else LensCodeColors.CardBg)
-                    .border(1.dp, if (state.flash == "branch") LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder, RoundedCornerShape(8.dp)),
+                    .border(1.dp, if (state.flash == "branch") LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder, lensShape(8.dp)),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -394,9 +393,9 @@ fun AgentComposer(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(lensShape(12.dp))
                 .background(LensCodeColors.CardBg)
-                .border(1.dp, LensCodeColors.CardBorder, RoundedCornerShape(12.dp))
+                .border(1.dp, LensCodeColors.CardBorder, lensShape(12.dp))
                 .padding(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
@@ -429,7 +428,7 @@ fun AgentComposer(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(lensShape(8.dp))
                         .clickable { state.prompt = TextFieldValue("") }
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
@@ -440,7 +439,7 @@ fun AgentComposer(
                 color = if (state.prompt.text.isBlank()) LensCodeColors.Muted else LensCodeColors.ActiveDock,
                 fontSize = 20.sp,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(lensShape(8.dp))
                     .clickable(enabled = state.prompt.text.isNotBlank(), onClick = onSend)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             )
@@ -463,9 +462,9 @@ fun AgentComposer(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(lensShape(10.dp))
                     .background(if (isListening) LensCodeColors.DockActiveGradTop else LensCodeColors.CardBg)
-                    .border(1.dp, if (isListening) LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder, RoundedCornerShape(10.dp))
+                    .border(1.dp, if (isListening) LensCodeColors.DockActiveBorder else LensCodeColors.CardBorder, lensShape(10.dp))
                     .clickable(onClick = onMic)
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             )

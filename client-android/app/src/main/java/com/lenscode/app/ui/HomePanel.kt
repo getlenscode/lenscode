@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -249,7 +248,7 @@ private fun PairingFlowContent(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(3.dp))
+                    .clip(lensShape(3.dp))
                     .clickable(onClick = onBeginPairing)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
@@ -269,7 +268,7 @@ private fun PairingFlowContent(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(3.dp))
+                    .clip(lensShape(3.dp))
                     .clickable(onClick = onSubmitPairingCode)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
@@ -286,7 +285,7 @@ private fun PairingFlowContent(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(lensShape(3.dp))
                         .clickable(onClick = onSubmitPairingCode)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -296,7 +295,7 @@ private fun PairingFlowContent(
                     color = LensCodeColors.Muted,
                     fontSize = 15.sp,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(lensShape(3.dp))
                         .clickable(onClick = onRetryPairing)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -311,7 +310,7 @@ internal fun PairingTextField(value: String, onValueChange: (String) -> Unit, pl
     Box(
         Modifier
             .width(220.dp)
-            .clip(RoundedCornerShape(3.dp))
+            .clip(lensShape(3.dp))
             .background(VsCodeColors.EditorBg)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {

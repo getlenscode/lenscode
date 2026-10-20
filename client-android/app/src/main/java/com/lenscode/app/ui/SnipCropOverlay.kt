@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -171,7 +169,7 @@ private fun SnipButton(
 ) {
     Box(
         Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(lensShape(8.dp))
             .background(if (enabled) background else background.copy(alpha = 0.4f))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
@@ -198,7 +196,7 @@ private fun SnipHandle(offset: Offset, onDrag: (Offset) -> Unit) {
         Modifier
             .offset(offsetXDp, offsetYDp)
             .size(handleSizeDp)
-            .clip(CircleShape)
+            .clip(LensCircle)
             .background(Color(0xFF4FC3F7))
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -97,7 +96,7 @@ fun VoiceOverlay(
                                 Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(lensShape(3.dp))
                                         .clickable { onSelectCandidate(candidate.path) }
                                         .padding(vertical = 8.dp, horizontal = 6.dp),
                                 ) {
@@ -188,7 +187,7 @@ fun VoiceCommandOverlay(
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(3.dp))
+                                .clip(lensShape(3.dp))
                                 .background(VsCodeColors.EditorBg)
                                 .padding(12.dp),
                         ) {

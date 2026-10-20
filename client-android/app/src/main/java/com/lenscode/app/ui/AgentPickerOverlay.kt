@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -47,7 +46,7 @@ fun AgentPickerOverlay(
     ) {
         Box(
             Modifier
-                .clip(RoundedCornerShape(16.dp))
+                .clip(lensShape(16.dp))
                 .background(Color(0xFF1E1E24))
                 // Disabled (not omitted) clickable still consumes the touch,
                 // so a tap on the card itself doesn't fall through to the
@@ -68,7 +67,7 @@ fun AgentPickerOverlay(
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(lensShape(10.dp))
                                 .clickable { onSelect(agent) }
                                 .padding(vertical = 12.dp, horizontal = 12.dp),
                         ) {

@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -108,7 +107,7 @@ fun FilesPanelContent(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp)
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(lensShape(3.dp))
                         .background(VsCodeColors.EditorBg)
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
@@ -306,7 +305,7 @@ fun FilesPanelContent(
                         Box(
                             Modifier
                                 .width(200.dp)
-                                .clip(RoundedCornerShape(3.dp))
+                                .clip(lensShape(3.dp))
                                 .background(VsCodeColors.SidebarBg)
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                         ) {
@@ -384,9 +383,9 @@ fun FilesPanelContent(
                                     .padding(top = 4.dp, end = 8.dp)
                                     .width(260.dp)
                                     .heightIn(max = 320.dp)
-                                    .clip(RoundedCornerShape(3.dp))
+                                    .clip(lensShape(3.dp))
                                     .background(VsCodeColors.SidebarBg)
-                                    .border(1.dp, VsCodeColors.Border, RoundedCornerShape(3.dp))
+                                    .border(1.dp, VsCodeColors.Border, lensShape(3.dp))
                                     .padding(vertical = 6.dp),
                             ) {
                                 LazyColumn {
@@ -449,9 +448,9 @@ fun FilesPanelContent(
                                     Modifier
                                         .fillMaxWidth(0.92f)
                                         .fillMaxHeight(0.88f)
-                                        .clip(RoundedCornerShape(3.dp))
+                                        .clip(lensShape(3.dp))
                                         .background(VsCodeColors.EditorBg)
-                                        .border(1.dp, VsCodeColors.Border, RoundedCornerShape(3.dp))
+                                        .border(1.dp, VsCodeColors.Border, lensShape(3.dp))
                                         .padding(16.dp),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -528,7 +527,7 @@ fun FilesPanelContent(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(top = 6.dp, end = 10.dp)
-                    .clip(RoundedCornerShape(3.dp))
+                    .clip(lensShape(3.dp))
                     .background(VsCodeColors.TabBarBg)
                     .clickable(onClick = onToggleFullscreen)
                     .padding(horizontal = 10.dp, vertical = 4.dp),

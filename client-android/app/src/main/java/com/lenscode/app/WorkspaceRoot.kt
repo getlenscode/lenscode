@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -63,6 +62,8 @@ import com.lenscode.app.ui.AgentChipContent
 import com.lenscode.app.ui.AgentsPanelContent
 import com.lenscode.app.ui.DiffPanelContent
 import com.lenscode.app.ui.DockButtonContent
+import com.lenscode.app.ui.agentChipSurface
+import com.lenscode.app.ui.lensShape
 import com.lenscode.app.ui.FilesPanelContent
 import com.lenscode.app.ui.LensCodeColors
 import com.lenscode.app.ui.LensCodeCorners
@@ -2153,7 +2154,13 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     @Composable
     fun flatContent() {
         androidx.compose.foundation.layout.Column(
-            Modifier.fillMaxSize().background(Color(0xFF0B1118)).padding(12.dp),
+            Modifier.fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.linearGradient(
+                        listOf(LensCodeColors.WindowBgAlt, LensCodeColors.WindowBg),
+                    ),
+                )
+                .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
@@ -2166,7 +2173,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (agents.isEmpty()) {
-                        Box(Modifier.width(300.dp).fillMaxHeight().glassFinish(LensCodeCorners.Card, compact = true)) {
+                        Box(Modifier.width(300.dp).fillMaxHeight().agentChipSurface(first = true)) {
                             AgentChipContent("—", "No agents running", LensCodeColors.Idle)
                         }
                     } else {
@@ -2174,7 +2181,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             androidx.compose.runtime.key(agent.agentId) {
                                 Box(
                                     Modifier.width(220.dp).fillMaxHeight()
-                                        .glassFinish(LensCodeCorners.Card, compact = true)
+                                        .agentChipSurface(first = agent === agents.first())
                                         .clickable { openAgentDetail(agent) },
                                 ) {
                                     AgentChipContent(agent.label, agent.status, LensCodeColors.agentStatusColor(agent.status), agent.provider)
@@ -2189,12 +2196,14 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                     }
                 }
             }
-            Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(LensCodeCorners.Panel))) {
+            Box(Modifier.weight(1f).fillMaxWidth().clip(lensShape(LensCodeCorners.Panel))) {
                 primaryContent()
             }
             if (!codeFullscreen) {
-                Box(Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(LensCodeCorners.Control))) {
-                    dockContent()
+                Box(Modifier.fillMaxWidth().height(76.dp).clip(lensShape(LensCodeCorners.Control))) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        com.lenscode.app.ui.LocalWindowCornerFollow provides true,
+                    ) { dockContent() }
                 }
             }
         }
@@ -2287,7 +2296,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         android.util.Log.d("LensCodeFollowMe", "followMe=$ui.followMeEnabled trackingReady=$ui.deviceTrackingReady distance=${ui.followMeDistanceM}m")
     }
     if (!androidx.xr.compose.platform.LocalSpatialCapabilities.current.isSpatialUiEnabled) {
-        flatContent()
+        // The flat layout's agent chips sit outside any SnipRegion, so give it the font here too.
+        com.lenscode.app.ui.ProvideLensFont { flatContent() }
     } else if (ui.followMeEnabled && xrSession != null && ui.deviceTrackingReady) {
         FollowingSubspace(
             FollowTarget.ArDevice(xrSession),
@@ -2308,4 +2318,3 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         }
     }
 }
-

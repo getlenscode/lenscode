@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -55,7 +54,17 @@ fun DockButtonContent(
     attention: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(DockCorner)
+    // In the flat layout the first and last buttons touch the window's rounded corners.
+    val windowCorner = if (LocalWindowCornerFollow.current) {
+        when (id) {
+            "home" -> WindowCorner.BOTTOM_START
+            "settings" -> WindowCorner.BOTTOM_END
+            else -> null
+        }
+    } else {
+        null
+    }
+    val shape = lensCornerShape(DockCorner, windowCorner)
     // Pulsing glow, not a static highlight — a permission sitting unanswered
     // should keep catching the eye, not just flag once and fade into the
     // rest of the dock's idle chrome.
@@ -118,7 +127,7 @@ fun DockButtonContent(
             Box(
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
                     .width(16.dp).height(2.dp)
-                    .background(LensCodeColors.Cyan, RoundedCornerShape(1.dp)),
+                    .background(LensCodeColors.Cyan, lensShape(1.dp)),
             )
         }
     }

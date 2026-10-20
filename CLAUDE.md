@@ -44,6 +44,12 @@ adb -s 192.168.1.166:34347 shell monkey -p com.lenscode.app -c android.intent.ca
 - Dev mode (default): `/setup` and the proxy are open to the LAN, like the WebSocket. Prod mode: `/setup` needs the 6-digit code the bridge prints, and the proxy needs a paired device's token.
 - Non-obvious: Koog's base URL must end in `/` (`.../gemini/`). Ktor resolves its relative `v1beta/...` path like a browser, so without the slash it drops `/gemini` and the bridge 404s.
 
+## Themes and window look
+
+- Themes live in `ui/Theme.kt` (`ThemeId`, palettes, corner radii); the picker is Settings → App theme. **Terminal** (default) is square corners, thin outlines, flat translucent brown fills and monospace type. Small corners must go through `lensShape(dp)`, never `RoundedCornerShape(dp)` directly, or a sharp theme gets stray rounded corners.
+- The app runs in Home Space (`FULL_SPACE_ENABLED = false` in `MainActivity.kt`; don't switch it on without asking). A Home Space window is opaque — transparent pixels render black — and its outer rounded frame is drawn by the XR system. Setting `scene.mainPanelEntity.cornerRadius` is accepted and reads back, but the frame does not change (tried 2026-10-20), and the Android XR docs pages for SceneCore/Compose/design say nothing about it. So panels sit on a themed backdrop gradient (`windowBg`/`windowBgAlt`) instead of the room; real see-through needs `SpatialPanel`s in Full Space.
+- Headset screenshots: `adb -s <dev> exec-out screencap -p` prints a "multiple displays" warning before the PNG — strip everything before the `\x89PNG` signature. A 3840x1200 all-black capture means the headset is asleep (`dumpsys power | grep mWakefulness`), not that the app is broken.
+
 ## Follow Me (non-obvious)
 
 - `FollowingSubspace` + `FollowTarget.ArDevice` must use `FollowBehavior.Soft()`. `ArDevice` is not compatible with `Tight` (nothing renders). The layout is pushed ~0.6 m in front of the head (`followMeDistanceM`).

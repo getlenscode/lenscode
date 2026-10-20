@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -146,7 +145,7 @@ fun HudRing(
 fun WeatherCard(reading: WeatherReading?, locationDenied: Boolean, modifier: Modifier = Modifier) {
     Row(
         modifier
-            .clip(RoundedCornerShape(LensCodeCorners.Card))
+            .clip(lensShape(LensCodeCorners.Card))
             .background(LensCodeColors.CardBg)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

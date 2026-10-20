@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -42,9 +41,9 @@ private fun CodeBlock(lines: List<String>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(4.dp))
+            .clip(lensShape(4.dp))
             .background(LensCodeColors.CardBg)
-            .border(1.dp, LensCodeColors.CardBorder, RoundedCornerShape(4.dp))
+            .border(1.dp, LensCodeColors.CardBorder, lensShape(4.dp))
             .padding(12.dp),
     ) {
         for (line in lines) CodeLine(line)
@@ -104,9 +103,9 @@ fun SettingsPanelContent(
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .clip(lensShape(6.dp))
                                     .background(if (selected) LensCodeColors.CardBg else androidx.compose.ui.graphics.Color.Transparent)
-                                    .border(1.dp, if (selected) LensCodeColors.Cyan else LensCodeColors.CardBorder, RoundedCornerShape(6.dp))
+                                    .border(1.dp, if (selected) LensCodeColors.Cyan else LensCodeColors.CardBorder, lensShape(6.dp))
                                     .clickable { onThemeChange(id) }
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
                             )
@@ -153,7 +152,7 @@ fun SettingsPanelContent(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(lensShape(3.dp))
                         .clickable(onClick = onReload)
                         .padding(vertical = 4.dp),
                 )

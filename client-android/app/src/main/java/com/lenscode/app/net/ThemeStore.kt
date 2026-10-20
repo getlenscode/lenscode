@@ -11,8 +11,8 @@ class ThemeStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun load(): ThemeId {
-        val name = prefs.getString(KEY_THEME_ID, null) ?: return ThemeId.CURSOR
-        return runCatching { ThemeId.valueOf(name) }.getOrDefault(ThemeId.CURSOR)
+        val name = prefs.getString(KEY_THEME_ID, null) ?: return ThemeId.TERMINAL
+        return runCatching { ThemeId.valueOf(name) }.getOrDefault(ThemeId.TERMINAL)
     }
 
     fun save(id: ThemeId) {

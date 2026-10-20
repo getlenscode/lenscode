@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -97,7 +96,7 @@ private fun BridgeAddressField(ui: BridgeSettingsUi) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(4.dp))
+            .clip(lensShape(4.dp))
             .background(LensCodeColors.CardBg)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
@@ -142,6 +141,6 @@ private fun BridgeAction(label: String, color: androidx.compose.ui.graphics.Colo
         color = color,
         fontSize = 13.sp,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.clip(RoundedCornerShape(3.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
+        modifier = Modifier.clip(lensShape(3.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
     )
 }

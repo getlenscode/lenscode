@@ -108,6 +108,8 @@ fun SnipRegion(
             drawLayer(layer)
         },
     ) {
-        content()
+        // Panels, the dock and the spatial agent chips are all SnipRegions, so this gives them
+        // the theme's font (monospace in Terminal).
+        ProvideLensFont(content)
     }
 }

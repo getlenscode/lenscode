@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -236,7 +235,7 @@ fun DiffPanelContent(
                             Row(
                                 Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(3.dp))
+                                    .clip(lensShape(3.dp))
                                     .background(if (isSelected) LensCodeColors.DockActiveGradTop else Color.Transparent)
                                     .clickable { onSelectFile(f.path) }
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -265,7 +264,7 @@ fun DiffPanelContent(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(3.dp))
+                    .clip(lensShape(3.dp))
                     .background(VsCodeColors.EditorBg)
                     .padding(14.dp),
             ) {

@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -56,9 +55,9 @@ fun AgentChipContent(name: String, stateLabel: String, dotColor: Color, kind: St
             Box(
                 Modifier
                     .size(30.dp)
-                    .clip(RoundedCornerShape(DockCorner))
+                    .clip(lensShape(DockCorner))
                     .background(LensCodeColors.LogoBg)
-                    .border(1.dp, LensCodeColors.LogoBorder, RoundedCornerShape(DockCorner)),
+                    .border(1.dp, LensCodeColors.LogoBorder, lensShape(DockCorner)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(name.take(1), color = LensCodeColors.agentAccent(kind), fontWeight = FontWeight.Black, fontSize = 14.sp)
@@ -143,8 +142,8 @@ fun AgentsPanelContent(
                 Spacer(Modifier.weight(1f))
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, LensCodeColors.Cyan.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        .clip(lensShape(6.dp))
+                        .border(1.dp, LensCodeColors.Cyan.copy(alpha = 0.5f), lensShape(6.dp))
                         .clickable {
                             showingHistory = !showingHistory
                             if (showingHistory) onShowHistory()
@@ -187,7 +186,7 @@ fun AgentsPanelContent(
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(3.dp))
+                                            .clip(lensShape(3.dp))
                                             .clickable { onSelectHistory(entry) }
                                             .padding(vertical = 6.dp, horizontal = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically,
@@ -249,7 +248,7 @@ fun AgentsPanelContent(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(3.dp))
+                                .clip(lensShape(3.dp))
                                 .clickable { onSelect(agent) }
                                 .padding(vertical = 6.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -363,9 +362,9 @@ fun PermissionsPanelContent(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 6.dp)
-                                .clip(RoundedCornerShape(3.dp))
+                                .clip(lensShape(3.dp))
                                 .background(LensCodeColors.CardBg)
-                                .border(1.dp, LensCodeColors.CardBorder, RoundedCornerShape(3.dp))
+                                .border(1.dp, LensCodeColors.CardBorder, lensShape(3.dp))
                                 .padding(14.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -453,7 +452,7 @@ private fun AgentActivityFeed(timeline: List<com.lenscode.app.net.AgentTimelineE
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 60.dp, max = 220.dp)
-                .clip(RoundedCornerShape(3.dp))
+                .clip(lensShape(3.dp))
                 .background(VsCodeColors.EditorBg)
                 .padding(10.dp),
         ) {
@@ -557,8 +556,8 @@ fun AgentDetailOverlay(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
-                        Modifier.size(28.dp).clip(RoundedCornerShape(DockCorner)).background(LensCodeColors.LogoBg)
-                            .border(1.dp, LensCodeColors.LogoBorder, RoundedCornerShape(DockCorner)),
+                        Modifier.size(28.dp).clip(lensShape(DockCorner)).background(LensCodeColors.LogoBg)
+                            .border(1.dp, LensCodeColors.LogoBorder, lensShape(DockCorner)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -582,7 +581,7 @@ fun AgentDetailOverlay(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(lensShape(3.dp))
                         .background(VsCodeColors.EditorBg)
                         .padding(10.dp),
                 ) {
@@ -614,7 +613,7 @@ fun AgentDetailOverlay(
                         Box(
                             Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(3.dp))
+                                .clip(lensShape(3.dp))
                                 .background(VsCodeColors.EditorBg)
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                         ) {

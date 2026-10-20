@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,7 +79,7 @@ fun TerminalPanelContent(
                                 Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clip(RoundedCornerShape(3.dp))
+                                    .clip(lensShape(3.dp))
                                     .background(if (isSelected) LensCodeColors.DockActiveGradTop else Color.Transparent)
                                     .clickable { onSelect(pane) }
                                     .padding(8.dp),
@@ -129,7 +128,7 @@ fun TerminalPanelContent(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(lensShape(3.dp))
                         .background(LensCodeColors.CardBg)
                         .padding(14.dp),
                 ) {

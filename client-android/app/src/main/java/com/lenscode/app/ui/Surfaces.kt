@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,8 +29,8 @@ internal val CardCorner get() = LensCodeCorners.Card
 internal val DockCorner get() = LensCodeCorners.Control
 
 /** Cache reflection brushes at the panel's size instead of allocating each frame. */
-internal fun Modifier.glassFinish(corner: Dp, compact: Boolean = false): Modifier {
-    val shape = RoundedCornerShape(corner)
+internal fun Modifier.glassFinish(corner: Dp, compact: Boolean = false, windowCorner: WindowCorner? = null): Modifier {
+    val shape = lensCornerShape(corner, windowCorner)
     return clip(shape)
         .background(Brush.verticalGradient(
             if (compact) listOf(LensCodeColors.CardGradTop, LensCodeColors.CardBg)
@@ -71,6 +69,13 @@ internal fun Modifier.glassFinish(corner: Dp, compact: Boolean = false): Modifie
         )
 }
 
+/** The compact surface for an agent chip; the first one touches the window's top-left corner. */
+internal fun Modifier.agentChipSurface(first: Boolean): Modifier = glassFinish(
+    LensCodeCorners.Card,
+    compact = true,
+    windowCorner = if (first) WindowCorner.TOP_START else null,
+)
+
 /** The .panel style: gradient fill + corner glow + screen-blend sheen + top-bright border. */
 @Composable
 fun GlassSurface(corner: Dp = PanelCorner, content: @Composable () -> Unit) {
@@ -100,5 +105,5 @@ fun Eyebrow(text: String) {
 
 @Composable
 fun StatusDot(color: Color, size: Dp = 8.dp) {
-    Box(Modifier.size(size).clip(CircleShape).background(color))
+    Box(Modifier.size(size).clip(LensCircle).background(color))
 }
