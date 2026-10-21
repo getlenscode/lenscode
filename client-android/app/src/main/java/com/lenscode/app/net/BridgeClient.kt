@@ -36,6 +36,7 @@ class BridgeClient(
     private val pairingStore: PairingStore,
     private val addressStore: BridgeAddressStore? = null,
     private val pinStore: PinStore? = null,
+    private val remoteFolderStore: RemoteFolderStore? = null,
 ) {
     /** The bridge WebSocket URL; changed at runtime by [setAddress]. Read from the OkHttp and UI threads. */
     @Volatile
@@ -359,7 +360,36 @@ class BridgeClient(
         refreshWorktrees()
         // So Home's project-path summary has something to show immediately,
         // not only after the user visits Code at least once.
-        listDir(dirPath.value)
+        if (!restoreRemoteFolder()) listDir(dirPath.value)
+    }
+
+    /**
+     * Re-opens the remote folder Code was last on (connecting its machine first if needed), so a
+     * fresh launch doesn't land on "Select machine" and a new folder browse. Only when nothing has
+     * been picked yet this run. Returns false when there is nothing to restore.
+     */
+    private fun restoreRemoteFolder(): Boolean {
+        if (filesMachineId != "local") return false
+        val saved = remoteFolderStore?.load() ?: return false
+        fun open() {
+            if (filesMachineId == "local") openRemoteFolderInFiles(saved.machineId, saved.root, saved.label)
+        }
+        send("machine.list", onResult = { result ->
+            val machines = decodeList<MachineInfo>(result, "machines")
+            _machines.value = machines
+            val machine = machines.firstOrNull { it.id == saved.machineId }
+            when {
+                machine == null -> listDir(dirPath.value)
+                machine.connected -> open()
+                else -> send(
+                    "machine.connect",
+                    JSONObject().put("machineId", saved.machineId),
+                    onResult = { refreshMachines(); open() },
+                    onError = { listDir(dirPath.value) },
+                )
+            }
+        })
+        return true
     }
 
     /** Starts pairing (spec §55) — the 6-digit code itself is shown on the bridge's own console. */
@@ -602,6 +632,7 @@ class BridgeClient(
         refreshProviders()
         filesWorkspaceId = root
         _filesRootLabel.value = label
+        remoteFolderStore?.save(SavedRemoteFolder(machineId, root, label))
         listDir(".")
     }
 

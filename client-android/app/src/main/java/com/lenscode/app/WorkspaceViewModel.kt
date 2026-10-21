@@ -8,6 +8,7 @@ import com.lenscode.app.net.BridgeAddressStore
 import com.lenscode.app.net.BridgeClient
 import com.lenscode.app.net.PairingStore
 import com.lenscode.app.net.PinStore
+import com.lenscode.app.net.RemoteFolderStore
 
 /**
  * Owns the bridge connection for the workspace UI. Living in a ViewModel (with
@@ -34,6 +35,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         PairingStore(app.applicationContext),
         addressStore,
         PinStore(app.applicationContext),
+        RemoteFolderStore(app.applicationContext),
     )
 
     init {
