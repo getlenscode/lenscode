@@ -53,6 +53,13 @@ function localPortFor(machineId: string): number {
 export class RemoteManager {
   private connections = new Map<string, Connection>();
 
+  /**
+   * Called with every Paseo event a connected remote machine pushes (agent state, a pending
+   * permission, …). Without it only the local daemon's events reach the app, so a remote agent
+   * asking for permission never lit the Permissions icon.
+   */
+  onEvent: ((machineId: string, event: { type: string; [key: string]: unknown }) => void) | null = null;
+
   // The SSH tunnel can stay up while the remote's Paseo daemon restarts; the client doesn't
   // reconnect on its own (see PaseoClient), so a connection whose client dropped is dead and must
   // be re-made rather than reported as connected and failing with "Transport not connected".
@@ -133,6 +140,7 @@ export class RemoteManager {
       throw new Error(`Tunnel to ${machineId} is up, but Paseo isn't reachable there: ${lastError}`);
     }
 
+    client.on("paseo-event", (event) => this.onEvent?.(machineId, event));
     this.connections.set(machineId, { tunnel, client, localPort, homeDir: home });
   }
 

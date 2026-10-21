@@ -122,6 +122,7 @@ export class BridgeServer {
       }
     });
     this.paseo.on("paseo-event", (ev) => this.broadcastPaseoEvent(ev));
+    this.remote.onEvent = (_machineId, ev) => this.broadcastPaseoEvent(ev);
     this.paseo.on("disconnected", () =>
       this.broadcastEvent("connection", "backend_disconnected", {}),
     );
