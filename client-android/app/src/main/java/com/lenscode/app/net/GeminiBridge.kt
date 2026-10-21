@@ -23,10 +23,15 @@ data class BridgeGeminiStatus(
             if (json == null) return BridgeGeminiStatus()
             return BridgeGeminiStatus(
                 configured = json.optBoolean("configured", false),
-                source = json.optString("source", "").ifBlank { null },
-                model = json.optString("model", "").ifBlank { null },
+                source = json.optStringOrNull("source"),
+                model = json.optStringOrNull("model"),
             )
         }
+
+        // org.json's optString turns a JSON null into the text "null" (the bridge sends
+        // "model": null when none is chosen), which then became the model id "null".
+        private fun JSONObject.optStringOrNull(name: String): String? =
+            if (isNull(name)) null else optString(name, "").ifBlank { null }
     }
 }
 
