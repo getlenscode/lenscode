@@ -1542,6 +1542,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 modelId = fileModel ?: bridgeGemini.model ?: BuildConfig.GEMINI_MODEL,
                 baseUrl = bridge.geminiProxyBase,
                 extraHeaders = bridge::geminiAuthHeaders,
+                okHttpClient = bridge.pinnedHttpClient,
             )
             com.lenscode.app.net.GeminiKeySource.CONFIG_FILE -> com.lenscode.app.voice.KoogVoiceRouter(
                 apiKey = checkNotNull(fileConfig?.apiKey),

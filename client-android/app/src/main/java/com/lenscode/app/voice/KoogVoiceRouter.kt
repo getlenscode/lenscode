@@ -11,6 +11,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
+import okhttp3.OkHttpClient
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -471,13 +472,17 @@ class KoogVoiceRouter(
     modelId: String,
     baseUrl: String? = null,
     extraHeaders: () -> Map<String, String> = { emptyMap() },
+    okHttpClient: OkHttpClient? = null,
 ) {
     // See the build.gradle.kts comment on the ktor-client-okhttp dependency —
     // Koog's default Ktor engine crashes on Android once a custom
     // network_security_config.xml is present in the app, regardless of host.
     // Koog adds its own defaultRequest (base URL + key) on top of this one; ktor
     // chains the blocks, so these headers survive.
+    // [okHttpClient] is the bridge's pinned-certificate client: through a --secure bridge the
+    // default system-trust client fails the handshake ("Trust anchor ... not found").
     private val httpClient = HttpClient(OkHttp) {
+        okHttpClient?.let { preconfigured -> engine { this.preconfigured = preconfigured } }
         defaultRequest { extraHeaders().forEach { (name, value) -> header(name, value) } }
     }
     private val settings = if (baseUrl == null) GoogleClientSettings() else GoogleClientSettings(baseUrl = baseUrl)

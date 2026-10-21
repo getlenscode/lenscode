@@ -139,6 +139,9 @@ class BridgeClient(
     // connects only once the user has confirmed its fingerprint (see certPrompt).
     private val http = PinnedTls.okHttpClient { pinStore?.pinFor(bridgeHostPort(url)) }
 
+    /** The same pinned-trust client, for HTTP calls to this bridge from elsewhere (the Gemini proxy). */
+    val pinnedHttpClient: okhttp3.OkHttpClient get() = http
+
     private val _certPrompt = MutableStateFlow<CertPrompt?>(null)
 
     /** Set when the bridge presents a certificate the user hasn't confirmed (or one that changed). */
