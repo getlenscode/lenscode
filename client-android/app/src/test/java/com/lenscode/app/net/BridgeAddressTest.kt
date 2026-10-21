@@ -22,21 +22,21 @@ class BridgeAddressTest {
 
     @Test
     fun `a bare ip gets the default port and ws`() {
-        assertEquals("ws://192.168.1.157:8137", ok("192.168.1.157"))
-        assertEquals("ws://192.168.1.157:8137", ok("  192.168.1.157  "))
+        assertEquals("ws://192.168.0.10:8137", ok("192.168.0.10"))
+        assertEquals("ws://192.168.0.10:8137", ok("  192.168.0.10  "))
     }
 
     @Test
     fun `the default port depends on whether the address is secure`() {
-        assertEquals("ws://192.168.1.157:8137", ok("192.168.1.157"))
-        assertEquals("wss://192.168.1.157:8443", ok("wss://192.168.1.157"))
-        assertEquals("ws://192.168.1.157:8137", ok("ws://192.168.1.157"))
-        assertEquals("wss://192.168.1.157:9000", ok("wss://192.168.1.157:9000"))
+        assertEquals("ws://192.168.0.10:8137", ok("192.168.0.10"))
+        assertEquals("wss://192.168.0.10:8443", ok("wss://192.168.0.10"))
+        assertEquals("ws://192.168.0.10:8137", ok("ws://192.168.0.10"))
+        assertEquals("wss://192.168.0.10:9000", ok("wss://192.168.0.10:9000"))
     }
 
     @Test
     fun `an explicit port and scheme are kept`() {
-        assertEquals("ws://192.168.1.157:9000", ok("192.168.1.157:9000"))
+        assertEquals("ws://192.168.0.10:9000", ok("192.168.0.10:9000"))
         assertEquals("ws://host.local:8137", ok("ws://host.local:8137/"))
         assertEquals("ws://10.0.2.2:8137", ok("http://10.0.2.2"))
     }
@@ -49,13 +49,13 @@ class BridgeAddressTest {
 
     @Test
     fun `a dictated address works end to end`() {
-        val spoken = normalizeSpokenAddress("one nine two dot one six eight dot one dot one five seven")
-        assertEquals("ws://192.168.1.157:8137", ok(spoken))
+        val spoken = normalizeSpokenAddress("one nine two dot one six eight dot zero dot one zero")
+        assertEquals("ws://192.168.0.10:8137", ok(spoken))
         assertEquals(
-            "ws://192.168.1.157:3000",
+            "ws://192.168.0.10:3000",
             ok(
                 normalizeSpokenAddress(
-                    "one nine two dot one six eight dot one dot one five seven colon three zero zero zero",
+                    "one nine two dot one six eight dot zero dot one zero colon three zero zero zero",
                 ),
             ),
         )
@@ -65,11 +65,11 @@ class BridgeAddressTest {
 
     @Test
     fun `secure-only builds default to wss and refuse ws`() {
-        assertEquals("wss://192.168.1.157:8443", ok("192.168.1.157", secureOnly = true))
+        assertEquals("wss://192.168.0.10:8443", ok("192.168.0.10", secureOnly = true))
         assertEquals("wss://host:8443", ok("https://host", secureOnly = true))
-        assertTrue(invalid("ws://192.168.1.157", secureOnly = true).contains("secure"))
+        assertTrue(invalid("ws://192.168.0.10", secureOnly = true).contains("secure"))
         // with no port typed, the suggestion is the secure form on the secure port
-        assertTrue(invalid("ws://192.168.1.157", secureOnly = true).contains("wss://192.168.1.157:8443"))
+        assertTrue(invalid("ws://192.168.0.10", secureOnly = true).contains("wss://192.168.0.10:8443"))
         // an explicit port is kept in the suggestion
         assertTrue(invalid("http://host:9000", secureOnly = true).contains("wss://host:9000"))
     }
@@ -87,8 +87,8 @@ class BridgeAddressTest {
 
     @Test
     fun `ports outside 1 to 65535 are rejected`() {
-        assertTrue(invalid("192.168.1.157:0").contains("port"))
-        assertTrue(invalid("192.168.1.157:99999").contains("port"))
+        assertTrue(invalid("192.168.0.10:0").contains("port"))
+        assertTrue(invalid("192.168.0.10:99999").contains("port"))
     }
 
     // ── connection errors in words ───────────────────────────────────────

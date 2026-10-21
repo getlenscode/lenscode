@@ -49,9 +49,9 @@ class GeminiBridgeTest {
 
     @Test
     fun `http addresses are derived from the bridge websocket url`() {
-        assertEquals("http://192.168.1.157:8137", GeminiBridgeUrls.httpBase("ws://192.168.1.157:8137"))
-        assertEquals("http://192.168.1.157:8137/setup", GeminiBridgeUrls.setupPage("ws://192.168.1.157:8137"))
-        assertEquals("http://192.168.1.157:8137/gemini/", GeminiBridgeUrls.proxyBase("ws://192.168.1.157:8137"))
+        assertEquals("http://192.168.0.10:8137", GeminiBridgeUrls.httpBase("ws://192.168.0.10:8137"))
+        assertEquals("http://192.168.0.10:8137/setup", GeminiBridgeUrls.setupPage("ws://192.168.0.10:8137"))
+        assertEquals("http://192.168.0.10:8137/gemini/", GeminiBridgeUrls.proxyBase("ws://192.168.0.10:8137"))
     }
 
     @Test

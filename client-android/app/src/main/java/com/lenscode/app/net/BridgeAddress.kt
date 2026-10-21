@@ -26,7 +26,7 @@ private const val MAX_PORT = 65535
 
 /**
  * Turns what the user typed or dictated into the WebSocket URL the app dials:
- * "192.168.1.157", "192.168.1.157:9000", "ws://host:8137", "https://host" all work.
+ * "192.168.0.10", "192.168.0.10:9000", "ws://host:8137", "https://host" all work.
  * The port defaults to [DEFAULT_SECURE_BRIDGE_PORT] for a secure address and [DEFAULT_BRIDGE_PORT]
  * for a plain one. With no scheme given it picks wss when
  * [secureOnly] (release builds, which the platform forbids from using cleartext) and
@@ -37,9 +37,9 @@ fun normalizeBridgeAddress(input: String, secureOnly: Boolean): BridgeAddressRes
     val text = input.trim()
     val match = ADDRESS.matchEntire(text)
     return when {
-        text.isEmpty() -> BridgeAddressResult.Invalid("Enter the bridge's address, for example 192.168.1.157")
+        text.isEmpty() -> BridgeAddressResult.Invalid("Enter the bridge's address, for example 192.168.0.10")
         match == null -> BridgeAddressResult.Invalid(
-            "That doesn't look like an address. Try 192.168.1.157 or wss://my-host:8137",
+            "That doesn't look like an address. Try 192.168.0.10 or wss://my-host:8137",
         )
         else -> validateAddress(match, secureOnly)
     }

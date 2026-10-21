@@ -63,7 +63,7 @@ fun BridgeConnectionSection(ui: BridgeSettingsUi) {
             "Enter the address of the computer running lenscode-bridge. The port is added for you " +
                 "(8443 for a secure address, 8137 for a plain one). " +
                 "To avoid typing, tap Speak and say the digits and \"dot\" — for example \"one nine two dot " +
-                "one six eight dot one dot one five seven\".",
+                "one six eight dot zero dot one zero\".",
             color = LensCodeColors.Muted,
             fontSize = 11.5.sp,
             lineHeight = 16.sp,
@@ -102,7 +102,7 @@ private fun BridgeAddressField(ui: BridgeSettingsUi) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         if (ui.input.isEmpty()) {
-            Text("192.168.1.157", color = LensCodeColors.Muted, style = mono)
+            Text("192.168.0.10", color = LensCodeColors.Muted, style = mono)
         }
         BasicTextField(
             value = ui.input,

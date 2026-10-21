@@ -37,7 +37,7 @@ class CertPinTest {
 
     @Test
     fun `host and port key a bridge's pin`() {
-        assertEquals("192.168.1.157:8443", bridgeHostPort("wss://192.168.1.157:8443"))
+        assertEquals("192.168.0.10:8443", bridgeHostPort("wss://192.168.0.10:8443"))
         assertEquals("bridge.example.com:443", bridgeHostPort("wss://bridge.example.com"))
         assertEquals("10.0.2.2:8137", bridgeHostPort("ws://10.0.2.2:8137"))
     }

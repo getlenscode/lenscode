@@ -5,11 +5,7 @@
   levels/some OkHttp paths without an explicit network security config
   permitting cleartext for the target host.
 
-  10.0.2.2 is the Android emulator's host-loopback alias. 192.168.1.157 is
-  the dev machine's LAN IP, for testing on a real device on the same
-  network (see build.gradle.kts's bridgeUrl property) — update this if that
-  IP changes, or widen to a whole /24 with a wildcard domain if it moves
-  around a lot.
+  10.0.2.2 is the Android emulator's host-loopback alias.
 
   The bridge address is now set in-app (Settings → Bridge connection), so debug
   builds permit cleartext to any host — a developer can point at whatever LAN IP
@@ -20,7 +16,6 @@
     <base-config cleartextTrafficPermitted="true" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">10.0.2.2</domain>
-        <domain includeSubdomains="false">192.168.1.157</domain>
     </domain-config>
     <!-- Debug builds also trust CAs installed on the device (Settings > security >
          install certificate), so the local CA from scripts/make-dev-tls.sh can be used

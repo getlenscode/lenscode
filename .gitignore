@@ -34,3 +34,6 @@ ycr.md
 *.p12
 privkey*
 fullchain*
+
+# Personal machine details (real IPs); never commit
+CLAUDE.local.md

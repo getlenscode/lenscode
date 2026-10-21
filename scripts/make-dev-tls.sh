@@ -3,8 +3,8 @@
 # so the bridge can run in prod mode (TLS) on your own network and a debug build of
 # the app can connect to it over wss://.
 #
-#   ./scripts/make-dev-tls.sh 192.168.1.157          # one or more IPs and/or host names
-#   ./scripts/make-dev-tls.sh --out ./tls my-mac.local 192.168.1.157
+#   ./scripts/make-dev-tls.sh 192.168.0.10          # one or more IPs and/or host names
+#   ./scripts/make-dev-tls.sh --out ./tls my-mac.local 192.168.0.10
 #
 # Output (default ~/.config/lenscode-bridge/tls/):
 #   ca.pem       the CA certificate — install THIS on the headset (see below)
@@ -16,7 +16,7 @@
 #
 # This is for development. A published app's users need a certificate from a public
 # CA (or a tunnel that provides one) because a store build cannot trust your private CA.
-# The address must match what the app dials: a certificate for 192.168.1.157 is not
+# The address must match what the app dials: a certificate for 192.168.0.10 is not
 # valid for any other IP, so re-run this when the address changes.
 
 set -euo pipefail
