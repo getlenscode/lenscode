@@ -4,7 +4,8 @@ dist/
 *.tsbuildinfo
 .env
 
-# Unity
+# Unity — archived client, kept on disk but not tracked
+client-unity/
 client-unity/[Ll]ibrary/
 client-unity/[Tt]emp/
 client-unity/[Oo]bj/
