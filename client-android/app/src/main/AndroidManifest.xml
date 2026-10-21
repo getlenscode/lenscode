@@ -12,8 +12,10 @@
          lookup, no need for GPS-grade precision. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- XR-only app: request the immersive feature. -->
-    <uses-feature android:name="android.software.xr.immersive" android:required="true" />
+    <!-- Declared but not required: Play then lists the app on XR devices that
+         don't advertise immersive mode (e.g. the XREAL Android XR Puck). The app
+         runs in Home Space, so it does not depend on this feature. -->
+    <uses-feature android:name="android.software.xr.immersive" android:required="false" />
 
     <!-- Android 11+ package visibility: without this, SpeechRecognizer.isRecognitionAvailable()
          can't see the on-device recognition service even when one exists. -->
