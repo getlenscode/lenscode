@@ -425,7 +425,7 @@ data class AgentDetailState(val agent: AgentInfo, val promptError: String? = nul
 /**
  * Agent detail card (spec §10 — a chip "expands to a detail card" rather than
  * navigating away). Paseo agents are first-class objects, not a scraped
- * terminal pane (see AgentInfo's doc), so unlike the Herdr-era version this
+ * terminal pane (see AgentInfo's doc), so this
  * shows real agent metadata (model, cwd, cost, last error) instead of a raw
  * terminal snippet, and offers "Open Workspace" (the agent's own cwd/
  * workspace in Files+Terminal) rather than a fake "its terminal". A prompt

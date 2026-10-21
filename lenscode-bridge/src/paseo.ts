@@ -1,6 +1,6 @@
 /**
- * Paseo daemon client (docs/paseo-migration-plan.md, Phase 1). Replaces
- * herdr.ts: lenscode-bridge is now a session on top of a Paseo daemon
+ * Paseo daemon client (docs/paseo-migration-plan.md, Phase 1). lenscode-bridge
+ * is a session on top of a Paseo daemon
  * (https://github.com/getpaseo/paseo), reached over its WebSocket protocol via
  * the official `@getpaseo/client` SDK rather than a hand-rolled IPC client.
  *
@@ -48,9 +48,8 @@ export class PaseoError extends Error {
 }
 
 /**
- * Thin wrapper giving the rest of the bridge the same shape HerdrClient used
- * to provide (`connect`, `connected`, `protocol`, an event emitter for
- * backend/disconnected events) over the real Paseo SDK client.
+ * Thin wrapper giving the rest of the bridge `connect`, `connected`, `protocol`,
+ * and an event emitter for backend/disconnected events over the Paseo SDK client.
  */
 export class PaseoClient extends EventEmitter {
   private client: DaemonClient;
@@ -68,14 +67,13 @@ export class PaseoClient extends EventEmitter {
       clientType: "mobile",
       password: cfg.password,
       // The bridge already retries on demand via ensurePaseo() before every
-      // request (mirroring HerdrClient's model); the SDK's own background
+      // request; the SDK's own background
       // reconnect loop would just be a second retry policy fighting the
       // first, and its timers can outlive a server.close() in tests.
       reconnect: { enabled: false },
       // The SDK's own default (15s) is tuned for a human waiting on a UI;
       // the bridge's ensurePaseo() is polled on every hello/request, so a
       // fast, loud failure beats a slow hang when no daemon is running yet
-      // (mirrors HerdrClient's one-shot-connection-refused behavior).
       connectTimeoutMs: cfg.connectTimeoutMs ?? 3000,
     });
     this.client.subscribe((event) => this.onDaemonEvent(event));

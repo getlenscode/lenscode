@@ -60,7 +60,8 @@ fun BridgeConnectionSection(ui: BridgeSettingsUi) {
         BridgeActionRow(ui)
         Spacer(Modifier.height(10.dp))
         Text(
-            "Enter the address of the computer running lenscode-bridge. The port (8137) is added for you. " +
+            "Enter the address of the computer running lenscode-bridge. The port is added for you " +
+                "(8443 for a secure address, 8137 for a plain one). " +
                 "To avoid typing, tap Speak and say the digits and \"dot\" — for example \"one nine two dot " +
                 "one six eight dot one dot one five seven\".",
             color = LensCodeColors.Muted,

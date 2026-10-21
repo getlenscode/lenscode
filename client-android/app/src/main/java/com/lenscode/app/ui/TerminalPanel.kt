@@ -198,8 +198,7 @@ fun TerminalPanelContent(
 
 /**
  * Terminal list status dot (docs/paseo-migration-plan.md, Phase 1) — Paseo's
- * per-terminal activity state (idle/working/attention), not the old Herdr
- * "focused" flag, which has no server-side equivalent anymore.
+ * per-terminal activity state (idle/working/attention).
  */
 private fun terminalActivityColor(activity: String?): Color = when (activity) {
     "working" -> LensCodeColors.Green

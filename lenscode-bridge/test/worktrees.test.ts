@@ -72,8 +72,8 @@ after(async () => {
 });
 
 // Requires a live local Paseo daemon (ws://127.0.0.1:6767/ws by default, or
-// LENSCODE_PASEO_URL); self-skips otherwise. Replaces Herdr's worktree.* proxy
-// calls (docs/paseo-migration-plan.md, Phase 3).
+// LENSCODE_PASEO_URL); self-skips otherwise. See docs/paseo-migration-plan.md,
+// Phase 3.
 test("worktree.list, worktree.open, worktree.remove round-trip against a live Paseo daemon", async (t) => {
   const ws = await connect();
   if (!paseoUp) {

@@ -34,6 +34,13 @@
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.LensCodeXr">
 
+        <!-- The Jetpack XR ARCore library merges in com.google.ar.core.min_apk_version, and Play
+             rejects the bundle unless the app also says whether ARCore is required. "optional":
+             "required" would limit installs to Google's ARCore-supported device list (which may
+             not include XR headsets) and force Google Play Services for AR. Head tracking runs on
+             the headset's own XR runtime, so the app does not depend on it. -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
+
         <!-- Default to Home Space. Full space (needed to spatialize Subspace
              content) is opt-in: launch with the boolean intent extra fullSpace=true, see
              MainActivity. To make full space the default again, set this to

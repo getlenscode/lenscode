@@ -36,7 +36,7 @@ android {
         targetSdk = 36
         // versionCode must rise with every build handed to anyone (Android uses it to
         // decide what is an upgrade); versionName is the semver shown to people.
-        versionCode = 2
+        versionCode = 3
         versionName = "0.1.0-alpha.1"
         // lenscode-bridge WebSocket URL. Defaults to 10.0.2.2 (the emulator's
         // host-loopback alias); override for a real device on the same LAN

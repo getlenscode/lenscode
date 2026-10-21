@@ -38,9 +38,8 @@ data class PaneInfo(
     /** Wire sends this as "name"; callers fall back to [terminalId] when blank. */
     @SerialName("name") val title: String = "",
     /** Paseo's terminal activity state (idle/working/attention), or null if unknown.
-     * Replaces the old Herdr "focused" flag — Paseo has no server-side terminal
-     * focus (docs/paseo-migration-plan.md, Phase 1), so this is what the status
-     * dot actually reflects now. */
+     * Paseo has no server-side terminal focus (docs/paseo-migration-plan.md,
+     * Phase 1), so this is what the status dot actually reflects. */
     val agentStatus: String? = null,
     /** "local" or a connected remote machine id (spec §37) — carried per-terminal so
      * terminal-scoped actions (read/close/interrupt) always target the right
@@ -68,10 +67,7 @@ data class FileContent(
 
 /**
  * A first-class Paseo agent (docs/paseo-migration-plan.md, Phase 2/3) — not a
- * terminal pane. Herdr had no agent model at all; LensCode used to infer one by
- * scraping terminal output for a pane Herdr flagged as agent-shaped
- * (`AgentInfo` used to carry a `paneId` for exactly that reason). Paseo
- * tracks agents as their own objects instead.
+ * terminal pane. Paseo tracks agents as their own objects.
  */
 @Serializable
 data class AgentInfo(

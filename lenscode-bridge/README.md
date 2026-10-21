@@ -14,7 +14,7 @@ Connects the LensCode headset app to the coding agents you run with [Paseo](http
 npx lenscode-bridge
 ```
 
-It prints the address to enter in the app (**Settings → Bridge connection**), for example `ws://192.168.1.20:8137`. You can say the address instead of typing it: tap **Speak address** and say the digits and "dot".
+It prints the address to enter in the app (**Settings → Bridge connection**), for example `ws://192.168.1.20:8137` (or `wss://192.168.1.20:8443` in secure mode). You can say the address instead of typing it: tap **Speak address** and say the digits and "dot".
 
 That is *dev mode*: plain `ws://`, open to everyone on your network. It works with a debug build of the app. A store build only connects over a secure `wss://` address — see below.
 
@@ -24,7 +24,7 @@ That is *dev mode*: plain `ws://`, open to everyone on your network. It works wi
 npx lenscode-bridge --secure
 ```
 
-The bridge makes its own certificate (kept in `~/.config/lenscode-bridge/self-signed/`) and prints its **fingerprint**, like `510D-4148-395F-0618-6472`. The first time the headset connects it shows the same fingerprint: check that the two match and tap **Trust & connect**. The headset then remembers that exact certificate, so a changed IP address is fine; if the certificate ever changes you are asked again, with a warning. A new headset then **pairs**: the app asks for a 6-digit code, which the bridge prints in this terminal.
+It listens on port 8443 (plain mode uses 8137, so both can run together). The bridge makes its own certificate (kept in `~/.config/lenscode-bridge/self-signed/`) and prints its **fingerprint**, like `510D-4148-395F-0618-6472`. The first time the headset connects it shows the same fingerprint: check that the two match and tap **Trust & connect**. The headset then remembers that exact certificate, so a changed IP address is fine; if the certificate ever changes you are asked again, with a warning. A new headset then **pairs**: the app asks for a 6-digit code, which the bridge prints in this terminal.
 
 No domain, certificate authority or tunnel is needed. Don't skip the fingerprint check: it is what proves the headset is talking to your bridge and not something else on the network.
 
@@ -43,7 +43,7 @@ Free-form voice commands ("add a test for the login route") use Google's Gemini.
 ## Options
 
 ```
---port <n>          port to listen on (default 8137)
+--port <n>          port to listen on (default 8137; 8443 in secure mode)
 --secure            secure mode with a certificate the bridge makes itself
 --tls-cert <file>   TLS certificate (PEM, full chain) from a public authority
 --tls-key <file>    TLS private key

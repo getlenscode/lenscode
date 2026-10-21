@@ -534,9 +534,8 @@ class BridgeClient(
     /**
      * Ctrl+C — the protocol requires `confirmed:true`, so only call this after
      * the XR confirmation card. Paseo has no per-terminal "what's running"
-     * RPC (Herdr's `terminal.process_info` has no equivalent — see
-     * docs/paseo-migration-plan.md), so unlike before, the confirmation card
-     * can't name the process being interrupted; it just confirms the action.
+     * RPC (see docs/paseo-migration-plan.md), so the confirmation card can't
+     * name the process being interrupted; it just confirms the action.
      */
     fun interruptTerminal(terminalId: String, machineId: String = "local", onDone: () -> Unit = {}) {
         send(
@@ -552,8 +551,8 @@ class BridgeClient(
     // ── Files ────────────────────────────────────────────────────────────
 
     /**
-     * Which Herdr workspace the file browser is rooted at. "local" resolves
-     * bridge-side to lenscode-bridge's own project root; any real Herdr
+     * Which workspace the file browser is rooted at. "local" resolves
+     * bridge-side to lenscode-bridge's own project root; any real
      * workspace_id resolves to that workspace's pane cwd (see lenscode-bridge's
      * `filesFor`) — which is exactly a worktree's checkout path, so jumping
      * the Code view into a worktree is just switching this id.
@@ -577,7 +576,7 @@ class BridgeClient(
     /** Absolute path of whatever the file browser is currently rooted at — local or remote, never an IP (spec §54/§36). */
     val projectRootPath: StateFlow<String?> = _projectRootPath
 
-    /** Re-roots the file browser at a worktree (or any Herdr workspace) and opens it in Code. Defaults to local. */
+    /** Re-roots the file browser at a worktree (or any workspace) and opens it in Code. Defaults to local. */
     fun openWorkspaceInFiles(workspaceId: String, label: String, machineId: String = "local") {
         filesMachineId = machineId
         _filesMachineIdFlow.value = machineId
@@ -589,7 +588,7 @@ class BridgeClient(
     /**
      * Re-roots the file browser at an absolute folder on a remote machine
      * (spec §37) — e.g. a folder picked in the remote browse dialog. Unlike
-     * [openWorkspaceInFiles], `root` isn't a Herdr workspace id to resolve;
+     * [openWorkspaceInFiles], `root` isn't a workspace id to resolve;
      * it's used as the literal filesystem root, matching how the bridge's
      * `RemoteFiles` treats it (see lenscode-bridge's resolveFiles).
      */
@@ -777,8 +776,7 @@ class BridgeClient(
     }
 
     // ── Agents (docs/paseo-migration-plan.md, Phase 2/3) ────────────────
-    // Agents are first-class in Paseo, unlike Herdr where LensCode inferred an
-    // "agent" from a terminal pane's scraped output — see AgentInfo's doc.
+    // Agents are first-class in Paseo — see AgentInfo's doc.
 
     fun refreshAgents() {
         send("agent.list", onResult = { result ->
@@ -932,8 +930,7 @@ class BridgeClient(
 
     // ── Permissions (docs/paseo-migration-plan.md, Phase 3) ─────────────
     // The spatial "approve this tool call" card — the highest-value new
-    // glasses affordance this phase adds; Herdr had no equivalent to migrate
-    // away from.
+    // glasses affordance this phase adds.
 
     fun refreshPermissions() {
         send("permission.list", onResult = { result ->
@@ -976,7 +973,7 @@ class BridgeClient(
     val connectingMachineId: StateFlow<String?> = _connectingMachineId
 
     /**
-     * Opens the SSH tunnel + remote Herdr connection (spec §37) — can take a
+     * Opens the SSH tunnel + remote connection (spec §37) — can take a
      * few seconds. On success, opens the remote folder browser right away
      * (starting at the machine's real home directory) so connecting always
      * leads somewhere, rather than landing on an otherwise-empty machine row.
@@ -1026,7 +1023,7 @@ class BridgeClient(
     private fun fetchRemoteBrowseDir(machineId: String, path: String) {
         // "." as the browsed path against `path` as the workspace root — same
         // convention resolveFiles uses server-side: workspaceId IS the absolute
-        // root for a remote machine, not a Herdr workspace id to resolve.
+        // root for a remote machine, not a workspace id to resolve.
         send(
             "dir.list",
             JSONObject().put("machineId", machineId).put("workspaceId", path).put("path", "."),
@@ -1086,9 +1083,8 @@ class BridgeClient(
     //
     // docs/paseo-migration-plan.md, Phase 3: worktree.list now takes the same
     // lenscode workspaceId + machineId shape as git.status/git.branches — the
-    // bridge resolves it to a cwd server-side (resolveWorkspaceRoot), so
-    // unlike the old Herdr-proxy version this needs no candidate-guessing
-    // across every pane's workspace on the machine.
+    // bridge resolves it to a cwd server-side (resolveWorkspaceRoot), so no
+    // candidate-guessing across every pane's workspace is needed.
 
     fun refreshWorktrees() {
         send(
@@ -1302,8 +1298,8 @@ class BridgeClient(
 
     private fun applySnapshot(result: JSONObject) {
         // docs/paseo-migration-plan.md, Phase 1: the snapshot's `backend` key
-        // carries {terminals, projects} rather than Herdr's {workspaces, panes,
-        // agents} — "workspaces" here counts distinct projects instead.
+        // carries {terminals, projects} — "workspaces" here counts distinct
+        // projects.
         val backend = result.optJSONObject("backend")
         _state.value = _state.value.copy(
             workspaces = backend?.optJSONObject("projects")?.optJSONArray("projects")?.length() ?: 0,

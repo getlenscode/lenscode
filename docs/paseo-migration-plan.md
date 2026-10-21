@@ -182,7 +182,7 @@ The bridge's role changes from *"Herdr IPC proxy + everything Herdr lacks"* to
 Client side: `BridgeClient.kt` and `WorkspaceUi.kt` mention "herdr" only as XR-protocol
 field names (`herdrConnected`, `herdr_unavailable`) — pure renames, no logic change.
 
-`docs/herdr-ipc.md` and `docs/herdr-api-schema.json` get archived, not deleted.
+`docs/herdr-ipc.md` and `docs/herdr-api-schema.json` were removed once Herdr was no longer used (see git history).
 
 ## RPC mapping
 

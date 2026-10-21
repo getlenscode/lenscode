@@ -436,8 +436,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
 
     /**
      * Opens the agent's own directory in Files + Terminal (docs/paseo-migration-plan.md,
-     * Phase 3). Paseo agents aren't tied to a terminal pane the way Herdr's
-     * were (see AgentInfo's doc), so this opens where the agent actually
+     * Phase 3). Paseo agents aren't tied to a terminal pane, so this opens where
+     * the agent actually
      * works — its workspaceId if it has one, otherwise a fresh terminal at
      * its cwd — rather than a specific pane that may not exist.
      */

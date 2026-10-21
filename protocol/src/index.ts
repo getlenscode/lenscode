@@ -6,20 +6,18 @@
  *  - structured errors, never bare strings
  *  - server-push events are versioned envelopes
  *
- * v2 (docs/paseo-migration-plan.md, Phase 1): the bridge's backend switched from
- * Herdr to Paseo (https://github.com/getpaseo/paseo). There is no raw proxy
+ * v2 (docs/paseo-migration-plan.md, Phase 1): the bridge's backend switched to
+ * Paseo (https://github.com/getpaseo/paseo). There is no raw proxy
  * request anymore — Paseo's protocol churns on its own dated compat schedule
  * (packages/protocol/src/client-capabilities.ts upstream), and leaking that
  * straight into the Kotlin client would mean re-deriving those compat gates on
  * every daemon release. Every capability the XR client needs is modelled
  * explicitly below instead. `paneId` is renamed `terminalId` throughout to
- * match Paseo's own terminal ids (they are not Herdr panes).
+ * match Paseo's own terminal ids.
  *
- * v3 (docs/paseo-migration-plan.md, Phase 2): agents become first-class. Herdr
- * had no agent model at all — LensCode inferred agent state by scraping terminal
- * output. Paseo tracks agents as their own objects (status, provider/model,
- * cost, pending permission requests), so `agent.*` and `permission.*` below
- * are new, not renamed. Agent/terminal push events (agent_stream,
+ * v3 (docs/paseo-migration-plan.md, Phase 2): agents become first-class. Paseo
+ * tracks agents as their own objects (status, provider/model, cost, pending
+ * permission requests), so `agent.*` and `permission.*` below are new, not renamed. Agent/terminal push events (agent_stream,
  * agent_permission_request, terminals_changed, …) are not modelled as
  * distinct XR event types yet — they ride the existing generic `backend`
  * topic verbatim (bridge's `broadcastPaseoEvent`), same as every Paseo event
@@ -434,9 +432,8 @@ export const ProviderListRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Worktrees (docs/paseo-migration-plan.md, Phase 3) — Herdr's worktree.* was
-// reachable through the now-removed herdr.request proxy; these are its
-// direct XR-protocol replacements, backed by Paseo's Paseo-owned-worktree
+// Worktrees (docs/paseo-migration-plan.md, Phase 3): XR-protocol requests
+// backed by Paseo's Paseo-owned-worktree
 // RPCs (getPaseoWorktreeList / createPaseoWorktree / archivePaseoWorktree).
 // ---------------------------------------------------------------------------
 

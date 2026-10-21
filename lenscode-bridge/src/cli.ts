@@ -9,7 +9,7 @@ export const USAGE = `lenscode-bridge — connects the LensCode headset app to y
 
 Usage: lenscode-bridge [options]
 
-  --port <n>          port to listen on (default 8137)
+  --port <n>          port to listen on (default 8137; 8443 in secure mode)
   --secure            secure mode with a certificate the bridge makes itself: wss://, and a
                       headset pairs with a code and confirms the certificate fingerprint once.
                       No domain or certificate authority needed.

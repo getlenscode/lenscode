@@ -32,7 +32,7 @@ import com.lenscode.app.net.BridgeClient
  * ever a bare alias — no IP, user, or key path ever leaves the bridge, and
  * any alias that was itself an IP address is filtered out server-side since
  * there'd be no other label to show. Connect opens a real SSH tunnel to that
- * machine's own Herdr socket (spec §37); once connected, its terminals are
+ * machine's own daemon (spec §37); once connected, its terminals are
  * reachable the same way local ones are, just scoped to that machine id.
  */
 @Composable

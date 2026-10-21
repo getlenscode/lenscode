@@ -18,8 +18,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
  * panels into one screenshot. SceneCore renders SpatialPanel content
  * through its own spatial compositor rather than a normal Android Surface —
  * `adb shell screencap` was confirmed live to return a fixed
- * environment-mirror image regardless of app/spatial state (see
- * herdr-ipc-gotchas memory) — so per-panel GraphicsLayer capture of each
+ * environment-mirror image regardless of app/spatial state — so per-panel GraphicsLayer capture of each
  * panel's own 2D Compose content is the only way to get real pixels out.
  *
  * The composite stacks capture groups top-to-bottom in [GROUP_ORDER] (agent

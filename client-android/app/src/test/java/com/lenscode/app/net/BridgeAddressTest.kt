@@ -27,6 +27,14 @@ class BridgeAddressTest {
     }
 
     @Test
+    fun `the default port depends on whether the address is secure`() {
+        assertEquals("ws://192.168.1.157:8137", ok("192.168.1.157"))
+        assertEquals("wss://192.168.1.157:8443", ok("wss://192.168.1.157"))
+        assertEquals("ws://192.168.1.157:8137", ok("ws://192.168.1.157"))
+        assertEquals("wss://192.168.1.157:9000", ok("wss://192.168.1.157:9000"))
+    }
+
+    @Test
     fun `an explicit port and scheme are kept`() {
         assertEquals("ws://192.168.1.157:9000", ok("192.168.1.157:9000"))
         assertEquals("ws://host.local:8137", ok("ws://host.local:8137/"))
@@ -35,7 +43,7 @@ class BridgeAddressTest {
 
     @Test
     fun `https and wss map to wss`() {
-        assertEquals("wss://bridge.example.com:8137", ok("https://bridge.example.com"))
+        assertEquals("wss://bridge.example.com:8443", ok("https://bridge.example.com"))
         assertEquals("wss://bridge.example.com:443", ok("wss://bridge.example.com:443"))
     }
 
@@ -57,10 +65,13 @@ class BridgeAddressTest {
 
     @Test
     fun `secure-only builds default to wss and refuse ws`() {
-        assertEquals("wss://192.168.1.157:8137", ok("192.168.1.157", secureOnly = true))
-        assertEquals("wss://host:8137", ok("https://host", secureOnly = true))
+        assertEquals("wss://192.168.1.157:8443", ok("192.168.1.157", secureOnly = true))
+        assertEquals("wss://host:8443", ok("https://host", secureOnly = true))
         assertTrue(invalid("ws://192.168.1.157", secureOnly = true).contains("secure"))
-        assertTrue(invalid("http://host:8137", secureOnly = true).contains("wss://host:8137"))
+        // with no port typed, the suggestion is the secure form on the secure port
+        assertTrue(invalid("ws://192.168.1.157", secureOnly = true).contains("wss://192.168.1.157:8443"))
+        // an explicit port is kept in the suggestion
+        assertTrue(invalid("http://host:9000", secureOnly = true).contains("wss://host:9000"))
     }
 
     // ── rejects ──────────────────────────────────────────────────────────
@@ -90,6 +101,15 @@ class BridgeAddressTest {
         assertTrue(describeConnectError(SSLHandshakeException("bad cert")).contains("certificate"))
         val cleartext = IOException("CLEARTEXT communication to 1.2.3.4 not permitted by network security policy")
         assertTrue(describeConnectError(cleartext).contains("wss://"))
+    }
+
+    @Test
+    fun `wss to a plain-text port says the port is not secure, not that a certificate is untrusted`() {
+        // What Android reports when it speaks TLS to a server that answers in plain text.
+        val error = javax.net.ssl.SSLException("Unable to parse TLS packet header")
+        val message = describeConnectError(error)
+        assertTrue(message, message.contains("isn't secure"))
+        assertTrue(message.contains("--secure"))
     }
 
     @Test

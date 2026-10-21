@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyCliArgs, USAGE } from "../src/cli.ts";
 import { BRIDGE_VERSION } from "../src/server.ts";
-import { loadConfig } from "../src/config.ts";
+import { defaultPort, loadConfig } from "../src/config.ts";
 
 const run = (argv: string[], env: NodeJS.ProcessEnv = {}) => {
   const result = applyCliArgs(argv, env, "9.9.9");
@@ -47,6 +47,25 @@ test("--secure turns on secure mode and refuses to be mixed with your own certif
   assert.equal(env.LENSCODE_MODE, "prod");
   const mixed = run(["--secure", "--tls-cert", "a", "--tls-key", "b"]).result;
   assert.match(mixed.action === "exit" ? mixed.message : "", /don't combine/);
+});
+
+test("plain mode defaults to 8137 and secure mode to 8443, unless --port says otherwise", () => {
+  assert.equal(defaultPort("dev"), 8137);
+  assert.equal(defaultPort("prod"), 8443);
+  assert.equal(loadConfig(run([]).env).port, 8137);
+
+  const withCertificate = (argv: string[]) => {
+    const { env } = run(argv);
+    // main.ts fills these in after creating the --secure certificate, before loadConfig
+    env.LENSCODE_TLS_CERT = "cert.pem";
+    env.LENSCODE_TLS_KEY = "key.pem";
+    return loadConfig(env);
+  };
+  assert.equal(withCertificate(["--secure"]).port, 8443);
+  assert.equal(withCertificate(["--secure"]).mode, "prod");
+  assert.equal(withCertificate(["--secure", "--port", "9000"]).port, 9000);
+  const own = run(["--tls-cert", "a.pem", "--tls-key", "b.pem"]);
+  assert.equal(loadConfig(own.env).port, 8443);
 });
 
 test("--help and --version exit cleanly with their text", () => {

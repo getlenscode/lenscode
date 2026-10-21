@@ -5,7 +5,12 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
+/**
+ * Port of a plain (ws://) bridge. A secure (wss://) bridge uses [DEFAULT_SECURE_BRIDGE_PORT];
+ * both mirror defaultPort() in lenscode-bridge/src/config.ts.
+ */
 const val DEFAULT_BRIDGE_PORT = 8137
+const val DEFAULT_SECURE_BRIDGE_PORT = 8443
 
 sealed class BridgeAddressResult {
     data class Ok(val url: String) : BridgeAddressResult()
@@ -22,7 +27,8 @@ private const val MAX_PORT = 65535
 /**
  * Turns what the user typed or dictated into the WebSocket URL the app dials:
  * "192.168.1.157", "192.168.1.157:9000", "ws://host:8137", "https://host" all work.
- * The port defaults to [DEFAULT_BRIDGE_PORT]. With no scheme given it picks wss when
+ * The port defaults to [DEFAULT_SECURE_BRIDGE_PORT] for a secure address and [DEFAULT_BRIDGE_PORT]
+ * for a plain one. With no scheme given it picks wss when
  * [secureOnly] (release builds, which the platform forbids from using cleartext) and
  * ws otherwise; an explicit ws:// on a secure-only build is refused up front with an
  * explanation rather than failing later as an opaque connection error.
@@ -48,14 +54,18 @@ private fun validateAddress(match: MatchResult, secureOnly: Boolean): BridgeAddr
         "ws", "http" -> false
         else -> null
     }
-    val port = rawPort.ifEmpty { DEFAULT_BRIDGE_PORT.toString() }.toInt()
+    val defaultPort = if (secure == true) DEFAULT_SECURE_BRIDGE_PORT else DEFAULT_BRIDGE_PORT
+    val port = rawPort.ifEmpty { defaultPort.toString() }.toInt()
+    // What to suggest to someone who typed a plain address: the secure form on the secure port.
+    val securePort = if (rawPort.isEmpty()) DEFAULT_SECURE_BRIDGE_PORT else port
     return when {
         secure == null -> BridgeAddressResult.Invalid("Use ws:// or wss:// (or just the host name).")
         !HOST_CHARS.matches(host) ->
             BridgeAddressResult.Invalid("That host name has characters an address can't have.")
         port !in 1..MAX_PORT -> BridgeAddressResult.Invalid("The port must be between 1 and $MAX_PORT.")
         !secure && secureOnly -> BridgeAddressResult.Invalid(
-            "This build only connects over a secure address. Run the bridge with TLS and enter wss://$host:$port",
+            "This build only connects over a secure address. " +
+                "Run the bridge with --secure and enter wss://$host:$securePort",
         )
         else -> BridgeAddressResult.Ok("${if (secure) "wss" else "ws"}://$host:$port")
     }
@@ -68,6 +78,8 @@ fun describeConnectError(t: Throwable): String {
         chain.any { it.message?.contains("CLEARTEXT", ignoreCase = true) == true } ->
             "This build only allows secure (wss://) addresses."
         chain.any { it is UnknownHostException } -> "Can't find that host. Check the address."
+        chain.any { it is SSLException && it.message?.contains("TLS packet header") == true } ->
+            "That port isn't secure. Start the bridge with --secure, or check the port number."
         chain.any { it is SSLException } -> "Secure connection failed — the bridge's certificate isn't trusted."
         chain.any { it is ConnectException || it is SocketTimeoutException } ->
             "Couldn't reach it. Is the bridge running, and on the same network?"

@@ -7,10 +7,8 @@
  * material ever leaves this process (spec §54): ssh reads `~/.ssh/config`
  * itself, this code never touches a private key or password.
  *
- * docs/paseo-migration-plan.md, Phase 1: Herdr used a Unix domain socket, so
- * remote access forwarded that socket path directly. Paseo's daemon listens
- * on a TCP port (default 6767), so this forwards a local TCP port to the
- * remote daemon's port instead of a socket path.
+ * Paseo's daemon listens on a TCP port (default 6767), so this forwards a
+ * local TCP port to the remote daemon's port.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";

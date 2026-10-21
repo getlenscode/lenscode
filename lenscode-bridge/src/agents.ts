@@ -1,9 +1,7 @@
 /**
- * Agent subsystem (docs/paseo-migration-plan.md, Phase 2). Herdr had no agent
- * model at all — LensCode inferred agent state by scraping terminal output. Paseo
- * tracks agents as first-class objects, so this module is new (not a
- * Herdr-derived rewrite like terminals.ts), translating XR-shaped operations
- * into `DaemonClient` agent RPCs and normalizing the results for the client.
+ * Agent subsystem (docs/paseo-migration-plan.md, Phase 2). Paseo tracks agents
+ * as first-class objects, so this module translates XR-shaped operations into
+ * `DaemonClient` agent RPCs and normalizes the results for the client.
  */
 import type { PaseoClient } from "./paseo.ts";
 import type {

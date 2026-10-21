@@ -18,9 +18,8 @@ Paseo daemon (terminals, agents, workspaces, worktrees — authoritative)
 ```
 
 `client-unity/` (Unity 6 + OpenXR) is archived — the client stack switched to
-Jetpack XR. The backend switched from Herdr to Paseo in protocol v2; see
-`docs/paseo-migration-plan.md` for the migration and `docs/herdr-ipc.md` for
-the retired Herdr integration this replaced.
+Jetpack XR. The backend switched to Paseo in protocol v2; see
+`docs/paseo-migration-plan.md` for the migration.
 
 ## Layout
 
@@ -36,8 +35,7 @@ the retired Herdr integration this replaced.
 - [Try it: remote projects, AI coding, and switching machines](docs/try-it-workflows.md) — click-by-click exercises and example prompts.
 - [Remote setup and current limits](docs/remote-setup-and-limits.md) — prerequisites, supported paths, and troubleshooting.
 - [Website competitive analysis](docs/website-competitive-analysis.md) — product, documentation, and positioning patterns reviewed before the site build.
-- `../Project Specifications Herdr XR.md` — full product specification
 - `../MR App Ideas for Productivity.html` — visual mockup of the six primary views
-- `docs/paseo-migration-plan.md` — Herdr → Paseo migration plan and phase status
+- `docs/paseo-migration-plan.md` — Paseo migration plan and phase status
 - Implementation plan: milestones M1–M6 (Phase 1 Foundation), then Git/Agents,
   Remote Development, Advanced Productivity.

@@ -3,10 +3,8 @@
  * this module only translates XR-shaped operations into Paseo terminal RPCs
  * and normalizes the results for the client.
  *
- * docs/paseo-migration-plan.md, Phase 1: replaces the Herdr pane/tab model.
- * Paseo has no per-terminal "focus" concept and no process-info RPC — those
- * two Herdr operations have no daemon equivalent (see the RPC mapping table
- * in the plan); `focus` is now a bridge-local acknowledgement only.
+ * docs/paseo-migration-plan.md, Phase 1. Paseo has no per-terminal "focus"
+ * concept and no process-info RPC; `focus` is a bridge-local acknowledgement only.
  */
 import type { PaseoClient } from "./paseo.ts";
 
@@ -70,7 +68,7 @@ export class Terminals {
    * root when the client omits it — asking for a terminal from XR must never
    * fail merely because no directory was specified.
    *
-   * Unlike Herdr, Paseo's create_terminal_request requires a workspaceId
+   * Paseo's create_terminal_request requires a workspaceId
    * (confirmed live against paseo 0.7.2: "workspaceId is required" without
    * one) — there's no bare "just start a shell in this cwd" call. So the
    * bridge resolves one first: reuse an existing workspace already backed by
@@ -120,10 +118,9 @@ export class Terminals {
   }
 
   /**
-   * `source`/`format` from the old Herdr-shaped request are accepted for
-   * protocol compatibility but Paseo's capture is always a plain-text line
-   * range; ANSI passthrough and Herdr's "recent_unwrapped" distinction have
-   * no equivalent here (see docs/paseo-migration-plan.md risks).
+   * `source`/`format` are accepted for protocol compatibility but Paseo's
+   * capture is always a plain-text line range; ANSI passthrough has no
+   * equivalent here (see docs/paseo-migration-plan.md risks).
    */
   async read(
     terminalId: string,

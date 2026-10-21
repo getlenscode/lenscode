@@ -28,19 +28,19 @@ export interface BridgeConfig {
   geminiUpstream?: string;
 }
 
+/**
+ * Plain ws:// and secure wss:// get different default ports (like 80 and 443), so the two can run
+ * side by side and a user who types only the bridge's IP into the app reaches the right one: the
+ * app likewise assumes 8443 for a secure address and 8137 for a plain one.
+ */
+export function defaultPort(mode: "dev" | "prod"): number {
+  return mode === "prod" ? 8443 : 8137;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
   const mode = env.LENSCODE_MODE === "prod" ? "prod" : "dev";
-  if (env.LENSCODE_HERDR_SOCKET) {
-    // COMPAT: pre-Paseo config key. Warn once and ignore it rather than fail
-    // startup, since it no longer maps to anything (docs/paseo-migration-plan.md).
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[lenscode-bridge] LENSCODE_HERDR_SOCKET is no longer used — lenscode-bridge now talks to a Paseo daemon. " +
-        "Set LENSCODE_PASEO_URL instead (default ws://127.0.0.1:6767/ws).",
-    );
-  }
   const cfg: BridgeConfig = {
-    port: Number(env.LENSCODE_PORT ?? 8137),
+    port: Number(env.LENSCODE_PORT ?? defaultPort(mode)),
     mode,
     tlsKeyPath: env.LENSCODE_TLS_KEY,
     tlsCertPath: env.LENSCODE_TLS_CERT,
