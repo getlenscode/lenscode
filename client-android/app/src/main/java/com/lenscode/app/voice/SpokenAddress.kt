@@ -34,3 +34,26 @@ fun normalizeSpokenAddress(raw: String): String {
     }
     return sb.toString()
 }
+
+/** An address to open in the app's browser, plus a note for the user when it can't be what they meant. */
+data class MachineAddress(val address: String, val warning: String? = null)
+
+private val ipv4 = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
+
+/**
+ * "localhost" means the headset in this app's own browser, but a dev server the user is talking about
+ * runs on the machine the agent is on. Points a loopback address at [machineId] when that id is an
+ * address the headset can reach (an IPv4 or a .local name); otherwise leaves it and says why.
+ * Other hosts, and the "local" pseudo-machine, are untouched.
+ */
+fun addressForMachine(address: String, machineId: String): MachineAddress {
+    val host = address.substringAfter("://").substringBefore('/').substringBefore(':')
+    val loopback = host == "localhost" || host == "127.0.0.1"
+    if (machineId == "local" || !loopback) return MachineAddress(address)
+    val reachable = ipv4.matches(machineId) || machineId.endsWith(".local")
+    return if (reachable) {
+        MachineAddress(address.replaceFirst(host, machineId))
+    } else {
+        MachineAddress(address, "\"$host\" is the headset here; the server runs on $machineId.")
+    }
+}

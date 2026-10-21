@@ -58,6 +58,13 @@ fun composerModesFor(provider: String, providers: List<ProviderInfo>): List<Comp
         ComposerMode(it.id, it.label, it.description, it.label.lowercase(), it.dangerous)
     }
 
+/** The agents the dropdown offers: installed ones, the usual four first (claude, codex, pi, omp). */
+fun agentChoices(providers: List<ProviderInfo>): List<ProviderInfo> {
+    val preferred = listOf("claude", "codex", "pi", "omp")
+    return providers.filter { it.available }
+        .sortedBy { preferred.indexOf(it.provider).let { i -> if (i < 0) preferred.size else i } }
+}
+
 fun composerModeFor(id: String, provider: String, providers: List<ProviderInfo>): ComposerMode =
     composerModesFor(provider, providers).firstOrNull { it.id == id } ?: ComposerDefaultMode
 
@@ -214,7 +221,7 @@ fun AgentComposer(
         }
     }
     val mode = composerModeFor(state.modeId, state.provider, providers)
-    val modelLabel = state.model ?: state.provider
+    val modelLabel = state.model ?: "default model"
 
     Column(modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // ── Inline menus (above the chips, like Claude Code's popovers) ──
@@ -312,21 +319,30 @@ fun AgentComposer(
                     }
                 }
             }
-            "model" -> MenuCard("use <model name>") {
-                val usable = providers.filter { it.available }
-                if (usable.isEmpty()) MenuRow("No providers loaded yet", onClick = { state.menu = null })
+            "agent" -> MenuCard("use <claude, codex, pi or omp>") {
+                val usable = agentChoices(providers)
+                if (usable.isEmpty()) MenuRow("No agents loaded yet", onClick = { state.menu = null })
                 for (p in usable) {
-                    MenuRow(p.provider, "provider default", selected = state.provider == p.provider && state.model == null) {
+                    MenuRow(p.provider, selected = state.provider == p.provider) {
                         state.menu = null
-                        onModelChosen(p.provider, null)
-                    }
-                    for (m in p.models) {
-                        MenuRow(m, selected = state.provider == p.provider && state.model == m) {
-                            state.menu = null
-                            onModelChosen(p.provider, m)
-                        }
+                        // A different agent has its own models, so it starts on its default one.
+                        onModelChosen(p.provider, if (p.provider == state.provider) state.model else null)
                     }
                 }
+            }
+            "model" -> MenuCard("use <model name>") {
+                val models = providers.firstOrNull { it.provider == state.provider }?.models.orEmpty()
+                MenuRow("Default model", "${state.provider}'s own default", selected = state.model == null) {
+                    state.menu = null
+                    onModelChosen(state.provider, null)
+                }
+                for (m in models) {
+                    MenuRow(m, selected = state.model == m) {
+                        state.menu = null
+                        onModelChosen(state.provider, m)
+                    }
+                }
+                if (models.isEmpty()) MenuRow("No models listed for ${state.provider}", onClick = { state.menu = null })
             }
         }
 
@@ -460,7 +476,13 @@ fun AgentComposer(
             )
             Spacer(Modifier.weight(1f))
             Chip(
-                modelLabel,
+                "${state.provider} ▾",
+                highlighted = state.flash == "model" || state.menu == "agent",
+                onClick = { state.toggleMenu("agent") },
+            )
+            Spacer(Modifier.width(8.dp))
+            Chip(
+                "$modelLabel ▾",
                 highlighted = state.flash == "model" || state.menu == "model",
                 onClick = { state.toggleMenu("model") },
             )

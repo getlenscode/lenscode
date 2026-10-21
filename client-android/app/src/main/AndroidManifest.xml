@@ -29,9 +29,11 @@
         <package android:name="com.android.chrome" />
     </queries>
 
-    <!-- Cleartext allowances live in src/debug/ only — release builds must not
-         carry usesCleartextTraffic or the dev network security config. -->
+    <!-- Release allows cleartext http for the Browser view only in effect: the bridge address is
+         still refused unless wss:// (see res/xml/network_security_config.xml). The debug source
+         set overrides this config with its own. -->
     <application
+        android:networkSecurityConfig="@xml/network_security_config"
         android:label="LensCode"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.LensCodeXr">

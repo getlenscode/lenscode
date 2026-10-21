@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release network policy. Cleartext http is allowed so the Browser view can open a dev server
+  on the LAN (http://192.168.x.x:3000); Network Security Config can't allow "private addresses
+  only", so this is not host-limited. Everything else the app sends is still encrypted:
+  the bridge connection is refused unless it is wss:// (BridgeAddress.kt, secureOnly), and
+  Gemini goes through the bridge's https proxy.
+
+  The debug source set has its own copy (cleartext + user-installed CAs) that overrides this one.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

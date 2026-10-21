@@ -17,7 +17,7 @@ import { log } from "./log.ts";
 
 const REMOTE_PASEO_PORT = 6767;
 
-interface Connection {
+export interface Connection {
   tunnel: ChildProcess;
   client: PaseoClient;
   localPort: number;
@@ -140,8 +140,13 @@ export class RemoteManager {
       throw new Error(`Tunnel to ${machineId} is up, but Paseo isn't reachable there: ${lastError}`);
     }
 
-    client.on("paseo-event", (event) => this.onEvent?.(machineId, event));
-    this.connections.set(machineId, { tunnel, client, localPort, homeDir: home });
+    this.register(machineId, { tunnel, client, localPort, homeDir: home });
+  }
+
+  /** Tracks an established connection and relays its Paseo events through [onEvent]. */
+  register(machineId: string, conn: Connection): void {
+    conn.client.on("paseo-event", (event) => this.onEvent?.(machineId, event));
+    this.connections.set(machineId, conn);
   }
 
   disconnect(machineId: string): void {

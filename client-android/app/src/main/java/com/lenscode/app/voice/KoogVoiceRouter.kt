@@ -160,8 +160,11 @@ sealed class VoiceAction {
 
     @Serializable
     @SerialName("set_model")
-    @LLMDescription("Change the model new agents use — \"use Opus\", \"switch to Sonnet\". Persists.")
-    data class SetModel(@property:LLMDescription("the model/provider name as heard") val model: String) : VoiceAction()
+    @LLMDescription(
+        "Change the agent and/or model new agents use — an agent is claude, codex, pi or omp " +
+            "(\"oh my pi\"): \"use codex\", \"switch to pi\", \"use Opus\", \"switch to Sonnet\". Persists.",
+    )
+    data class SetModel(@property:LLMDescription("the agent or model name as heard") val model: String) : VoiceAction()
 
     @Serializable
     @SerialName("set_worktree")
@@ -233,6 +236,19 @@ sealed class VoiceAction {
     ) : VoiceAction()
 
     @Serializable
+    @SerialName("open_url")
+    @LLMDescription(
+        "Open a web address in this app's own Browser view (not Chrome, and not on the agent's " +
+            "machine) — \"open localhost 9000 in browser\", \"go to example.com\", \"show the " +
+            "preview at port 3000\". Use this, never ask_agent, whenever the transcript asks to " +
+            "open/show/visit an address or port in the browser.",
+    )
+    data class OpenUrl(
+        @property:LLMDescription("the address as heard, compact — e.g. \"localhost:9000\", \"example.com\"")
+        val url: String,
+    ) : VoiceAction()
+
+    @Serializable
     @SerialName("open_agent")
     @LLMDescription(
         "Open a specific agent's detail card by name/label, as heard — e.g. \"show me the " +
@@ -286,7 +302,7 @@ data class VoiceStep(
         "one of: navigate, open_file, accept_changes, discard_changes, new_terminal, " +
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
             "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
-            "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size",
+            "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size, open_url",
     )
     val type: String,
     @property:LLMDescription(
@@ -339,8 +355,13 @@ data class VoiceStep(
         "type=set_font_size: \"larger\", \"smaller\" or \"reset\" when no number was named. Null otherwise.",
     )
     val change: String? = null,
+    @property:LLMDescription(
+        "required when type=open_url: the address to open, as heard (\"localhost:9000\"). Null otherwise.",
+    )
+    val url: String? = null,
 ) {
     fun toVoiceAction(): VoiceAction? = when (type) {
+        "open_url" -> url?.takeIf { it.isNotBlank() }?.let { VoiceAction.OpenUrl(it) }
         "navigate" -> view?.let { VoiceAction.Navigate(it) }
         "open_file" -> path?.let { VoiceAction.OpenFile(it, line) }
         "accept_changes" -> VoiceAction.AcceptChanges
@@ -432,7 +453,8 @@ an ordered list of actions from the fixed grammar. Rules:
   (context says a permission is pending) — that takes priority.
 - The Code view has a composer with mode / model / branch / worktree settings for new agents.
   "plan mode", "accept edits", "manual mode", "bypass permissions" -> set_mode; "use Opus",
-  "switch to Sonnet" -> set_model; "use a new worktree" / "no worktree" -> set_worktree;
+  "switch to Sonnet", "use codex", "switch to pi", "use omp" / "oh my pi" -> set_model (the agent
+  and model dropdowns); "use a new worktree" / "no worktree" -> set_worktree;
   "switch to <branch>" / "checkout <branch>" -> switch_branch; "make/create a worktree for
   <branch>" -> create_worktree; "remove/delete the <branch> worktree" -> remove_worktree;
   "open git", "show branches" or "show worktrees" -> navigate with view=code (the branch
@@ -445,6 +467,9 @@ an ordered list of actions from the fixed grammar. Rules:
   "bigger", "larger", "zoom in on the code", "increase the font" -> set_font_size with
   change="larger"; "smaller", "decrease", "shrink the text" -> change="smaller"; "reset the
   font" / "default font size" -> change="reset". Give fontSize OR change, never both.
+- Opening an address or port in the browser ("open localhost 9000 in browser", "go to
+  example.com", "show port 3000") is open_url with url="localhost:9000" / "example.com" /
+  "localhost:3000" — never ask_agent, which would launch a browser on the agent's machine.
 - A name with a file extension ("open main.ts", "show server.ts") is open_file with that name as
   the path — never navigate. "main" in a filename is not the home view; the leading "open"
   is not part of the path.
@@ -552,6 +577,7 @@ class KoogVoiceRouter(
             VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", fontSize = 18))),
             VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", change = "larger"))),
+            VoiceCommandPlan(listOf(VoiceStep(type = "open_url", url = "localhost:9000"))),
             VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
             VoiceCommandPlan(
                 listOf(

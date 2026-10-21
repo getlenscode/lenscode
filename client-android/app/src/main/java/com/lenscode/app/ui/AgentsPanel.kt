@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -440,16 +442,18 @@ data class AgentDetailState(val agent: AgentInfo, val promptError: String? = nul
  * daemon directly from outside the app.
  */
 @Composable
-private fun AgentActivityFeed(timeline: List<com.lenscode.app.net.AgentTimelineEntry>) {
+private fun AgentActivityFeed(timeline: List<com.lenscode.app.net.AgentTimelineEntry>, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(timeline.size) {
         if (timeline.isNotEmpty()) listState.animateScrollToItem(timeline.size - 1)
     }
-    Column {
+    Column(modifier) {
         Text("ACTIVITY", color = LensCodeColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
+        // Shrinks (and scrolls) when the card runs out of room, so the controls below stay on screen.
         Box(
             Modifier
+                .weight(1f, fill = false)
                 .fillMaxWidth()
                 .heightIn(min = 60.dp, max = 220.dp)
                 .clip(lensShape(3.dp))
@@ -581,11 +585,13 @@ fun AgentDetailOverlay(
                 Box(
                     Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 96.dp)
                         .clip(lensShape(3.dp))
                         .background(VsCodeColors.EditorBg)
                         .padding(10.dp),
                 ) {
-                    Column {
+                    // A long error or path scrolls here instead of pushing the controls off the card.
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
                         Text(agent.cwd, color = VsCodeColors.Plain, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                         if (agent.model != null) {
                             Text("model ${agent.model}", color = LensCodeColors.Muted, fontSize = 11.sp)
@@ -606,7 +612,7 @@ fun AgentDetailOverlay(
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                AgentActivityFeed(timeline)
+                AgentActivityFeed(timeline, Modifier.weight(1f, fill = false))
                 Spacer(Modifier.height(14.dp))
                 if (canPrompt) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

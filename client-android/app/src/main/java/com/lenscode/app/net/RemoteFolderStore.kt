@@ -1,6 +1,7 @@
 package com.lenscode.app.net
 
 import android.content.Context
+import android.content.SharedPreferences
 
 private const val PREFS_NAME = "lenscode_remote_folder"
 private const val KEY_MACHINE_ID = "machine_id"
@@ -14,8 +15,8 @@ data class SavedRemoteFolder(val machineId: String, val root: String, val label:
  * Remembers the last remote folder opened in Code, so the next launch lands there
  * instead of "Select machine" and a fresh folder browse.
  */
-class RemoteFolderStore(context: Context) {
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+class RemoteFolderStore(private val prefs: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
 
     fun load(): SavedRemoteFolder? {
         val machineId = prefs.getString(KEY_MACHINE_ID, null)?.takeIf { it.isNotBlank() } ?: return null
