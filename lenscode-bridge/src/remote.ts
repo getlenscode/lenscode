@@ -53,17 +53,24 @@ function localPortFor(machineId: string): number {
 export class RemoteManager {
   private connections = new Map<string, Connection>();
 
+  // The SSH tunnel can stay up while the remote's Paseo daemon restarts; the client doesn't
+  // reconnect on its own (see PaseoClient), so a connection whose client dropped is dead and must
+  // be re-made rather than reported as connected and failing with "Transport not connected".
+  private isAlive(machineId: string): boolean {
+    return this.connections.get(machineId)?.client.connected === true;
+  }
+
   connectedIds(): string[] {
-    return [...this.connections.keys()];
+    return [...this.connections.keys()].filter((id) => this.isAlive(id));
   }
 
   isConnected(machineId: string): boolean {
-    return this.connections.has(machineId);
+    return this.isAlive(machineId);
   }
 
   /** Null for "local" and for any machine that isn't currently connected. */
   clientFor(machineId: string): PaseoClient | null {
-    if (machineId === "local") return null;
+    if (machineId === "local" || !this.isAlive(machineId)) return null;
     return this.connections.get(machineId)?.client ?? null;
   }
 
@@ -73,7 +80,8 @@ export class RemoteManager {
   }
 
   async connect(machineId: string): Promise<void> {
-    if (this.connections.has(machineId)) return;
+    if (this.isAlive(machineId)) return;
+    this.disconnect(machineId); // drop a stale tunnel + client before dialing again
 
     const home = (await runSsh(machineId, "echo $HOME")).trim();
     if (!home) throw new Error(`Could not resolve a home directory on ${machineId}.`);
