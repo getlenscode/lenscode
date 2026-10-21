@@ -780,9 +780,15 @@ export class BridgeServer {
         return;
       }
       case "provider.list": {
-        if (!(await this.requireBackend(ws, req.id))) return;
+        let client: PaseoClient;
         try {
-          this.send(ws, { id: req.id, result: { providers: await listProviders(this.paseo) } });
+          client = await this.paseoClientFor(req.machineId ?? "local");
+        } catch (e) {
+          this.send(ws, { id: req.id, error: err("backend_unavailable", String(e), true) });
+          return;
+        }
+        try {
+          this.send(ws, { id: req.id, result: { providers: await listProviders(client) } });
         } catch (e) {
           this.send(ws, {
             id: req.id,

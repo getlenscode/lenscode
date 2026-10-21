@@ -583,6 +583,7 @@ class BridgeClient(
     fun openWorkspaceInFiles(workspaceId: String, label: String, machineId: String = "local") {
         filesMachineId = machineId
         _filesMachineIdFlow.value = machineId
+        refreshProviders()
         filesWorkspaceId = workspaceId
         _filesRootLabel.value = label
         listDir(".")
@@ -598,6 +599,7 @@ class BridgeClient(
     fun openRemoteFolderInFiles(machineId: String, root: String, label: String) {
         filesMachineId = machineId
         _filesMachineIdFlow.value = machineId
+        refreshProviders()
         filesWorkspaceId = root
         _filesRootLabel.value = label
         listDir(".")
@@ -693,10 +695,15 @@ class BridgeClient(
 
     /** Fetched at connect time — model discovery can be slow on a cold provider, so the picker shouldn't wait on it. */
     fun refreshProviders() {
+        val requestedMachine = filesMachineId
+        _providers.value = emptyList()
         send(
             "provider.list",
+            JSONObject().put("machineId", requestedMachine),
             onResult = { result ->
-                _providers.value = decodeList<ProviderInfo>(result, "providers")
+                if (filesMachineId == requestedMachine) {
+                    _providers.value = decodeList<ProviderInfo>(result, "providers")
+                }
             },
         )
     }
@@ -881,7 +888,7 @@ class BridgeClient(
         model: String? = null,
         title: String? = null,
         workspaceId: String? = null,
-        /** Paseo permission mode ("auto", "bypassPermissions", …) — null keeps Paseo's own "default" (ask every time). */
+        /** Paseo permission mode ("auto", "bypassPermissions", …) — null uses that provider's own default. */
         modeId: String? = null,
         /** Which machine runs the agent — a connected remote host's id, or "local". */
         machineId: String = "local",

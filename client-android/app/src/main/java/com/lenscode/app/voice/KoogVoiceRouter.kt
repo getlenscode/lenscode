@@ -133,7 +133,7 @@ sealed class VoiceAction {
     @Serializable
     @SerialName("ask_agent")
     @LLMDescription(
-        "Hand a real coding/dev task off to the coding agent (Claude or Codex) to actually " +
+        "Hand a real coding/dev task off to the coding agent (Claude, Codex, Pi, or Oh My Pi) to actually " +
             "perform — e.g. \"start a http server in this project\", \"add a test for the " +
             "login route\", \"fix the bug in auth.ts\". Use this whenever the transcript " +
             "describes work to be *done*, not just something to navigate to, find, or a " +

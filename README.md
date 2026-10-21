@@ -1,7 +1,7 @@
 # LensCode
 
 Mixed-reality agent command center for Android XR glasses (XREAL LensCode-class).
-A spatial control surface for coding agents (Claude, Codex, Hermes, Pi), terminals,
+A spatial control surface for coding agents (Claude, Codex, Hermes, Pi, Oh My Pi), terminals,
 Git branches/worktrees/diffs, and remote SSH machines — driven by gaze + pinch + voice.
 
 ## Architecture
@@ -31,6 +31,8 @@ Jetpack XR. The backend switched to Paseo in protocol v2; see
 - `website/` — product story and technical documentation site
 
 ## References
+
+- [Agent compatibility and live checks](docs/agent-compatibility.md) — Pi, Codex, and Oh My Pi modes, requirements, and verification.
 
 - [Try it: remote projects, AI coding, and switching machines](docs/try-it-workflows.md) — click-by-click exercises and example prompts.
 - [Remote setup and current limits](docs/remote-setup-and-limits.md) — prerequisites, supported paths, and troubleshooting.

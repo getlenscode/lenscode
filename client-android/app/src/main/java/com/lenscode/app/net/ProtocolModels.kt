@@ -209,10 +209,19 @@ data class GitStatus(
 
 /** One coding-agent provider from `provider.list`, with the model ids it offers. */
 @Serializable
+data class ProviderModeInfo(
+    val id: String = "",
+    val label: String = "",
+    val description: String = "",
+    val dangerous: Boolean = false,
+)
+
+@Serializable
 data class ProviderInfo(
     val provider: String = "",
     val available: Boolean = false,
     val models: List<String> = emptyList(),
+    val modes: List<ProviderModeInfo> = emptyList(),
 )
 
 @Serializable

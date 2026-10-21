@@ -42,24 +42,24 @@ import com.lenscode.app.net.ProviderInfo
 import com.lenscode.app.net.WorktreeInfo
 import kotlinx.coroutines.delay
 
-/** One permission mode the composer offers — [id] is the Paseo modeId, [spoken] is what to say to pick it. */
-data class ComposerMode(val id: String, val label: String, val description: String, val spoken: String)
-
-/**
- * Claude Code's own permission-mode list. "Auto" isn't offered separately:
- * Claude's CLI rejects `auto` as a mode (confirmed live, see modeIdFor's old
- * note), and the "auto-approve edits" behavior the voice flow always used is
- * exactly Accept edits — "auto mode" is just a spoken alias for it.
- */
-val ComposerModes = listOf(
-    ComposerMode("acceptEdits", "Accept edits", "Automatically accept all file edits", "accept edits"),
-    ComposerMode("default", "Manual", "Always ask before making changes", "manual mode"),
-    ComposerMode("plan", "Plan", "Create a plan before making changes", "plan mode"),
+/** Mode ids come from the selected machine's provider, never from another agent CLI. */
+data class ComposerMode(
+    val id: String,
+    val label: String,
+    val description: String,
+    val spoken: String,
+    val dangerous: Boolean = false,
 )
-val ComposerBypassMode = ComposerMode("bypassPermissions", "Bypass permissions", "No approval prompts at all", "bypass permissions")
 
-fun composerModeFor(id: String): ComposerMode =
-    (ComposerModes + ComposerBypassMode).firstOrNull { it.id == id } ?: ComposerModes.first()
+val ComposerDefaultMode = ComposerMode("", "Provider default", "Use this agent's own default mode", "default mode")
+
+fun composerModesFor(provider: String, providers: List<ProviderInfo>): List<ComposerMode> =
+    providers.firstOrNull { it.provider == provider }?.modes.orEmpty().map {
+        ComposerMode(it.id, it.label, it.description, it.label.lowercase(), it.dangerous)
+    }
+
+fun composerModeFor(id: String, provider: String, providers: List<ProviderInfo>): ComposerMode =
+    composerModesFor(provider, providers).firstOrNull { it.id == id } ?: ComposerDefaultMode
 
 /**
  * Everything a new agent is created with, shared by the Code-view composer and
@@ -67,7 +67,7 @@ fun composerModeFor(id: String): ComposerMode =
  * the same one either path uses, and is always visible on the chips.
  */
 class ComposerState {
-    var modeId by mutableStateOf("acceptEdits")
+    var modeId by mutableStateOf("")
     var provider by mutableStateOf("claude")
     /** null = the provider's own default model. */
     var model by mutableStateOf<String?>(null)
@@ -213,7 +213,7 @@ fun AgentComposer(
             state.flash = null
         }
     }
-    val mode = composerModeFor(state.modeId)
+    val mode = composerModeFor(state.modeId, state.provider, providers)
     val modelLabel = state.model ?: state.provider
 
     Column(modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -304,28 +304,12 @@ fun AgentComposer(
                     }
                 }
             }
-            "mode" -> MenuCard("plan mode, accept edits, manual") {
-                Text(
-                    "MODE",
-                    color = LensCodeColors.Eyebrow,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 14.dp, top = 8.dp),
-                )
-                for (m in ComposerModes) {
-                    MenuRow(m.label, m.description, selected = m.id == state.modeId, hint = "“${m.spoken}”") {
+            "mode" -> MenuCard("choose a mode for ${state.provider}") {
+                for (m in listOf(ComposerDefaultMode) + composerModesFor(state.provider, providers)) {
+                    MenuRow(m.label, m.description, selected = m.id == mode.id, hint = "“${m.spoken}”") {
                         state.menu = null
                         onModeChosen(m)
                     }
-                }
-                MenuRow(
-                    ComposerBypassMode.label,
-                    "Skips every approval — asks you to confirm first",
-                    selected = state.modeId == ComposerBypassMode.id,
-                    hint = "“${ComposerBypassMode.spoken}”",
-                ) {
-                    state.menu = null
-                    onModeChosen(ComposerBypassMode)
                 }
             }
             "model" -> MenuCard("use <model name>") {

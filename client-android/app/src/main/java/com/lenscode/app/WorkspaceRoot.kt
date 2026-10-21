@@ -721,7 +721,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         ui.activeView = "agents"
         val useProvider = provider ?: composer.provider
         val useModel = if (provider != null || model != null) model else composer.model
-        val useMode = modeId ?: composer.modeId
+        val useMode = com.lenscode.app.ui.composerModeFor(
+            modeId ?: composer.modeId.takeIf { useProvider == composer.provider }.orEmpty(), useProvider, providers,
+        ).id.takeIf { it.isNotEmpty() }
         val useWorktree = worktree ?: composer.worktree
         android.util.Log.d("LensCodeVoice", "startVoiceAgent provider=$useProvider model=$useModel mode=$useMode worktree=$useWorktree")
         // A tmux session both the agent and the Terminal view share
@@ -934,22 +936,29 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     }
 
     /** Maps a spoken/typed mode name to one of the composer's modes; null if it isn't a mode at all. */
-    fun resolveMode(heard: String): com.lenscode.app.ui.ComposerMode? {
-        val h = heard.lowercase()
-        return when {
-            "bypass" in h || "skip" in h -> com.lenscode.app.ui.ComposerBypassMode
-            "plan" in h -> com.lenscode.app.ui.ComposerModes.first { it.id == "plan" }
-            "manual" in h || "ask" in h || "default" in h -> com.lenscode.app.ui.ComposerModes.first { it.id == "default" }
-            "accept" in h || "auto" in h || "edit" in h -> com.lenscode.app.ui.ComposerModes.first { it.id == "acceptEdits" }
-            else -> null
+    fun resolveMode(heard: String, provider: String = composer.provider): com.lenscode.app.ui.ComposerMode? {
+        val h = norm(heard)
+        if (h == "default" || h == "defaultmode" || h == "providerdefault") {
+            return com.lenscode.app.ui.ComposerDefaultMode
         }
+        val modes = com.lenscode.app.ui.composerModesFor(provider, providers)
+        return modes.firstOrNull { norm(it.id) == h || norm(it.label) == h }
+            ?: modes.firstOrNull {
+                when {
+                    "bypass" in h || "skip" in h || "fullaccess" in h -> it.dangerous
+                    "manual" in h || "ask" in h -> it.id in listOf("default", "ask")
+                    "plan" in h -> it.id == "plan"
+                    "accept" in h || "edit" in h || "auto" in h -> it.id in listOf("acceptEdits", "auto", "write")
+                    else -> false
+                }
+            }
     }
 
     /** Fuzzy model match over every provider's models (and provider names): "opus" → the Opus model id. Speech rarely matches an id exactly. */
     fun resolveModel(heard: String): Pair<String, String?>? {
         val want = norm(heard)
         if (want.isEmpty()) return null
-        for (p in providers.filter { it.available }) if (norm(p.provider) == want) return p.provider to null
+        for (p in providers.filter { it.available }) if (norm(p.provider) == want || (p.provider == "omp" && want == "ohmypi")) return p.provider to null
         val hits = providers.filter { it.available }.flatMap { p -> p.models.map { p.provider to it } }
             .filter { norm(it.second).contains(want) }
         // Several versions of one family match ("opus") — take the shortest id,
@@ -959,7 +968,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
 
     /** Applies a mode pick. Bypass always asks first — by tap or by voice ("say confirm"). */
     fun chooseMode(m: com.lenscode.app.ui.ComposerMode) {
-        if (m.id == com.lenscode.app.ui.ComposerBypassMode.id && composer.modeId != m.id) {
+        if (m.dangerous && composer.modeId != m.id) {
             ui.deleteConfirm = com.lenscode.app.ui.DeleteConfirmState(
                 title = "Turn off all approvals?",
                 message = "Bypass permissions lets agents run every tool call without asking. Say “confirm” or tap Enable.",
@@ -980,6 +989,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     }
 
     fun chooseModel(provider: String, model: String?) {
+        if (composer.provider != provider) composer.modeId = ""
         composer.provider = provider
         composer.model = model
         composer.flash = "model"
@@ -1380,12 +1390,12 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 } else {
                     // Settings named inside the sentence ("in a new worktree using
                     // Opus…") only make sense for a fresh agent, and only for this one.
-                    val mode = action.mode?.let { resolveMode(it) }
                     val picked = action.model?.let { resolveModel(it) }
+                    val mode = action.mode?.let { resolveMode(it, picked?.first ?: composer.provider) }
                     if (action.model != null && picked == null) showToast("No model matching \"${action.model}\" — using ${composer.model ?: composer.provider}.")
                     startVoiceAgent(
                         instruction = action.instruction,
-                        modeId = mode?.id?.takeIf { it != com.lenscode.app.ui.ComposerBypassMode.id }, // never bypass approvals from a passing phrase
+                        modeId = mode?.takeUnless { it.dangerous }?.id, // never bypass approvals from a passing phrase
                         provider = picked?.first,
                         model = picked?.second,
                         worktree = action.worktree,
@@ -1471,7 +1481,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             }
 
             com.lenscode.app.voice.VoiceAction.ComposerStatus -> {
-                val modeLabel = com.lenscode.app.ui.composerModeFor(composer.modeId).label
+                val modeLabel = com.lenscode.app.ui.composerModeFor(composer.modeId, composer.provider, providers).label
                 showToast(
                     "Mode: $modeLabel · Model: ${composer.model ?: composer.provider} · " +
                         "Branch: ${currentBranch ?: "unknown"} · Worktree: ${if (composer.worktree) "on" else "off"}",

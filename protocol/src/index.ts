@@ -345,12 +345,9 @@ export const AgentCreateRequest = z.object({
   /** Starts the agent working immediately; omit to create it idle. */
   prompt: z.string().optional(),
   /**
-   * Paseo permission mode, e.g. "default" (ask every time — the daemon's own
-   * default), "auto" (classifier-reviewed auto-approval), "acceptEdits",
-   * "bypassPermissions". Omit for "default" — confirmed live (2026-09-07): a
-   * voice-created agent left on "default" sits forever on its first tool
-   * call's permission request since nothing in the voice flow ever answers
-   * it, so ask_agent always passes one explicitly.
+   * Provider-native permission mode from provider.list (e.g. Codex "auto",
+   * Claude "acceptEdits", OMP "ask"). Omit for the provider's own default.
+   * Pi exposes no permission modes and should leave this unset.
    */
   modeId: z.string().optional(),
   /**
@@ -717,6 +714,13 @@ export const ProviderSummary = z.object({
   label: z.string(),
   available: z.boolean(),
   models: z.array(z.string()),
+  /** Provider-native permission modes; Pi reports an empty list. */
+  modes: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+    dangerous: z.boolean().optional(),
+  })).optional(),
 });
 export type ProviderSummary = z.infer<typeof ProviderSummary>;
 

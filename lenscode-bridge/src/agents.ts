@@ -235,16 +235,21 @@ export async function listProviders(paseo: PaseoClient): Promise<ProviderSummary
   const { providers } = await paseo.daemon.listAvailableProviders();
   return Promise.all(
     providers.map(async (p) => {
-      let models: string[] = [];
-      if (p.available) {
-        try {
-          const res = await paseo.daemon.listProviderModels(p.provider);
-          models = (res.models ?? []).map((m) => m.id);
-        } catch {
-          /* provider available but model discovery failed — picker just shows no models */
-        }
-      }
-      return { provider: p.provider, label: p.provider, available: p.available, models };
+      const [modelResult, modeResult] = p.available
+        ? await Promise.allSettled([
+            paseo.daemon.listProviderModels(p.provider),
+            paseo.daemon.listProviderModes(p.provider),
+          ])
+        : [];
+      const models = modelResult?.status === "fulfilled"
+        ? (modelResult.value.models ?? []).map((m) => m.id) : [];
+      const modes = modeResult?.status === "fulfilled"
+        ? (modeResult.value.modes ?? []).map((m) => ({
+            id: m.id, label: m.label,
+            ...(m.description ? { description: m.description } : {}),
+            dangerous: m.colorTier === "dangerous",
+          })) : [];
+      return { provider: p.provider, label: p.provider, available: p.available, models, modes };
     }),
   );
 }

@@ -170,3 +170,14 @@ test("agent.create with worktree:true runs the agent in a fresh worktree", async
   await rpc(ws, { id: nextId(), type: "agent.archive", agentId });
   ws.close();
 });
+
+test("provider.list for a disconnected remote does not return local providers", async () => {
+  const ws = await connect();
+  try {
+    const res = await rpc(ws, { id: nextId(), type: "provider.list", machineId: "missing-compat-test-host" });
+    assert.equal(res.error?.code, "backend_unavailable");
+    assert.equal(res.result, undefined);
+  } finally {
+    ws.close();
+  }
+});
