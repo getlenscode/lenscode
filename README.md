@@ -34,6 +34,7 @@ Jetpack XR. The backend switched to Paseo in protocol v2; see
 
 - [Agent compatibility and live checks](docs/agent-compatibility.md) — Pi, Codex, and Oh My Pi modes, requirements, and verification.
 
+- [Drive the glasses from Claude Code or Claude Desktop (MCP)](docs/mcp-headset-control.md) — why it exists, setup, tools, examples, and troubleshooting.
 - [Try it: remote projects, AI coding, and switching machines](docs/try-it-workflows.md) — click-by-click exercises and example prompts.
 - [Remote setup and current limits](docs/remote-setup-and-limits.md) — prerequisites, supported paths, and troubleshooting.
 - [Website competitive analysis](docs/website-competitive-analysis.md) — product, documentation, and positioning patterns reviewed before the site build.

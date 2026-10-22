@@ -40,6 +40,11 @@ Keep `privkey.pem` private. Anyone who has it can impersonate your bridge.
 
 Free-form voice commands ("add a test for the login route") use Google's Gemini. Open `http://<your-address>:8137/setup` on your phone or computer and paste a key from <https://aistudio.google.com/apikey>. It is stored on this computer, and the headset never sees it. Without a key, voice still works through built-in commands (navigate, open a file, accept or discard changes).
 
+## Control the headset from Claude Code or Claude Desktop (MCP)
+
+`lenscode-bridge mcp` lets Claude open a link, a tmux session, a file or a remote project on the glasses.
+Why, setup, tools and examples: [MCP guide](https://github.com/getlenscode/lenscode/blob/HEAD/docs/mcp-headset-control.md).
+
 ## Options
 
 ```

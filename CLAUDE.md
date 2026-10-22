@@ -52,6 +52,14 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - Publishing opens a browser auth step and can sit "staged" for a few minutes before `npm view` shows it; don't publish again (`E409`). A `404` on `PUT` means you're logged out (`npm whoami` gives 401), not a missing package.
 - License: GPL-3.0-or-later. The root `LICENSE` is copied into `lenscode-bridge/` and listed in its `files`. `alpha.1` and `alpha.2` were ISC (deprecate with `npm deprecate`; installed copies stay ISC); `alpha.3` is the first GPL release.
 
+### MCP: drive the headset from Claude Code / Claude Desktop
+
+- User guide (why, setup, tools, examples): `docs/mcp-headset-control.md`. Everything is in `lenscode-bridge/src/mcp/` (see its `README.md`; tests in `test/mcp/`): `commands.ts` (the commands and their checks), `endpoint.ts` (loopback listener, token, `control.json`), `tools.ts`, `client.ts`, `server.ts` (stdio MCP, hand-written JSON-RPC, no SDK), `remoteDaemon.ts` (starts a remote Paseo for `open_project`), `index.ts`. The rest of the bridge imports only from `./mcp/index.ts`.
+- `lenscode-bridge mcp` starts no bridge: it reads `~/.config/lenscode-bridge/control.json` (port + token, 0600, written by `main.ts` at startup) and POSTs to the running bridge's control endpoint. That endpoint is a separate HTTP listener on `127.0.0.1`, random port, bearer token. Never bind it to the LAN.
+- Headset commands go to paired clients as `control` topic events. The app side is the `com.lenscode.app.control` package (`ControlCommands.kt`, tests in `test/.../control/`); `handleControlCommand` in `WorkspaceRoot.kt` acts on them.
+- tmux session names are typed into a shell (`tmux new -A -s <name>`), so both sides only accept `[A-Za-z0-9._-]{1,64}`; URLs must be http(s); folder paths for `open_project` are single-quoted (`shellQuote`) before they reach ssh. Keep these checks.
+- Dev from the repo: `claude mcp add lenscode -- node --experimental-strip-types <repo>/lenscode-bridge/src/main.ts mcp`. `npx lenscode-bridge mcp` needs a published bridge newer than `0.1.0-alpha.3`.
+
 ## Gemini key (voice routing)
 
 - Normal path: the key lives on the **bridge**, not the headset. Open `http://<mac-ip>:8137/setup` on a phone or PC and paste it (the headset's Settings panel shows this URL; the bridge also logs it at startup while no key is set). Saved to `~/.config/lenscode-bridge/gemini.json` (0600); a `GEMINI_API_KEY` env var also works, and a page-saved key wins over it.
