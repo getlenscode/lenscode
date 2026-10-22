@@ -58,7 +58,7 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - `lenscode-bridge mcp` starts no bridge: it reads `~/.config/lenscode-bridge/control.json` (port + token, 0600, written by `main.ts` at startup) and POSTs to the running bridge's control endpoint. That endpoint is a separate HTTP listener on `127.0.0.1`, random port, bearer token. Never bind it to the LAN.
 - Headset commands go to paired clients as `control` topic events. The app side is the `com.lenscode.app.control` package (`ControlCommands.kt`, tests in `test/.../control/`); `handleControlCommand` in `WorkspaceRoot.kt` acts on them.
 - tmux session names are typed into a shell (`tmux new -A -s <name>`), so both sides only accept `[A-Za-z0-9._-]{1,64}`; URLs must be http(s); folder paths for `open_project` are single-quoted (`shellQuote`) before they reach ssh. Keep these checks.
-- Dev from the repo: `claude mcp add lenscode -- node --experimental-strip-types <repo>/lenscode-bridge/src/main.ts mcp`. `npx lenscode-bridge mcp` needs a published bridge newer than `0.1.0-alpha.3`.
+- Dev from the repo: `claude mcp add lenscode -- node --experimental-strip-types <repo>/lenscode-bridge/src/main.ts mcp`. `npx lenscode-bridge mcp` needs bridge `0.1.0-alpha.4` or newer.
 
 ## Gemini key (voice routing)
 

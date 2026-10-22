@@ -65,7 +65,7 @@ asks it to send a command to the paired glasses.
 3. **Start a new Claude session** (or reconnect the server from `/mcp`). MCP servers are loaded
    when a session starts, so one added mid-session does not show up until then.
 
-`npx lenscode-bridge mcp` needs a published bridge newer than `0.1.0-alpha.3`. Until then use the
+`npx lenscode-bridge mcp` needs bridge `0.1.0-alpha.4` or newer. Until then use the
 clone form above.
 
 ## The tools
