@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -1363,7 +1365,20 @@ class BridgeClient(
         )
     }
 
+    private val _controlCommands = MutableSharedFlow<com.lenscode.app.control.ControlCommand>(extraBufferCapacity = 16)
+
+    /** Commands from a tool on the user's computer (`lenscode-bridge mcp`), relayed by the bridge. */
+    val controlCommands: SharedFlow<com.lenscode.app.control.ControlCommand> = _controlCommands
+
     private fun handleEvent(msg: JSONObject) {
+        if (msg.optString("topic") == "control") {
+            val data = msg.optJSONObject("data")
+            val args = buildMap {
+                data?.keys()?.forEach { key -> data.optString(key).takeIf { it.isNotEmpty() }?.let { put(key, it) } }
+            }
+            _controlCommands.tryEmit(com.lenscode.app.control.ControlCommand(msg.optString("event"), args))
+            return
+        }
         if (msg.optString("topic") == "connection" && msg.optString("event") == "gemini_key_changed") {
             _geminiStatus.value = BridgeGeminiStatus.fromJson(msg.optJSONObject("data"))
             return

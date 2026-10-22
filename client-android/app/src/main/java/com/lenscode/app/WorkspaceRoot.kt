@@ -729,7 +729,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
      * open, otherwise created and attached. [onReady] gets its id, or null when the terminal
      * couldn't be made (the caller carries on without tmux).
      */
-    fun withAgentTerminal(machineId: String, cwd: String, session: String, onReady: (String?) -> Unit) {
+    fun withAgentTerminal(machineId: String, cwd: String?, session: String, onReady: (String?) -> Unit) {
         val key = "$machineId|$session"
         val existing = ui.tmuxPanes[key]?.takeIf { id ->
             terminalsMachineId != machineId || terminals.any { pane -> pane.terminalId == id }
@@ -1723,6 +1723,78 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     // nulls ui.agentDetail (openAgentDetail, dismiss, archive, send-and-close…).
     LaunchedEffect(ui.agentDetail?.agent?.agentId) {
         bridge.trackAgent(ui.agentDetail?.agent?.agentId)
+    }
+
+    /**
+     * A command from a tool on the user's computer (Claude Code / Claude Desktop through
+     * `lenscode-bridge mcp`). Each one does what the matching tap would; anything that reaches a
+     * shell or an intent is checked again here (see ControlCommands.kt).
+     */
+    fun handleControlCommand(cmd: com.lenscode.app.control.ControlCommand) {
+        android.util.Log.d("LensCodeControl", "control ${cmd.name} ${cmd.args}")
+        when (cmd.name) {
+            "open_url" -> {
+                val url = cmd.args["url"]?.let { normalizeBrowserUrl(it) }
+                if (url == null || !com.lenscode.app.control.isWebUrl(url)) {
+                    showToast("Refused to open a non-web address.")
+                } else {
+                    openInAppBrowser(url)
+                }
+            }
+            "open_tmux" -> {
+                val session = cmd.args["session"].orEmpty()
+                val machine = cmd.args["machineId"] ?: filesMachineIdFlow
+                when {
+                    !com.lenscode.app.control.isSafeTmuxSession(session) -> showToast("Refused an unsafe tmux session name.")
+                    machine == "local" -> showToast("Pick a machine in Code first, then open \"$session\" again.")
+                    else -> withAgentTerminal(
+                        machine,
+                        bridge.currentWorkspaceId.takeIf { machine == filesMachineIdFlow && it != "local" },
+                        session,
+                    ) { terminalId ->
+                        if (terminalId == null) return@withAgentTerminal
+                        ui.activeView = "terminal"
+                        ui.selectedPane = com.lenscode.app.net.PaneInfo(terminalId = terminalId, title = session, machineId = machine)
+                        bridge.readTerminal(terminalId, machine)
+                        showToast("Showing tmux session $session")
+                    }
+                }
+            }
+            "open_project" -> {
+                val machine = cmd.args["machineId"]
+                val path = cmd.args["path"]
+                if (machine == null || path == null || !path.startsWith("/")) {
+                    showToast("Couldn't open that project.")
+                } else {
+                    // The bridge has already connected the machine and checked the folder exists.
+                    bridge.refreshMachines()
+                    val label = machines.firstOrNull { it.id == machine }?.label?.ifBlank { null } ?: machine
+                    bridge.openRemoteFolderInFiles(machine, path, com.lenscode.app.control.projectLabel(label, path))
+                    ui.activeView = "code"
+                    showToast("Opened $path on $machine")
+                }
+            }
+            "open_file" -> {
+                val path = cmd.args["path"].orEmpty()
+                when (val plan = com.lenscode.app.control.planOpenFile(filesMachineIdFlow, projectRootPath, cmd.args["machineId"], path)) {
+                    is com.lenscode.app.control.OpenFilePlan.Direct -> {
+                        bridge.openFile(plan.relativePath)
+                        ui.activeView = "code"
+                    }
+                    is com.lenscode.app.control.OpenFilePlan.Reroot -> {
+                        bridge.openRemoteFolderInFiles(plan.machineId, plan.folder, plan.folder.substringAfterLast('/').ifEmpty { plan.folder })
+                        bridge.openFile(plan.fileName)
+                        ui.activeView = "code"
+                    }
+                    is com.lenscode.app.control.OpenFilePlan.Unresolvable -> showToast(plan.reason)
+                }
+            }
+            "show_view" -> cmd.args["view"]?.takeIf { it in com.lenscode.app.control.CONTROL_VIEWS }?.let { ui.activeView = it }
+            "notify" -> cmd.args["message"]?.let { showToast(it.take(300)) }
+        }
+    }
+    LaunchedEffect(Unit) {
+        bridge.controlCommands.collect { handleControlCommand(it) }
     }
 
     // Refresh the data a view needs the moment it becomes active, rather than
