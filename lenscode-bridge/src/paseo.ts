@@ -54,6 +54,8 @@ export class PaseoError extends Error {
 export class PaseoClient extends EventEmitter {
   private client: DaemonClient;
   private everConnected = false;
+  /** Our subscription to agent updates (see connect()). */
+  private agentSubscription: { ready: Promise<unknown>; release(): Promise<void> } | null = null;
   /** Paseo daemon version string reported by daemon.get_status, null until first success. */
   protocol: string | null = null;
 
@@ -96,6 +98,11 @@ export class PaseoClient extends EventEmitter {
   async connect(): Promise<void> {
     await this.client.connect();
     this.everConnected = true;
+    // Paseo only pushes agent_update (state, attention, a new pending permission) to a client that
+    // has subscribed to agents; a plain fetchAgents() is a one-off read. Without this the app never
+    // heard about a permission request and the Permissions icon stayed dark until something else
+    // happened to make it refresh. The SDK restores the subscription itself after a reconnect.
+    this.observeAgents();
     try {
       const status = await this.client.getDaemonStatus();
       this.protocol = status.version ?? null;
@@ -116,6 +123,20 @@ export class PaseoClient extends EventEmitter {
     }
   }
 
+  /** Subscribes to agent updates once per client; a failure only costs push updates, never the connection. */
+  private observeAgents(): void {
+    if (this.agentSubscription) return;
+    try {
+      this.agentSubscription = this.client.observeAgents();
+      this.agentSubscription.ready.catch((e) => {
+        this.agentSubscription = null;
+        log("warn", "paseo agent subscription failed — agent updates will not be pushed", { error: String(e) });
+      });
+    } catch (e) {
+      log("warn", "paseo agent subscription failed — agent updates will not be pushed", { error: String(e) });
+    }
+  }
+
   private onDaemonEvent(event: DaemonEvent): void {
     if (event.type === "error") {
       log("warn", "paseo daemon event stream error", { message: event.message });
@@ -125,6 +146,8 @@ export class PaseoClient extends EventEmitter {
   }
 
   close(): void {
+    void this.agentSubscription?.release().catch(() => {});
+    this.agentSubscription = null;
     void this.client.close();
   }
 }
