@@ -4,11 +4,18 @@ import { BridgeServer, BRIDGE_VERSION } from "./server.ts";
 import { lanAddresses } from "./geminiHttp.ts";
 import { log } from "./log.ts";
 import { ensureSelfSignedCert, shortFingerprint, type SelfSignedCert } from "./selfSigned.ts";
+import { runMcpServer, writeControlFile } from "./mcp/index.ts";
 
 const cli = applyCliArgs(process.argv.slice(2), process.env, BRIDGE_VERSION);
 if (cli.action === "exit") {
   (cli.code === 0 ? process.stdout : process.stderr).write(cli.message);
   process.exit(cli.code);
+}
+// The MCP server is a separate, short-lived process the MCP client starts; it relays to the
+// bridge that is already running, so it must not start a second one.
+if (cli.action === "mcp") {
+  await runMcpServer(BRIDGE_VERSION);
+  process.exit(0);
 }
 
 // --secure: make (or reuse) the bridge's own certificate and serve it, in place of a user-supplied one.
@@ -28,6 +35,12 @@ try {
 }
 const server = new BridgeServer(cfg);
 await server.start();
+// Where `lenscode-bridge mcp` finds this bridge's loopback control endpoint.
+if (server.controlEndpoint) {
+  await writeControlFile({ ...server.controlEndpoint, pid: process.pid }).catch((e) =>
+    log("warn", "could not write the control file; the MCP server won't find this bridge", { error: String(e) }),
+  );
+}
 
 // The JSON log lines above are for machines; this is what a person needs to set up the app.
 const secure = cfg.mode === "prod" && !cfg.insecureProd;

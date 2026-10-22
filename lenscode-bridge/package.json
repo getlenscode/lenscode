@@ -3,7 +3,7 @@
   "version": "0.1.0-alpha.3",
   "description": "Bridges the LensCode Android XR app to your Paseo coding agents.",
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts test/mcp/*.test.ts",
     "test:agents:live": "node --experimental-strip-types scripts/check-agent-compat.ts",
     "dev": "node --experimental-strip-types src/main.ts",
     "build": "node scripts/build.mjs",

@@ -8,6 +8,8 @@
 export const USAGE = `lenscode-bridge — connects the LensCode headset app to your Paseo agents.
 
 Usage: lenscode-bridge [options]
+       lenscode-bridge mcp     MCP server (stdio) for Claude Code / Claude Desktop: lets them open
+                               links, tmux sessions and files on the headset through the running bridge
 
   --port <n>          port to listen on (default 8137; 8443 in secure mode)
   --secure            secure mode with a certificate the bridge makes itself: wss://, and a
@@ -38,6 +40,7 @@ const VALUE_FLAGS: Record<string, string> = {
 
 export type CliResult =
   | { action: "run" }
+  | { action: "mcp" }
   | { action: "exit"; code: number; message: string };
 
 /**
@@ -45,6 +48,7 @@ export type CliResult =
  * do: run the bridge, or print a message and exit (help, version, or a usage error).
  */
 export function applyCliArgs(argv: string[], env: NodeJS.ProcessEnv, version: string): CliResult {
+  if (argv[0] === "mcp") return { action: "mcp" };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--secure") {

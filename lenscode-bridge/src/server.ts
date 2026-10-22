@@ -20,7 +20,9 @@ import { Agents, listProviders } from "./agents.ts";
 import { GitService, worktreeConflictPath } from "./git.ts";
 import { listMachines } from "./machines.ts";
 import { RemoteManager, runSsh } from "./remote.ts";
-import { TMUX_LIST_COMMAND, parseTmuxSessions, runLocalTmuxList } from "./tmux.ts";
+import { TMUX_LIST_COMMAND, parseTmuxSessions, runLocalTmuxList, type TmuxSession } from "./tmux.ts";
+import { startControlServer, expandHome, shellQuote, connectStartingPaseo, type ControlCommand } from "./mcp/index.ts";
+import type { Server as HttpServer } from "node:http";
 import { RemoteFiles } from "./remoteFiles.ts";
 import { GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
 import { GeminiHttp, lanSetupUrls } from "./geminiHttp.ts";
@@ -55,6 +57,10 @@ export class BridgeServer {
   private wss: WebSocketServer;
   private paseo: PaseoClient;
   private clients = new Set<WebSocket>();
+  /** Loopback control endpoint for local tools (see control.ts); null until start(). */
+  private controlServer: HttpServer | null = null;
+  /** Where local tools reach the control endpoint; main.ts saves it to control.json. */
+  controlEndpoint: { port: number; token: string } | null = null;
   private eventSeq = 0;
   private cfg: BridgeConfig;
   private httpServer: ReturnType<typeof createHttpServer>;
@@ -141,6 +147,89 @@ export class BridgeServer {
       // The Paseo daemon may start later; clients get backendConnected:false in hello.
       log("warn", "paseo daemon unavailable at startup", { error: String(e) });
     }
+    const control = await startControlServer((command, args) => this.handleControl(command, args));
+    this.controlServer = control.server;
+    this.controlEndpoint = { port: control.port, token: control.token };
+  }
+
+  /**
+   * A command from a local tool (control.ts). Reads are answered here; the rest go to every paired,
+   * connected headset as a `control` event, which the app acts on.
+   */
+  private async handleControl(command: ControlCommand, args: Record<string, string>): Promise<{ status: number; body: unknown }> {
+    const headsets = [...this.clients].filter((ws) => ws.readyState === WebSocket.OPEN && this.authed.has(ws));
+    switch (command) {
+      case "status":
+        return {
+          status: 200,
+          body: { version: BRIDGE_VERSION, headsetsConnected: headsets.length, paseoConnected: this.paseo.connected },
+        };
+      case "list_machines":
+        return { status: 200, body: { machines: await listMachines() } };
+      case "list_tmux": {
+        const sessions = await this.tmuxSessionsOn(args.machineId);
+        return sessions === null
+          ? { status: 404, body: { error: `${args.machineId} isn't in the SSH machine registry.` } }
+          : { status: 200, body: { sessions } };
+      }
+      default:
+        break;
+    }
+    if (headsets.length === 0) {
+      return {
+        status: 409,
+        body: { error: "No LensCode headset is connected to the bridge. Open the app on the glasses and pair it first." },
+      };
+    }
+    let startedPaseo = false;
+    if (command === "open_project") {
+      const opened = await this.prepareProject(args.machineId, args.path);
+      if (!opened.ok) return { status: opened.status, body: { error: opened.error } };
+      args = { machineId: args.machineId, path: opened.path };
+      startedPaseo = opened.startedPaseo;
+    }
+    const frame = JSON.stringify({ type: "event", topic: "control", event: command, data: args, seq: this.eventSeq++ });
+    for (const ws of headsets) ws.send(frame);
+    return { status: 200, body: { sent: headsets.length, ...(startedPaseo ? { startedPaseo: true } : {}) } };
+  }
+
+  /**
+   * Makes a remote project ready to show: connects the machine (its SSH tunnel and Paseo, so the app
+   * lists it as connected), resolves `~` against its home, and checks the folder exists.
+   */
+  private async prepareProject(
+    machineId: string,
+    path: string,
+  ): Promise<{ ok: true; path: string; startedPaseo: boolean } | { ok: false; status: number; error: string }> {
+    const known = await listMachines();
+    if (!known.some((m) => m.id === machineId)) {
+      return { ok: false, status: 404, error: `${machineId} isn't in the SSH machine registry (~/.ssh/config).` };
+    }
+    // If the tunnel comes up but Paseo isn't running there, start it rather than send the user to do it.
+    const connected = await connectStartingPaseo(machineId, {
+      connect: (id) => this.remote.connect(id),
+      run: (id, command) => runSsh(id, command),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    });
+    if (!connected.ok) return connected;
+    const absolute = expandHome(path, this.remote.homeDirFor(machineId) ?? "");
+    const exists = await runSsh(machineId, `test -d ${shellQuote(absolute)} && echo yes`).catch(() => "");
+    if (!exists.includes("yes")) {
+      return { ok: false, status: 404, error: `${absolute} isn't a folder on ${machineId}.` };
+    }
+    return { ok: true, path: absolute, startedPaseo: connected.startedPaseo };
+  }
+
+  /**
+   * tmux sessions on "local" (this machine) or a registry machine over ssh; null for a machine id
+   * that isn't in the registry (it goes straight to the ssh argv, so never anything else, spec §54).
+   */
+  private async tmuxSessionsOn(machineId: string): Promise<TmuxSession[] | null> {
+    if (machineId === "local") return parseTmuxSessions(await runLocalTmuxList());
+    const known = await listMachines();
+    if (!known.some((m) => m.id === machineId)) return null;
+    // No tmux server running exits non-zero; that just means no sessions.
+    return parseTmuxSessions(await runSsh(machineId, TMUX_LIST_COMMAND).catch(() => ""));
   }
 
   private onConnection(ws: WebSocket): void {
@@ -551,23 +640,15 @@ export class BridgeServer {
       }
       case "tmux.list": {
         try {
-          let output: string;
-          if (req.machineId === "local") {
-            output = await runLocalTmuxList();
-          } else {
-            // The id goes straight to the ssh argv, so only ever a registry alias (spec §54).
-            const known = await listMachines();
-            if (!known.some((m) => m.id === req.machineId)) {
-              this.send(ws, {
-                id: req.id,
-                error: err("not_found", `${req.machineId} isn't in the SSH machine registry.`, false),
-              });
-              return;
-            }
-            // No tmux server running exits non-zero; that just means no sessions.
-            output = await runSsh(req.machineId, TMUX_LIST_COMMAND).catch(() => "");
+          const sessions = await this.tmuxSessionsOn(req.machineId);
+          if (sessions === null) {
+            this.send(ws, {
+              id: req.id,
+              error: err("not_found", `${req.machineId} isn't in the SSH machine registry.`, false),
+            });
+            return;
           }
-          this.send(ws, { id: req.id, result: { sessions: parseTmuxSessions(output) } });
+          this.send(ws, { id: req.id, result: { sessions } });
         } catch (e) {
           this.send(ws, {
             id: req.id,
@@ -1285,5 +1366,6 @@ export class BridgeServer {
     this.httpServer.close();
     this.paseo.close();
     this.remote.disconnectAll();
+    this.controlServer?.close();
   }
 }

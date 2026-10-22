@@ -588,7 +588,7 @@ export type XrResponse = z.infer<typeof XrResponse>;
 
 export const XrEvent = z.object({
   type: z.literal("event"),
-  topic: z.enum(["backend", "git", "files", "machines", "connection"]),
+  topic: z.enum(["backend", "git", "files", "machines", "connection", "control"]),
   event: z.string().min(1),
   data: z.unknown(),
   /** Monotonic per-topic sequence for gap detection after reconnect (spec §59). */

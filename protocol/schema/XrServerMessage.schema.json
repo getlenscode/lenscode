@@ -63,7 +63,8 @@
             "git",
             "files",
             "machines",
-            "connection"
+            "connection",
+            "control"
           ]
         },
         "event": {
