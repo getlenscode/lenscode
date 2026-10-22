@@ -209,17 +209,14 @@ internal class WorkspaceUiState(
     // after that (with no agent card explicitly open) sends into this same
     // agent instead of spinning up another one.
     var voiceAgentId by mutableStateOf<String?>(null)
-    // The tmux-bridged terminal pane ask_agent's server-under-test runs
-    // through (docs/paseo-migration-plan.md follow-up) — created once
-    // alongside the first voice agent, then reused. See AskAgent's handler
-    // for why: without this, agent Bash tool calls are invisible outside
-    // querying Paseo directly, and interrupting one kills the process
-    // outright rather than leaving it running the way a real terminal would.
-    var voiceAgentTerminalId by mutableStateOf<String?>(null)
-    /** "machine|folder" that [voiceAgentTerminalId] was started for — a different one needs its own pane. */
-    var voiceAgentTerminalKey by mutableStateOf<String?>(null)
-    /** Agents that have been given the tmux instructions (started with them, or sent them since). */
-    var tmuxAgentIds by mutableStateOf<Set<String>>(emptySet())
+    // Each agent runs its shell commands in its own tmux session, mirrored in a Terminal pane
+    // (docs/paseo-migration-plan.md follow-up) — without it an agent's Bash calls are invisible
+    // outside Paseo, and interrupting one kills the process instead of leaving it running the way
+    // a real terminal would. One session per agent, so parallel agents never share a shell.
+    /** agentId → the session that agent was given (see AgentTmux); persisted by AgentTmuxStore. */
+    var tmuxByAgent by mutableStateOf<Map<String, com.lenscode.app.ui.AgentTmux>>(emptyMap())
+    /** "machine|session" → the Terminal pane attached to that session. */
+    var tmuxPanes by mutableStateOf<Map<String, String>>(emptyMap())
     var pairingDeviceName by mutableStateOf("LensCode XR Glasses")
     var pairingCode by mutableStateOf("")
     var isListening by mutableStateOf(false)
@@ -430,6 +427,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     // you see on the chips is exactly what a spoken task will use.
     // The agent + model are remembered across restarts (ComposerPrefsStore), set by tap or voice.
     val composerPrefs = remember { com.lenscode.app.net.ComposerPrefsStore(context) }
+    // Which tmux session each agent was given; reloaded so a restart doesn't re-introduce them.
+    val agentTmuxStore = remember { com.lenscode.app.net.AgentTmuxStore(context) }
+    LaunchedEffect(Unit) { ui.tmuxByAgent = agentTmuxStore.load() }
     val composer = remember {
         com.lenscode.app.ui.ComposerState().also { state ->
             composerPrefs.load()?.let { saved ->
@@ -706,45 +706,37 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
      * hear me right", these cards answer "are you sure". The LLM only ever
      * classifies; it never bypasses this confirmation layer.
      */
-    // Given to an agent once: it then runs shell commands through the tmux session, which is
-    // mirrored in the Terminal pane, instead of its own hidden tool execution.
-    val tmuxPreamble = """
-        You have a tmux session named "lenscode-agent" available, mirrored live
-        in this workspace's own Terminal view. Always run shell commands
-        through it instead of your default tool execution — that's what
-        makes output visible there, and what lets a long-running process
-        (a dev server, a watcher, …) keep running independently of this
-        conversation instead of dying with whatever tool call started it:
-          tmux send-keys -t lenscode-agent "<command>" Enter
-          tmux capture-pane -t lenscode-agent -p     # to read output back
-        To stop something, send a real interrupt inside the session
-        (tmux send-keys -t lenscode-agent C-c, or kill its pid) rather than
-        canceling your own tool call.
-    """.trimIndent()
+    /** Remembers which tmux session [agentId] was given, across restarts. */
+    fun bindAgentTmux(agentId: String, tmux: com.lenscode.app.ui.AgentTmux) {
+        ui.tmuxByAgent = ui.tmuxByAgent + (agentId to tmux)
+        agentTmuxStore.save(ui.tmuxByAgent)
+    }
+
+    /** A fresh session name no agent has used. */
+    fun newAgentSession(): String =
+        com.lenscode.app.ui.newTmuxSession(ui.tmuxByAgent.values.map { it.session }.toSet())
 
     /**
-     * The shared "lenscode-agent" terminal pane on [machineId] in [cwd] — reused for the same
-     * machine + folder, otherwise created and attached to tmux. [onReady] gets its id, or null
-     * when the terminal couldn't be made (the caller carries on without tmux).
+     * The Terminal pane attached to tmux [session] on [machineId], in [cwd] — reused if it is still
+     * open, otherwise created and attached. [onReady] gets its id, or null when the terminal
+     * couldn't be made (the caller carries on without tmux).
      */
-    fun withAgentTerminal(machineId: String, cwd: String, onReady: (String?) -> Unit) {
-        val key = "$machineId|$cwd"
-        val existing = ui.voiceAgentTerminalId?.takeIf { id ->
-            ui.voiceAgentTerminalKey == key &&
-                (terminalsMachineId != machineId || terminals.any { pane -> pane.terminalId == id })
+    fun withAgentTerminal(machineId: String, cwd: String, session: String, onReady: (String?) -> Unit) {
+        val key = "$machineId|$session"
+        val existing = ui.tmuxPanes[key]?.takeIf { id ->
+            terminalsMachineId != machineId || terminals.any { pane -> pane.terminalId == id }
         }
         if (existing != null) {
             onReady(existing)
             return
         }
         bridge.createTerminal(
-            name = "lenscode-agent",
+            name = session,
             machineId = machineId,
             cwd = cwd,
             onCreated = { newTerminalId ->
-                ui.voiceAgentTerminalId = newTerminalId
-                ui.voiceAgentTerminalKey = key
-                bridge.inputTerminal(newTerminalId, "tmux new -A -s lenscode-agent\n")
+                ui.tmuxPanes = ui.tmuxPanes + (key to newTerminalId)
+                bridge.inputTerminal(newTerminalId, "tmux new -A -s $session\n")
                 onReady(newTerminalId)
             },
             onError = { error ->
@@ -758,19 +750,20 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     }
 
     /**
-     * Sends a message to an existing agent. The first time, an agent that wasn't started with
-     * the tmux instructions (one made before, or elsewhere) gets them prepended and its terminal
-     * pane is opened, so its shell commands show up in Terminal from then on.
+     * Sends a message to an existing agent. The first time, an agent that has no tmux session of
+     * its own (one made before, or elsewhere) is given one, with the instructions prepended and
+     * its terminal pane opened, so its shell commands show up in Terminal from then on.
      */
     fun sendToAgent(agentId: String, text: String, onDone: () -> Unit = {}, onError: (() -> Unit)? = null) {
         val agent = agents.firstOrNull { it.agentId == agentId }
-        if (agent == null || agent.status == "closed" || agentId in ui.tmuxAgentIds) {
+        if (agent == null || agent.status == "closed" || agentId in ui.tmuxByAgent) {
             bridge.sendAgentMessage(agentId, text, onDone, onError)
             return
         }
-        withAgentTerminal(agent.machineId, agent.cwd) { terminalId ->
-            if (terminalId != null) ui.tmuxAgentIds = ui.tmuxAgentIds + agentId
-            val message = if (terminalId == null) text else "$tmuxPreamble\n\n$text"
+        val session = newAgentSession()
+        withAgentTerminal(agent.machineId, agent.cwd, session) { terminalId ->
+            if (terminalId != null) bindAgentTmux(agentId, com.lenscode.app.ui.AgentTmux(session, agent.machineId, agent.cwd))
+            val message = if (terminalId == null) text else "${com.lenscode.app.ui.tmuxPreamble(session)}\n\n$text"
             bridge.sendAgentMessage(agentId, message, onDone, onError)
         }
     }
@@ -816,9 +809,12 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         // terminalId == null → the shared terminal couldn't be created (Paseo's
         // terminal.create can fail independently of agents), so the agent is
         // started anyway, just without the tmux mirroring instructions.
+        // This agent's own tmux session and the folder its pane starts in.
+        val session = newAgentSession()
+        val terminalCwd = bridge.currentWorkspaceId
         fun createAgentInTmux(terminalId: String?) {
             val task = if (instruction != null) "Task: $instruction" else "No task yet — say a brief hello and wait for the next instruction."
-            val prompt = if (terminalId == null) task else "$tmuxPreamble\n\n$task"
+            val prompt = if (terminalId == null) task else "${com.lenscode.app.ui.tmuxPreamble(session)}\n\n$task"
             bridge.createAgent(
                 provider = useProvider,
                 model = useModel,
@@ -840,7 +836,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 modeId = useMode,
                 onCreated = { created ->
                     ui.voiceAgentId = created.agentId
-                    if (terminalId != null) ui.tmuxAgentIds = ui.tmuxAgentIds + created.agentId
+                    if (terminalId != null) {
+                        bindAgentTmux(created.agentId, com.lenscode.app.ui.AgentTmux(session, agentMachine, terminalCwd))
+                    }
                     showToast(if (useWorktree) "Agent started in a new worktree." else "Agent started.")
                     android.util.Log.d("LensCodeVoice", "started agent ${created.agentId} (tmux)${instruction?.let { " for \"$it\"" } ?: ""}")
                 },
@@ -850,8 +848,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 },
             )
         }
-        // One shared tmux pane per machine + folder, on the host the agent runs on.
-        withAgentTerminal(agentMachine, bridge.currentWorkspaceId) { createAgentInTmux(it) }
+        // A pane of its own, on the host the agent runs on, attached to that session.
+        withAgentTerminal(agentMachine, terminalCwd, session) { createAgentInTmux(it) }
     }
 
     // ── Snip tool ────────────────────────────────────────────────────────
