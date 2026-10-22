@@ -1007,6 +1007,20 @@ class BridgeClient(
         })
     }
 
+    /**
+     * The tmux sessions open on [machineId], for attaching one to a prompt. [onResult] gets null when
+     * the request failed (for instance a bridge too old to know `tmux.list`), so that can be told
+     * apart from a machine that simply has no sessions.
+     */
+    fun listTmuxSessions(machineId: String, onResult: (List<TmuxSessionInfo>?) -> Unit) {
+        send(
+            "tmux.list",
+            JSONObject().put("machineId", machineId),
+            onResult = { result -> onResult(decodeList<TmuxSessionInfo>(result, "sessions")) },
+            onError = { onResult(null) },
+        )
+    }
+
     private val _machineConnectError = MutableStateFlow<String?>(null)
     val machineConnectError: StateFlow<String?> = _machineConnectError
 

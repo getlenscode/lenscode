@@ -436,7 +436,15 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 state.provider = saved.provider
                 state.model = saved.model
             }
+            state.attachOpenFiles = composerPrefs.loadAttachOpenFiles()
         }
+    }
+    // The file open in the editor (it has a single tab), as an absolute path the agent can read.
+    val openFilePaths = remember(openFile, projectRootPath) {
+        listOfNotNull(
+            openFile?.path?.takeIf { it.isNotBlank() }
+                ?.let { com.lenscode.app.ui.absoluteProjectPath(projectRootPath, it) },
+        )
     }
 
     // ── Device pairing (spec §55) ────────────────────────────────────────
@@ -780,6 +788,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         provider: String? = null,
         model: String? = null,
         worktree: Boolean? = null,
+        // The agent's label, when the first message carries more than the user's own words (attached context).
+        title: String? = null,
     ) {
         // The agent runs where Code is pointed: this machine, or the connected
         // remote host whose folder is open (its workspaceId is that folder's path).
@@ -832,7 +842,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 // named \"lenscode-agent\" available, mirror…" everywhere the
                 // agent's label is shown, permission cards included, hiding
                 // which agent a pending permission was actually for.
-                title = instruction ?: "Voice agent",
+                title = title ?: instruction ?: "Voice agent",
                 modeId = useMode,
                 onCreated = { created ->
                     ui.voiceAgentId = created.agentId
@@ -969,10 +979,29 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     fun sendComposer() {
         val text = composer.prompt.text.trim()
         if (text.isEmpty()) return
+        // What was attached (files, tmux sessions, the open editor file) rides along as a Context block.
+        val withContext = com.lenscode.app.ui.buildPromptWithContext(
+            text,
+            composer.attachments,
+            if (composer.attachOpenFiles) openFilePaths else emptyList(),
+        )
         composer.prompt = TextFieldValue("")
+        composer.attachments = emptyList()
+        composer.pickingFile = false
         composer.menu = null
         showToast("Starting agent…")
-        startVoiceAgent(instruction = text)
+        startVoiceAgent(instruction = withContext, title = text)
+    }
+
+    /** Pastes the clipboard's text into the prompt at the cursor. */
+    fun attachClipboard() {
+        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+        if (clip.isNullOrEmpty()) {
+            showToast("The clipboard is empty.")
+            return
+        }
+        composer.prompt = com.lenscode.app.ui.insertAtCursor(composer.prompt, clip)
     }
     LaunchedEffect(ui.composerSendRequested) {
         if (ui.composerSendRequested) {
@@ -1813,7 +1842,18 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                         onOpenFile = {
                             ui.fileSearchQuery = ""
                             bridge.clearSearchResults()
-                            bridge.openFile(it)
+                            if (composer.pickingFile) {
+                                // "Attach file": the tap attaches the file instead of opening it.
+                                composer.pickingFile = false
+                                composer.attach(
+                                    com.lenscode.app.ui.ComposerAttachment.File(
+                                        com.lenscode.app.ui.absoluteProjectPath(projectRootPath, it),
+                                    ),
+                                )
+                                showToast("Attached ${it.substringAfterLast('/')}.")
+                            } else {
+                                bridge.openFile(it)
+                            }
                         },
                         onUp = {
                             val parent = dirPath.substringBeforeLast('/', ".")
@@ -1854,6 +1894,18 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                                 onRemoveWorktree = { wt -> confirmRemoveWorktree(wt) },
                                 onModeChosen = { chooseMode(it) },
                                 onModelChosen = { provider, model -> chooseModel(provider, model) },
+                                openFilePaths = openFilePaths,
+                                onToggleOpenFiles = { on ->
+                                    composer.attachOpenFiles = on
+                                    composerPrefs.saveAttachOpenFiles(on)
+                                },
+                                onAttachClipboard = { attachClipboard() },
+                                onLoadTmuxSessions = {
+                                    bridge.listTmuxSessions(filesMachineIdFlow) { sessions ->
+                                        composer.tmuxFailed = sessions == null
+                                        composer.tmuxSessions = sessions
+                                    }
+                                },
                             )
                         },
                     )

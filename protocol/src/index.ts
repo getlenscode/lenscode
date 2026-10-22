@@ -518,6 +518,18 @@ export const SnipUploadRequest = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// tmux sessions — lists what is open on a machine so the client can offer one to
+// attach to a prompt (the agent is told its name and reads/drives it with tmux).
+// ---------------------------------------------------------------------------
+
+export const TmuxListRequest = z.object({
+  ...requestBase,
+  type: z.literal("tmux.list"),
+  /** A machine from machine.list, or "local" for the bridge's own machine. */
+  machineId: z.string().min(1),
+});
+
+// ---------------------------------------------------------------------------
 // Request union / responses / events
 // ---------------------------------------------------------------------------
 
@@ -562,6 +574,7 @@ export const XrRequest = z.discriminatedUnion("type", [
   WorktreeCreateRequest,
   WorktreeRemoveRequest,
   SnipUploadRequest,
+  TmuxListRequest,
 ]);
 export type XrRequest = z.infer<typeof XrRequest>;
 

@@ -24,7 +24,7 @@ export interface Connection {
   homeDir: string;
 }
 
-function runSsh(machineId: string, command: string, timeoutMs = 8000): Promise<string> {
+export function runSsh(machineId: string, command: string, timeoutMs = 8000): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn("ssh", [
       "-o", "BatchMode=yes",

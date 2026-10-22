@@ -231,6 +231,14 @@ data class MachineInfo(
     val connected: Boolean = false,
 )
 
+/** One tmux session open on a machine — same wire shape as the bridge's `tmux.list` result. */
+@Serializable
+data class TmuxSessionInfo(
+    val name: String = "",
+    val windows: Int = 0,
+    val attached: Boolean = false,
+)
+
 /** One row in the remote folder browser — same dir.list wire shape as [DirEntry]. */
 @Serializable
 data class RemoteBrowseEntry(

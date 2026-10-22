@@ -44,4 +44,27 @@ class ComposerPrefsStoreTest {
 
         assertNull(ComposerPrefsStore(prefs).load())
     }
+
+    @Test
+    fun `the open-files checkbox starts off and remembers being turned on and off`() {
+        val prefs = FakeSharedPreferences()
+        assertEquals(false, ComposerPrefsStore(prefs).loadAttachOpenFiles())
+
+        ComposerPrefsStore(prefs).saveAttachOpenFiles(true)
+        assertEquals(true, ComposerPrefsStore(prefs).loadAttachOpenFiles())
+
+        ComposerPrefsStore(prefs).saveAttachOpenFiles(false)
+        assertEquals(false, ComposerPrefsStore(prefs).loadAttachOpenFiles())
+    }
+
+    @Test
+    fun `the checkbox and the agent choice are saved independently`() {
+        val prefs = FakeSharedPreferences()
+        val store = ComposerPrefsStore(prefs)
+        store.saveAttachOpenFiles(true)
+        store.save(AgentChoice("pi", null))
+
+        assertEquals(true, store.loadAttachOpenFiles())
+        assertEquals(AgentChoice("pi", null), store.load())
+    }
 }

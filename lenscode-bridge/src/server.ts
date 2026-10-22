@@ -19,7 +19,8 @@ import { Terminals } from "./terminals.ts";
 import { Agents, listProviders } from "./agents.ts";
 import { GitService, worktreeConflictPath } from "./git.ts";
 import { listMachines } from "./machines.ts";
-import { RemoteManager } from "./remote.ts";
+import { RemoteManager, runSsh } from "./remote.ts";
+import { TMUX_LIST_COMMAND, parseTmuxSessions, runLocalTmuxList } from "./tmux.ts";
 import { RemoteFiles } from "./remoteFiles.ts";
 import { GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
 import { GeminiHttp, lanSetupUrls } from "./geminiHttp.ts";
@@ -544,6 +545,33 @@ export class BridgeServer {
           this.send(ws, {
             id: req.id,
             error: err("internal", "Could not read the SSH machine registry.", true, String(e)),
+          });
+        }
+        return;
+      }
+      case "tmux.list": {
+        try {
+          let output: string;
+          if (req.machineId === "local") {
+            output = await runLocalTmuxList();
+          } else {
+            // The id goes straight to the ssh argv, so only ever a registry alias (spec §54).
+            const known = await listMachines();
+            if (!known.some((m) => m.id === req.machineId)) {
+              this.send(ws, {
+                id: req.id,
+                error: err("not_found", `${req.machineId} isn't in the SSH machine registry.`, false),
+              });
+              return;
+            }
+            // No tmux server running exits non-zero; that just means no sessions.
+            output = await runSsh(req.machineId, TMUX_LIST_COMMAND).catch(() => "");
+          }
+          this.send(ws, { id: req.id, result: { sessions: parseTmuxSessions(output) } });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", "Could not list tmux sessions.", true, String(e)),
           });
         }
         return;

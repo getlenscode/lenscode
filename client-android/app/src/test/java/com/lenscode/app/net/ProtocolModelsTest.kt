@@ -86,4 +86,20 @@ class ProtocolModelsTest {
         assertTrue(v.confident)
         assertEquals("src/a.kt", v.resolvedPath)
     }
+
+    @Test
+    fun `tmux sessions decode from the bridge's list`() {
+        val result = JSONObject("""{"sessions":[{"name":"lc-ab12","windows":2,"attached":true},{"name":"web"}]}""")
+
+        assertEquals(
+            listOf(TmuxSessionInfo("lc-ab12", 2, true), TmuxSessionInfo("web", 0, false)),
+            decodeList<TmuxSessionInfo>(result, "sessions"),
+        )
+    }
+
+    @Test
+    fun `a missing tmux sessions list decodes as empty`() {
+        assertEquals(emptyList<TmuxSessionInfo>(), decodeList<TmuxSessionInfo>(JSONObject("{}"), "sessions"))
+    }
 }
+

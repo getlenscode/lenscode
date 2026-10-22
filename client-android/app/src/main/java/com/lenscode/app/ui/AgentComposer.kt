@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lenscode.app.net.MachineInfo
 import com.lenscode.app.net.ProviderInfo
+import com.lenscode.app.net.TmuxSessionInfo
 import com.lenscode.app.net.WorktreeInfo
 import kotlinx.coroutines.delay
 
@@ -82,7 +83,22 @@ class ComposerState {
     /** TextFieldValue (not String) so dictation can insert at the pinch-dragged cursor. */
     var prompt by mutableStateOf(TextFieldValue(""))
 
-    /** Which inline menu is open: "machine" | "branch" | "mode" | "model" | null. */
+    /** Files and tmux sessions attached to the next prompt (see buildPromptWithContext). */
+    var attachments by mutableStateOf<List<ComposerAttachment>>(emptyList())
+    /** Also tell the agent which file(s) are open in the editor. Optional; remembered. */
+    var attachOpenFiles by mutableStateOf(false)
+    /** While true, the next file tapped in the explorer is attached instead of opened. */
+    var pickingFile by mutableStateOf(false)
+    /** The tmux sessions on the agent's machine, for the attach menu; null while they load. */
+    var tmuxSessions by mutableStateOf<List<TmuxSessionInfo>?>(null)
+    /** The last attempt to list tmux sessions failed (as opposed to finding none). */
+    var tmuxFailed by mutableStateOf(false)
+
+    fun attach(attachment: ComposerAttachment) {
+        if (attachment !in attachments) attachments = attachments + attachment
+    }
+
+    /** Which inline menu is open: "machine" | "branch" | "mode" | "agent" | "model" | "attach" | "tmux" | null. */
     var menu by mutableStateOf<String?>(null)
     /** Chip that just changed by voice/tap — briefly highlighted so a spoken change is visibly confirmed. */
     var flash by mutableStateOf<String?>(null)
@@ -212,6 +228,11 @@ fun AgentComposer(
     onRemoveWorktree: (WorktreeInfo) -> Unit,
     onModeChosen: (ComposerMode) -> Unit,
     onModelChosen: (provider: String, model: String?) -> Unit,
+    /** Paths of the file(s) open in the editor, shown on the open-files checkbox. */
+    openFilePaths: List<String> = emptyList(),
+    onToggleOpenFiles: (Boolean) -> Unit = {},
+    onAttachClipboard: () -> Unit = {},
+    onLoadTmuxSessions: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(state.flash) {
@@ -344,6 +365,45 @@ fun AgentComposer(
                 }
                 if (models.isEmpty()) MenuRow("No models listed for ${state.provider}", onClick = { state.menu = null })
             }
+            "attach" -> MenuCard("attach") {
+                MenuRow("Attach file", "then tap a file in the explorer") {
+                    state.menu = null
+                    state.pickingFile = true
+                }
+                MenuRow("Attach clipboard", "pastes it into the prompt") {
+                    state.menu = null
+                    onAttachClipboard()
+                }
+                MenuRow("Attach tmux session", "pick one of the open sessions") {
+                    state.tmuxSessions = null
+                    state.tmuxFailed = false
+                    state.menu = "tmux"
+                    onLoadTmuxSessions()
+                }
+            }
+            "tmux" -> MenuCard("attach <session name>") {
+                val sessions = state.tmuxSessions
+                when {
+                    state.tmuxFailed -> MenuRow(
+                        "Couldn't list tmux sessions",
+                        "restart the bridge — an older one doesn't support this",
+                        onClick = { state.menu = null },
+                    )
+                    sessions == null -> MenuRow("Looking for tmux sessions…", onClick = {})
+                    sessions.isEmpty() -> MenuRow("No tmux sessions on $machineLabel", onClick = { state.menu = null })
+                    else -> for (s in sessions) {
+                        val attached = state.attachments.contains(ComposerAttachment.Tmux(s.name))
+                        MenuRow(
+                            s.name,
+                            "${s.windows} window${if (s.windows == 1) "" else "s"}${if (s.attached) " · in use" else ""}",
+                            selected = attached,
+                        ) {
+                            state.menu = null
+                            state.attach(ComposerAttachment.Tmux(s.name))
+                        }
+                    }
+                }
+            }
         }
 
         // ── Top chip row: machine · folder · branch | worktree ──────────
@@ -385,6 +445,62 @@ fun AgentComposer(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text("worktree", color = LensCodeColors.Text, fontSize = 13.sp)
+                }
+            }
+        }
+
+        // ── Attachments: chips for what is attached, and the file-picking hint ──
+        if (state.pickingFile) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(lensShape(8.dp))
+                    .background(LensCodeColors.DockActiveGradTop)
+                    .border(1.dp, LensCodeColors.DockActiveBorder, lensShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Tap a file in the explorer to attach it", color = LensCodeColors.ActiveDock, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(
+                    "Cancel",
+                    color = LensCodeColors.Muted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { state.pickingFile = false },
+                )
+            }
+        }
+        if (state.attachments.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                for (a in state.attachments) {
+                    Row(
+                        Modifier
+                            .clip(lensShape(8.dp))
+                            .background(LensCodeColors.CardBg)
+                            .border(1.dp, LensCodeColors.CardBorder, lensShape(8.dp)),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            (if (a is ComposerAttachment.Tmux) "▣ " else "📄 ") + a.label,
+                            color = LensCodeColors.Text,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 12.dp, top = 7.dp, bottom = 7.dp, end = 6.dp),
+                        )
+                        Text(
+                            "✕",
+                            color = LensCodeColors.Muted,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { state.attachments = state.attachments - a }
+                                .padding(start = 4.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),
+                        )
+                    }
                 }
             }
         }
@@ -433,7 +549,17 @@ fun AgentComposer(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "📎",
+                color = if (state.menu == "attach" || state.menu == "tmux" || state.pickingFile) LensCodeColors.ActiveDock else LensCodeColors.Text,
+                fontSize = 18.sp,
+                modifier = Modifier
+                    .clip(lensShape(8.dp))
+                    .clickable { state.toggleMenu("attach") }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            Spacer(Modifier.width(4.dp))
             Text(
                 "⏎",
                 color = if (state.prompt.text.isBlank()) LensCodeColors.Muted else LensCodeColors.ActiveDock,
@@ -450,6 +576,27 @@ fun AgentComposer(
         if (isListening && !dictationHint.isNullOrBlank()) {
             Spacer(Modifier.height(6.dp))
             Text("…$dictationHint", color = LensCodeColors.Muted, fontSize = 12.sp, maxLines = 2)
+        }
+
+        // ── Optional: tell the agent which file(s) are open in the editor ─────
+        Row(
+            Modifier
+                .clip(lensShape(8.dp))
+                .clickable { onToggleOpenFiles(!state.attachOpenFiles) }
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (state.attachOpenFiles) "☑" else "☐",
+                color = if (state.attachOpenFiles) LensCodeColors.Blue else LensCodeColors.Muted,
+                fontSize = 15.sp,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Attach open editor file paths" + if (openFilePaths.isEmpty()) " (none open)" else " (${openFilePaths.size})",
+                color = LensCodeColors.Text,
+                fontSize = 13.sp,
+            )
         }
 
         // ── Bottom row: mic · mode ······ model ──────────────────────
