@@ -31,7 +31,7 @@ class ControlCommandsTest {
     @Test
     fun `the view list matches the app's dock`() {
         assertEquals(
-            setOf("home", "code", "terminal", "agents", "permissions", "diff", "remote", "browser", "settings"),
+            setOf("home", "code", "terminal", "agents", "permissions", "diff", "remote", "tasks", "browser", "settings"),
             CONTROL_VIEWS,
         )
     }

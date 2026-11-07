@@ -89,10 +89,22 @@ fun DockIcon(id: String, color: Color) {
                     line(17f, 9f, 21f, 6f)
                     line(17f, 15f, 21f, 18f)
                 }
+                "record" -> {
+                    // Camcorder: body plus lens wedge, with a record dot.
+                    box(2f, 6f, 14f, 12f, 3f)
+                    line(16f, 10f, 22f, 7f, 22f, 17f, 16f, 14f)
+                    drawCircle(color, 2f, Offset(9f, 12f))
+                }
                 "browser" -> {
                     box(2f, 4f, 20f, 16f, 3f)
                     line(2f, 9f, 22f, 9f)
                     node(5.5f, 6.5f); node(8.5f, 6.5f)
+                }
+                "tasks" -> {
+                    // Kanban: three columns of differing card counts.
+                    box(3f, 3f, 5f, 18f, 1.5f)
+                    box(9.5f, 3f, 5f, 11f, 1.5f)
+                    box(16f, 3f, 5f, 15f, 1.5f)
                 }
                 "settings" -> {
                     drawCircle(color, 3.5f, Offset(12f, 12f), style = stroke)

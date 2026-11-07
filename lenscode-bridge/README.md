@@ -36,9 +36,14 @@ npx lenscode-bridge --tls-cert fullchain.pem --tls-key privkey.pem
 
 Keep `privkey.pem` private. Anyone who has it can impersonate your bridge.
 
-## Gemini voice routing (optional)
+## Voice: speech-to-text and command routing
 
-Free-form voice commands ("add a test for the login route") use Google's Gemini. Open `http://<your-address>:8137/setup` on your phone or computer and paste a key from <https://aistudio.google.com/apikey>. It is stored on this computer, and the headset never sees it. Without a key, voice still works through built-in commands (navigate, open a file, accept or discard changes).
+Open `http://<your-address>:8137/setup` on your phone or computer and paste:
+
+- an **AssemblyAI** key (<https://www.assemblyai.com/dashboard>), which every mic button needs for streaming speech-to-text (there is no on-device fallback; without it the app shows a popup). Also `ASSEMBLYAI_API_KEY` / `--assemblyai-key`; model `LENSCODE_ASSEMBLYAI_MODEL` (default `universal-streaming-english`).
+- an **OpenRouter** key (<https://openrouter.ai/keys>) for free-form commands ("add a test for the login route"). Also `OPENROUTER_API_KEY` / `--openrouter-key`; model `LENSCODE_OPENROUTER_MODEL` (default `z-ai/glm-5.3-flash`).
+
+Both are stored on this computer, and the headset never sees them. Without an OpenRouter key, a voice command shows an error popup in the headset; there is no built-in fallback.
 
 ## Control the headset from Claude Code or Claude Desktop (MCP)
 
@@ -58,8 +63,8 @@ Why, setup, tools and examples: [MCP guide](https://github.com/getlenscode/lensc
 -h, --help          show help
 ```
 
-The same settings are available as environment variables: `LENSCODE_PORT`, `LENSCODE_SECURE=1`, `LENSCODE_TLS_CERT`, `LENSCODE_TLS_KEY`, `LENSCODE_PASEO_URL`, `LENSCODE_PASEO_PASSWORD` (if your Paseo daemon has one), `GEMINI_API_KEY`.
+The same settings are available as environment variables: `LENSCODE_PORT`, `LENSCODE_SECURE=1`, `LENSCODE_TLS_CERT`, `LENSCODE_TLS_KEY`, `LENSCODE_PASEO_URL`, `LENSCODE_PASEO_PASSWORD` (if your Paseo daemon has one), `OPENROUTER_API_KEY`.
 
 ## Where it keeps things
 
-`~/.config/lenscode-bridge/`: `devices.json` (paired headsets), `gemini.json` (your Gemini key, readable only by you), `self-signed/` (the certificate and key made by `--secure`).
+`~/.config/lenscode-bridge/`: `devices.json` (paired headsets), `openrouter.json` and `assemblyai.json` (your API keys, readable only by you), `self-signed/` (the certificate and key made by `--secure`).

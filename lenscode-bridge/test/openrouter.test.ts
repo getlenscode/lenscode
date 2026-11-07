@@ -12,12 +12,12 @@ import { loadConfig } from "../src/config.ts";
 
 const DEV_PORT = 18143;
 const PROD_PORT = 18144;
-const GOOD_KEY = "AIzaGoodKey123";
+const GOOD_KEY = "sk-or-good-key-123";
 
 interface Seen {
   method?: string;
   url?: string;
-  apiKeyHeader?: string;
+  authHeader?: string;
   body: string;
 }
 let google: Server;
@@ -35,18 +35,18 @@ const bodyOf = (req: IncomingMessage) =>
   });
 
 function tmpFile(name: string): string {
-  return join(mkdtempSync(join(tmpdir(), "lenscode-gemini-")), name);
+  return join(mkdtempSync(join(tmpdir(), "lenscode-openrouter-")), name);
 }
 
 before(async () => {
-  // Stands in for generativelanguage.googleapis.com.
+  // Stands in for openrouter.ai/api/v1.
   google = createServer(async (req, res) => {
     const body = await bodyOf(req);
-    const apiKeyHeader = req.headers["x-goog-api-key"] as string | undefined;
-    seen.push({ method: req.method, url: req.url, apiKeyHeader, body });
-    if (apiKeyHeader !== GOOD_KEY) {
-      res.writeHead(400, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "API key not valid" } }));
+    const authHeader = req.headers.authorization;
+    seen.push({ method: req.method, url: req.url, authHeader, body });
+    if (authHeader !== `Bearer ${GOOD_KEY}`) {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: 401, message: "No auth credentials found" } }));
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
@@ -56,13 +56,13 @@ before(async () => {
   await once(google, "listening");
   googleUrl = `http://127.0.0.1:${(google.address() as AddressInfo).port}`;
 
-  devStore = tmpFile("gemini.json");
+  devStore = tmpFile("openrouter.json");
   dev = new BridgeServer(
     loadConfig({
       LENSCODE_PORT: String(DEV_PORT),
       LENSCODE_PAIRING_STORE: tmpFile("devices.json"),
-      LENSCODE_GEMINI_STORE: devStore,
-      LENSCODE_GEMINI_UPSTREAM: googleUrl,
+      LENSCODE_OPENROUTER_STORE: devStore,
+      LENSCODE_OPENROUTER_UPSTREAM: googleUrl,
     } as NodeJS.ProcessEnv),
   );
   await dev.start();
@@ -73,8 +73,8 @@ before(async () => {
       LENSCODE_MODE: "prod",
       LENSCODE_INSECURE_PROD: "1",
       LENSCODE_PAIRING_STORE: tmpFile("devices.json"),
-      LENSCODE_GEMINI_STORE: tmpFile("gemini.json"),
-      LENSCODE_GEMINI_UPSTREAM: googleUrl,
+      LENSCODE_OPENROUTER_STORE: tmpFile("openrouter.json"),
+      LENSCODE_OPENROUTER_UPSTREAM: googleUrl,
     } as NodeJS.ProcessEnv),
   );
   await prod.start();
@@ -118,7 +118,7 @@ test("before a key is set: setup page says so, proxy answers 503, hello reports 
   assert.equal(page.status, 200);
   assert.match(await page.text(), /Not set/);
 
-  const proxied = await fetch(`http://127.0.0.1:${DEV_PORT}/gemini/v1beta/models/m:generateContent`, {
+  const proxied = await fetch(`http://127.0.0.1:${DEV_PORT}/openrouter/chat/completions`, {
     method: "POST",
     body: "{}",
   });
@@ -129,61 +129,67 @@ test("before a key is set: setup page says so, proxy answers 503, hello reports 
   await once(ws, "open");
   const reply = nextMessage(ws, (m) => m.id === "h0");
   ws.send(JSON.stringify(helloMsg("h0")));
-  assert.deepEqual((await reply).result.gemini, { configured: false, source: null, model: null });
+  assert.deepEqual((await reply).result.openrouter, {
+    configured: false,
+    source: null,
+    model: "z-ai/glm-5.3-flash",
+  });
   ws.close();
 });
 
 test("a rejected key is not saved", async () => {
-  const res = await fetch(`http://127.0.0.1:${DEV_PORT}/setup`, form({ apiKey: "AIzaWrong" }));
+  const res = await fetch(`http://127.0.0.1:${DEV_PORT}/setup`, form({ apiKey: "sk-or-wrong" }));
   assert.equal(res.status, 400);
-  assert.match(await res.text(), /Google rejected that key/);
-  assert.equal(dev.gemini.status().configured, false);
+  assert.match(await res.text(), /OpenRouter rejected that key/);
+  assert.equal(dev.openrouter.status().configured, false);
   assert.equal(existsSync(devStore), false);
 });
 
 test("saving a good key persists it 0600, never echoes it, and pushes an event to connected headsets", async () => {
   const ws = new WebSocket(`ws://127.0.0.1:${DEV_PORT}`);
   await once(ws, "open");
-  const event = nextMessage(ws, (m) => m.type === "event" && m.event === "gemini_key_changed");
+  const event = nextMessage(ws, (m) => m.type === "event" && m.event === "openrouter_key_changed");
 
   const res = await fetch(
     `http://127.0.0.1:${DEV_PORT}/setup`,
-    form({ apiKey: ` ${GOOD_KEY} `, model: "gemini-test-model" }),
+    form({ apiKey: ` ${GOOD_KEY} `, model: "vendor/test-model:free" }),
   );
   const html = await res.text();
   assert.equal(res.status, 200);
-  assert.match(html, /Key saved/);
+  assert.match(html, /OpenRouter key saved/);
   assert.ok(!html.includes(GOOD_KEY), "key is never echoed back into the page");
 
-  assert.deepEqual((await event).data, { configured: true, source: "file", model: "gemini-test-model" });
+  assert.deepEqual((await event).data, { configured: true, source: "file", model: "vendor/test-model:free" });
   assert.equal(JSON.parse(readFileSync(devStore, "utf8")).apiKey, GOOD_KEY, "whitespace trimmed");
   assert.equal(statSync(devStore).mode & 0o777, 0o600);
 
   const reply = nextMessage(ws, (m) => m.id === "h1");
   ws.send(JSON.stringify(helloMsg("h1")));
-  assert.equal((await reply).result.gemini.configured, true);
+  assert.equal((await reply).result.openrouter.configured, true);
   ws.close();
 });
 
-test("proxy swaps the placeholder key for the real one and forwards path + body", async () => {
+test("proxy swaps in the real key (whatever auth the client sent) and forwards path + body", async () => {
   seen.length = 0;
-  const res = await fetch(
-    `http://127.0.0.1:${DEV_PORT}/gemini/v1beta/models/gemini-x:generateContent?key=placeholder&alt=json`,
-    { method: "POST", headers: { "content-type": "application/json" }, body: '{"hi":1}' },
-  );
+  const res = await fetch(`http://127.0.0.1:${DEV_PORT}/openrouter/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer placeholder" },
+    body: '{"hi":1}',
+  });
   assert.equal(res.status, 200);
   const json = (await res.json()) as any;
   assert.equal(json.echoed, '{"hi":1}');
 
   const upstream = seen.at(-1)!;
-  assert.equal(upstream.apiKeyHeader, GOOD_KEY);
-  assert.ok(!upstream.url!.includes("placeholder"), "client's own key param is dropped");
-  assert.equal(upstream.url, "/v1beta/models/gemini-x:generateContent?alt=json");
+  assert.equal(upstream.authHeader, `Bearer ${GOOD_KEY}`, "the client's own authorization is replaced");
+  assert.equal(upstream.url, "/chat/completions");
 });
 
-test("proxy refuses anything outside /v1beta/", async () => {
-  const res = await fetch(`http://127.0.0.1:${DEV_PORT}/gemini/v1/tunedModels`, { method: "POST", body: "{}" });
-  assert.equal(res.status, 404);
+test("proxy refuses everything but POST /chat/completions", async () => {
+  const keys = await fetch(`http://127.0.0.1:${DEV_PORT}/openrouter/keys`, { method: "POST", body: "{}" });
+  assert.equal(keys.status, 404);
+  const get = await fetch(`http://127.0.0.1:${DEV_PORT}/openrouter/chat/completions`);
+  assert.equal(get.status, 404);
 });
 
 test("setup refuses a cross-site form post", async () => {
@@ -201,7 +207,7 @@ test("setup accepts the form post a real browser sends (same-origin Origin heade
   const page = await fetch(`http://127.0.0.1:${DEV_PORT}/setup`);
   assert.equal(page.headers.get("referrer-policy"), "same-origin", "no-referrer would make browsers send Origin: null");
   const res = await fetch(`http://127.0.0.1:${DEV_PORT}/setup`, {
-    ...form({ apiKey: "AIzaWrong" }),
+    ...form({ apiKey: "sk-or-wrong" }),
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       origin: `http://127.0.0.1:${DEV_PORT}`,
@@ -218,12 +224,12 @@ test("setup accepts the form post a real browser sends (same-origin Origin heade
 test("removing the saved key turns routing back off", async () => {
   const res = await fetch(`http://127.0.0.1:${DEV_PORT}/setup`, form({ action: "clear" }));
   assert.equal(res.status, 200);
-  assert.equal(dev.gemini.status().configured, false);
+  assert.equal(dev.openrouter.status().configured, false);
   assert.equal(existsSync(devStore), false);
 });
 
 test("prod: setup needs the console code, and a wrong code is refused", async () => {
-  const code = prod.gemini.http.peekSetupCode();
+  const code = prod.openrouter.http.peekSetupCode();
   assert.match(code ?? "", /^\d{6}$/);
 
   const wrong = await fetch(
@@ -231,24 +237,24 @@ test("prod: setup needs the console code, and a wrong code is refused", async ()
     form({ apiKey: GOOD_KEY, code: code === "000000" ? "111111" : "000000" }),
   );
   assert.equal(wrong.status, 403);
-  assert.equal(prod.gemini.status().configured, false);
+  assert.equal(prod.openrouter.status().configured, false);
 
   const right = await fetch(`http://127.0.0.1:${PROD_PORT}/setup`, form({ apiKey: GOOD_KEY, code: code! }));
   assert.equal(right.status, 200);
-  assert.equal(prod.gemini.status().configured, true);
-  assert.notEqual(prod.gemini.http.peekSetupCode(), code, "code rotates after a successful save");
+  assert.equal(prod.openrouter.status().configured, true);
+  assert.notEqual(prod.openrouter.http.peekSetupCode(), code, "code rotates after a successful save");
 });
 
 test("prod: setup code rotates after repeated wrong guesses", async () => {
-  const before = prod.gemini.http.peekSetupCode();
+  const before = prod.openrouter.http.peekSetupCode();
   for (let i = 0; i < 5; i++) {
     await fetch(`http://127.0.0.1:${PROD_PORT}/setup`, form({ apiKey: GOOD_KEY, code: "abcdef" }));
   }
-  assert.notEqual(prod.gemini.http.peekSetupCode(), before);
+  assert.notEqual(prod.openrouter.http.peekSetupCode(), before);
 });
 
 test("prod: proxy needs a paired device's token", async () => {
-  const url = `http://127.0.0.1:${PROD_PORT}/gemini/v1beta/models/m:generateContent`;
+  const url = `http://127.0.0.1:${PROD_PORT}/openrouter/chat/completions`;
   const anon = await fetch(url, { method: "POST", body: "{}" });
   assert.equal(anon.status, 401);
 

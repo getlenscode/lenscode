@@ -62,25 +62,28 @@ class BridgeClient(
     private val _state = MutableStateFlow(UiState(bridgeUrl = initialUrl))
     val state: StateFlow<UiState> = _state
 
-    private val _geminiStatus = MutableStateFlow(BridgeGeminiStatus())
+    private val _llmStatus = MutableStateFlow(BridgeLlmStatus())
 
-    /** Whether the bridge holds a Gemini key; refreshed by hello and by `gemini_key_changed` events. */
-    val geminiStatus: StateFlow<BridgeGeminiStatus> = _geminiStatus
+    /** Whether the bridge holds an OpenRouter key; refreshed by hello and by `openrouter_key_changed` events. */
+    val llmStatus: StateFlow<BridgeLlmStatus> = _llmStatus
 
-    /** Koog's base URL for the bridge's Gemini proxy (see lenscode-bridge/src/geminiHttp.ts). */
-    val geminiProxyBase: String get() = GeminiBridgeUrls.proxyBase(url)
+    /** Base URL of the bridge's OpenRouter proxy (see lenscode-bridge/src/setupHttp.ts). */
+    val openRouterProxyBase: String get() = BridgeUrls.proxyBase(url)
 
     /** The page to open on a phone/PC to add the key — shown in Settings. */
-    val geminiSetupUrl: String get() = GeminiBridgeUrls.setupPage(url)
+    val setupUrl: String get() = BridgeUrls.setupPage(url)
 
     /**
-     * Proxy credentials, read per request so a token issued by pairing after the
-     * router was built still applies. Dev-mode bridges ignore them.
+     * Bridge credentials for the OpenRouter proxy and the AssemblyAI token route, read per request so a
+     * token issued by pairing after the router was built still applies. Dev-mode bridges ignore them.
      */
-    fun geminiAuthHeaders(): Map<String, String> = buildMap {
+    fun deviceAuthHeaders(): Map<String, String> = buildMap {
         put("X-LensCode-Device", deviceId)
         pairingStore.loadToken()?.let { put("X-LensCode-Token", it) }
     }
+
+    /** Blocking: a one-minute AssemblyAI streaming token from the bridge, or why there isn't one. */
+    fun assemblyAiToken(): AssemblyTokenResult = fetchAssemblyToken(http, url, deviceAuthHeaders())
 
     private val _terminals = MutableStateFlow<List<PaneInfo>>(emptyList())
     val terminals: StateFlow<List<PaneInfo>> = _terminals
@@ -142,7 +145,7 @@ class BridgeClient(
     // connects only once the user has confirmed its fingerprint (see certPrompt).
     private val http = PinnedTls.okHttpClient { pinStore?.pinFor(bridgeHostPort(url)) }
 
-    /** The same pinned-trust client, for HTTP calls to this bridge from elsewhere (the Gemini proxy). */
+    /** The same pinned-trust client, for HTTP calls to this bridge from elsewhere (the OpenRouter proxy). */
     val pinnedHttpClient: okhttp3.OkHttpClient get() = http
 
     private val _certPrompt = MutableStateFlow<CertPrompt?>(null)
@@ -206,7 +209,7 @@ class BridgeClient(
         ws = null
         old?.close(1000, "switching bridge")
         failAllPending(errorBody("CONNECTION_LOST", "Switched to a different bridge."))
-        _geminiStatus.value = BridgeGeminiStatus()
+        _llmStatus.value = BridgeLlmStatus()
         _certPrompt.value = null
         declinedFingerprint = null
         _state.value = _state.value.copy(
@@ -338,7 +341,7 @@ class BridgeClient(
                     backendConnected = helloResult.optBoolean("backendConnected", false),
                     connectError = null,
                 )
-                _geminiStatus.value = BridgeGeminiStatus.fromJson(helloResult.optJSONObject("gemini"))
+                _llmStatus.value = BridgeLlmStatus.fromJson(helloResult.optJSONObject("openrouter"))
                 if (helloResult.optBoolean("authenticated", false)) {
                     _pairingState.value = PairingState.Authenticated
                     onAuthenticated()
@@ -718,6 +721,127 @@ class BridgeClient(
                 _gitDiffPath.value = null
                 _gitDiffText.value = null
             },
+        )
+    }
+
+    // ── Paseo Tasks board ────────────────────────────────────────────────
+    // Not workspace-scoped: the plugin keeps one tracker per Paseo install, so the board has its own
+    // machine (the bridge's computer unless switched), independent of the machine Code is browsing.
+
+    private val _tasksMachineId = MutableStateFlow("local")
+    val tasksMachineId: StateFlow<String> = _tasksMachineId
+
+    fun setTasksMachine(machineId: String) {
+        if (_tasksMachineId.value == machineId) return
+        _tasksMachineId.value = machineId
+        _tasks.value = null
+        _tasksError.value = null
+        refreshTasks()
+    }
+
+    private val _tasks = MutableStateFlow<TasksBoard?>(null)
+    val tasks: StateFlow<TasksBoard?> = _tasks
+    private val _tasksError = MutableStateFlow<String?>(null)
+    val tasksError: StateFlow<String?> = _tasksError
+
+    fun refreshTasks() {
+        send(
+            "tasks.list",
+            JSONObject().put("machineId", _tasksMachineId.value),
+            onResult = { result ->
+                _tasksError.value = null
+                _tasks.value = decodeResult<TasksBoard>(result)
+            },
+            onError = { _tasksError.value = it.optString("message", "Could not read the task board.") },
+        )
+    }
+
+    fun createTask(
+        title: String,
+        project: String? = null,
+        priority: String? = null,
+        status: String? = null,
+        onDone: (TaskCard) -> Unit = {},
+        onError: (String) -> Unit = {},
+    ) {
+        val fields = JSONObject().put("title", title).put("machineId", _tasksMachineId.value)
+        if (project != null) fields.put("project", project)
+        if (priority != null) fields.put("priority", priority)
+        if (status != null) fields.put("status", status)
+        send(
+            "tasks.create",
+            fields,
+            onResult = { result ->
+                refreshTasks()
+                onDone(decodeResult<CreatedTask>(result).task)
+            },
+            onError = { onError(it.optString("message", "Could not create the task.")) },
+        )
+    }
+
+    fun updateTask(
+        key: String,
+        status: String? = null,
+        priority: String? = null,
+        onDone: (TaskCard) -> Unit = {},
+        onError: (String) -> Unit = {},
+    ) {
+        val fields = JSONObject().put("key", key).put("machineId", _tasksMachineId.value)
+        if (status != null) fields.put("status", status)
+        if (priority != null) fields.put("priority", priority)
+        // Show the move immediately; the refresh below replaces it with the plugin's own answer.
+        if (status != null) {
+            _tasks.value = _tasks.value?.let { b -> b.copy(tasks = b.tasks.map { if (it.key == key) it.copy(status = status) else it }) }
+        }
+        send(
+            "tasks.update",
+            fields,
+            onResult = { result ->
+                refreshTasks()
+                onDone(decodeResult<CreatedTask>(result).task)
+            },
+            onError = {
+                refreshTasks()
+                onError(it.optString("message", "Could not update the task."))
+            },
+        )
+    }
+
+    /**
+     * Starts an agent on [task] from a plugin [preset]. The plugin's own `delegate` command fails when
+     * called through its CLI, so this goes through the normal agent.create path. The agent's title
+     * starts with the task key, which is what tags the card with its provider on the board.
+     */
+    fun runTask(task: TaskCard, preset: TaskPreset, onDone: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val machine = _tasksMachineId.value
+        val remote = machine != "local"
+        // A remote agent needs a folder on that machine, which only the Code view knows.
+        if (remote && filesMachineId != machine) {
+            onError("Open a folder on $machine in Code first, then run the task.")
+            return
+        }
+        val prompt = buildString {
+            append("Work on task ${task.key}: ${task.title}\n\n")
+            if (task.summary.isNotBlank()) append(task.summary).append("\n\n")
+            if (preset.instructions.isNotBlank()) append(preset.instructions).append("\n\n")
+            append("Track progress with the paseo-tasks CLI: run `paseo-tasks update ${task.key} --status in_review` when it is ready, ")
+            append("and `paseo-tasks comment ${task.key} --body \"...\"` at milestones.")
+        }
+        createAgent(
+            provider = preset.providerId,
+            model = preset.modelId.ifBlank { null },
+            cwd = if (remote) currentWorkspaceId else ".",
+            prompt = prompt,
+            title = "${task.key}: ${task.title}",
+            workspaceId = currentWorkspaceId.takeIf { it != "local" && filesMachineId == machine },
+            machineId = machine,
+            worktree = preset.environmentKind == "new-worktree",
+            onCreated = {
+                updateTask(task.key, status = "in_progress")
+                refreshAgents()
+                onDone()
+            },
+            onError = onError,
         )
     }
 
@@ -1379,8 +1503,8 @@ class BridgeClient(
             _controlCommands.tryEmit(com.lenscode.app.control.ControlCommand(msg.optString("event"), args))
             return
         }
-        if (msg.optString("topic") == "connection" && msg.optString("event") == "gemini_key_changed") {
-            _geminiStatus.value = BridgeGeminiStatus.fromJson(msg.optJSONObject("data"))
+        if (msg.optString("topic") == "connection" && msg.optString("event") == "openrouter_key_changed") {
+            _llmStatus.value = BridgeLlmStatus.fromJson(msg.optJSONObject("data"))
             return
         }
         if (msg.optString("topic") != "backend") return

@@ -1,24 +1,22 @@
 package com.lenscode.app.voice
 
 import ai.koog.agents.core.tools.annotations.LLMDescription
-import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.executor.clients.google.GoogleClientSettings
-import ai.koog.prompt.executor.clients.google.GoogleLLMClient
-import ai.koog.prompt.executor.clients.google.GoogleModels
-import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
-import ai.koog.prompt.structure.executeStructured
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.defaultRequest
-import io.ktor.client.request.header
-import okhttp3.OkHttpClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Agentic voice command grammar (docs/paseo-migration-plan.md follow-up).
- * Gemini (via Koog, entirely on-device) returns these directly as structured
- * output — no manual keyword matching. A [VoiceCommandPlan] carries a
+ * An OpenRouter model returns these as JSON — no manual keyword matching. A [VoiceCommandPlan] carries a
  * *sequence* of actions so a compound utterance ("navigate to code and open
  * line 20 in package.json") resolves to multiple steps, unlike the old
  * deterministic [VoiceCommandRouter], which could only ever match one intent
@@ -31,7 +29,7 @@ sealed class VoiceAction {
     @LLMDescription("Switch the active view.")
     data class Navigate(
         @property:LLMDescription(
-            "one of: code, diff, terminal, git, agents, permissions, remote, browser, settings, home",
+            "one of: code, diff, terminal, git, agents, permissions, remote, tasks, browser, settings, home",
         )
         val view: String,
     ) : VoiceAction()
@@ -279,6 +277,55 @@ sealed class VoiceAction {
     data object Dismiss : VoiceAction()
 
     @Serializable
+    @SerialName("add_task")
+    @LLMDescription(
+        "Add a task to the project's task board (the Tasks view) — \"add a task to fix the login " +
+            "redirect\", \"new task: write release notes, high priority\", \"remind me to update the " +
+            "docs\". This only records the task; use ask_agent when the user wants the work done now.",
+    )
+    data class AddTask(
+        @property:LLMDescription("the task title as a short phrase")
+        val title: String,
+        @property:LLMDescription("urgent, high, medium or low if one was named; else null")
+        val priority: String? = null,
+    ) : VoiceAction()
+
+    @Serializable
+    @SerialName("move_task")
+    @LLMDescription(
+        "Move a task on the board to another column — \"move the login task to in progress\", " +
+            "\"mark ABC 12 done\", \"put the docs task in review\". Columns: backlog, todo, in progress, " +
+            "in review, done, canceled.",
+    )
+    data class MoveTask(
+        @property:LLMDescription("which task, as heard: its key (\"ABC 12\"), number or title words")
+        val task: String,
+        @property:LLMDescription("the column as heard")
+        val status: String,
+        @property:LLMDescription("the key of the board task this most likely means, corrected for mishearing")
+        val key: String? = null,
+        @property:LLMDescription("other plausible keys when unsure")
+        val alternatives: List<String> = emptyList(),
+    ) : VoiceAction()
+
+    @Serializable
+    @SerialName("run_task")
+    @LLMDescription(
+        "Start a coding agent on an existing task from the board — \"have Claude work on the login " +
+            "task\", \"give ABC 12 to codex\", \"run task 7 with pi\".",
+    )
+    data class RunTask(
+        @property:LLMDescription("which task, as heard: its key, number or title words")
+        val task: String,
+        @property:LLMDescription("the agent as heard: claude, codex, pi, opencode…")
+        val agent: String,
+        @property:LLMDescription("the key of the board task this most likely means, corrected for mishearing")
+        val key: String? = null,
+        @property:LLMDescription("other plausible keys when unsure")
+        val alternatives: List<String> = emptyList(),
+    ) : VoiceAction()
+
+    @Serializable
     @SerialName("respond_permission")
     @LLMDescription(
         "Answer an agent's pending tool-call permission request (\"allow it\", \"approve\", " +
@@ -292,11 +339,11 @@ sealed class VoiceAction {
 }
 
 /**
- * The wire shape Gemini actually fills in — flat, with every action's fields
+ * The wire shape the model fills in — flat, with every action's fields
  * laid out as optionals on one type, rather than [VoiceAction]'s sealed
  * hierarchy. Confirmed live (2026-09-06): a `oneOf`-style discriminated
  * union (which is what a Kotlin sealed class compiles to in the generated
- * JSON schema) is unreliable for Gemini's structured output — the model
+ * JSON schema) is unreliable for structured output (seen with Gemini) — the model
  * kept collapsing onto a nearby parameterless variant instead of
  * constructing one with real extracted field values, even with matching
  * few-shot examples. A flat schema with no `oneOf` fixed it outright. See
@@ -312,12 +359,12 @@ data class VoiceStep(
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
             "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
             "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size, open_url, " +
-            "set_machine",
+            "add_task, move_task, run_task, set_machine",
     )
     val type: String,
     @property:LLMDescription(
         "required when type=navigate: one of code, diff, terminal, git, agents, " +
-            "permissions, remote, home. Null otherwise.",
+            "permissions, remote, tasks, home. Null otherwise.",
     )
     val view: String? = null,
     @property:LLMDescription("required when type=open_file: the file's name/path, as heard. Null otherwise.")
@@ -338,8 +385,10 @@ data class VoiceStep(
     )
     val target: String? = null,
     @property:LLMDescription(
-        "type=set_mode: the mode as heard (required). type=ask_agent: a permission mode named " +
-            "for just this request, else null. Null otherwise.",
+        "type=set_mode: the mode as heard (required). type=ask_agent: ONLY when the user names a " +
+            "permission mode as a setting (\"in plan mode\", \"with accept edits\", \"in manual mode\") — " +
+            "never because the task mentions a plan, e.g. \"create a plan for…\" or \"plan the API\" " +
+            "is just the task: leave this null. Null otherwise.",
     )
     val mode: String? = null,
     @property:LLMDescription(
@@ -371,7 +420,30 @@ data class VoiceStep(
         "required when type=open_url: the address to open, as heard (\"localhost:9000\"). Null otherwise.",
     )
     val url: String? = null,
+    @property:LLMDescription("required when type=add_task: the new task's title. Null otherwise.")
+    val taskTitle: String? = null,
+    @property:LLMDescription("type=add_task: urgent/high/medium/low if named. Null otherwise.")
+    val taskPriority: String? = null,
+    @property:LLMDescription("required when type=move_task or run_task: which task, as heard (key, number or title words). Null otherwise.")
+    val taskRef: String? = null,
+    @property:LLMDescription("required when type=move_task: the column as heard (in progress, review, done…). Null otherwise.")
+    val taskStatus: String? = null,
+    @property:LLMDescription("required when type=run_task: the agent as heard (claude, codex, pi…). Null otherwise.")
+    val taskAgent: String? = null,
+    @property:LLMDescription(
+        "type=move_task / run_task: the key from the 'Tasks on the board' list that the user most likely " +
+            "means, correcting speech-to-text mistakes (\"L C one\" is LC-1; \"log in\" is login). Null only " +
+            "when no listed task is plausible.",
+    )
+    val taskKey: String? = null,
+    @property:LLMDescription(
+        "type=move_task / run_task: comma-separated keys of other plausible tasks when the choice is " +
+            "uncertain; null when sure.",
+    )
+    val taskAlternatives: String? = null,
 ) {
+    private fun altKeys() = taskAlternatives.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
     fun toVoiceAction(): VoiceAction? = when (type) {
         "open_url" -> url?.takeIf { it.isNotBlank() }?.let { VoiceAction.OpenUrl(it) }
         "navigate" -> view?.let { VoiceAction.Navigate(it) }
@@ -396,6 +468,9 @@ data class VoiceStep(
         "remove_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.RemoveWorktree(it) }
         "composer_status" -> VoiceAction.ComposerStatus
         "set_font_size" -> if (fontSize != null || change != null) VoiceAction.SetFontSize(fontSize, change) else null
+        "add_task" -> taskTitle?.takeIf { it.isNotBlank() }?.let { VoiceAction.AddTask(it, taskPriority) }
+        "move_task" -> if (!taskRef.isNullOrBlank() && !taskStatus.isNullOrBlank()) VoiceAction.MoveTask(taskRef, taskStatus, taskKey?.trim(), altKeys()) else null
+        "run_task" -> if (!taskRef.isNullOrBlank() && !taskAgent.isNullOrBlank()) VoiceAction.RunTask(taskRef, taskAgent, taskKey?.trim(), altKeys()) else null
         "confirm" -> VoiceAction.Confirm
         "respond_permission" -> behavior?.let { VoiceAction.RespondPermission(it) }
         else -> null
@@ -422,6 +497,8 @@ data class VoiceRouterContext(
     val hasPendingPermission: Boolean = false,
     /** True when a confirmation card (delete, discard, Bypass…) is open — makes "yes"/"confirm" mean confirm. */
     val hasConfirmation: Boolean = false,
+    /** The board's tasks as "KEY [status] title" lines, so the model can correct a misheard task reference. */
+    val tasks: List<String> = emptyList(),
 )
 
 private const val SYSTEM_PROMPT = """
@@ -478,6 +555,11 @@ an ordered list of actions from the fixed grammar. Rules:
   mode, add retry logic") return a single ask_agent with the task in `instruction` and the
   named settings in its mode/model/worktree fields — do NOT split them into set_* steps, which
   would change the defaults permanently.
+- Never set ask_agent's `mode` from the words of the task itself. "Create a step-by-step plan
+  for the API", "plan the migration", "write an edit script", "ask before changing things"
+  describe the work, not a permission mode — mode stays null, so the agent starts in the
+  default Auto mode. Only an explicit mode phrase ("in plan mode", "use plan mode", "with
+  accept edits", "in manual mode", "bypass permissions") sets it.
 - Font size: "set the font size to 16", "text size 20" -> set_font_size with fontSize=16 / 20.
   "bigger", "larger", "zoom in on the code", "increase the font" -> set_font_size with
   change="larger"; "smaller", "decrease", "shrink the text" -> change="smaller"; "reset the
@@ -488,6 +570,15 @@ an ordered list of actions from the fixed grammar. Rules:
 - A name with a file extension ("open main.ts", "show server.ts") is open_file with that name as
   the path — never navigate. "main" in a filename is not the home view; the leading "open"
   is not part of the path.
+- The Tasks view is a Kanban board of the project's tasks. "add a task ...", "new task ...",
+  "remind me to ..." -> add_task (title only; no agent is started). "move/mark/put <task> in/to
+  <column>" -> move_task. "have <agent> work on <task>", "give <task> to <agent>", "run <task>
+  with <agent>" -> run_task. Open "tasks" / "the board" / "kanban" -> navigate with view=tasks.
+  A request to actually do work now ("fix the login bug") is still ask_agent, not add_task.
+  For move_task and run_task the context lists "Tasks on the board". Speech-to-text garbles task
+  references ("L C one" for LC-1, "log in" or "login" for the login task, "to do" for todo), so pick
+  the listed task the user most likely means and put its key in taskKey; put other plausible keys in
+  taskAlternatives. Use only keys that appear in the list.
 - Speech-to-text transcripts can be rough (dropped words, filenames spoken oddly, e.g.
   "package json" for "package.json") — use judgment.
 - Only use confirm when the context says a confirmation card is open ("confirm", "yes do
@@ -498,114 +589,230 @@ an ordered list of actions from the fixed grammar. Rules:
 """
 
 /**
- * Wraps a single Gemini call (via Koog's structured-output executor) that
- * classifies a voice transcript into a [VoiceCommandPlan]. One instance per
- * app process — cheap to hold, the underlying client is just an HTTP client.
+ * One OpenRouter chat-completions call that classifies a voice transcript into a [VoiceCommandPlan].
+ * One instance per app process; the underlying client is just an HTTP client.
  *
- * By default it talks to Google directly with [apiKey]. Pass [baseUrl] to send
- * the same requests through lenscode-bridge's /gemini proxy instead: the bridge
- * holds the real key, so [apiKey] is just a placeholder Koog insists on, and
- * [extraHeaders] (read per request) carries this device's credentials.
+ * The request is sent to [baseUrl] — normally lenscode-bridge's `/openrouter/` proxy, where the bridge
+ * holds the real key, so none is sent from here and [extraHeaders] (read per request) carries this
+ * device's credentials instead. Pass [apiKey] to call OpenRouter directly (tests, or no bridge).
+ *
+ * The model is asked for plain JSON and the reply is parsed leniently (fences, prose around the
+ * object), because which structured-output modes a model supports varies by provider.
  */
-class KoogVoiceRouter(
-    apiKey: String,
-    modelId: String,
-    baseUrl: String? = null,
-    extraHeaders: () -> Map<String, String> = { emptyMap() },
-    okHttpClient: OkHttpClient? = null,
-) {
-    // See the build.gradle.kts comment on the ktor-client-okhttp dependency —
-    // Koog's default Ktor engine crashes on Android once a custom
-    // network_security_config.xml is present in the app, regardless of host.
-    // Koog adds its own defaultRequest (base URL + key) on top of this one; ktor
-    // chains the blocks, so these headers survive.
-    // [okHttpClient] is the bridge's pinned-certificate client: through a --secure bridge the
-    // default system-trust client fails the handshake ("Trust anchor ... not found").
-    private val httpClient = HttpClient(OkHttp) {
-        okHttpClient?.let { preconfigured -> engine { this.preconfigured = preconfigured } }
-        defaultRequest { extraHeaders().forEach { (name, value) -> header(name, value) } }
-    }
-    private val settings = if (baseUrl == null) GoogleClientSettings() else GoogleClientSettings(baseUrl = baseUrl)
-    private val executor = SingleLLMPromptExecutor(GoogleLLMClient(apiKey, settings, httpClient))
+class OpenRouterVoiceRouter(
+    private val modelId: String,
+    private val baseUrl: String,
+    private val apiKey: String? = null,
+    private val extraHeaders: () -> Map<String, String> = { emptyMap() },
+    private val client: OkHttpClient = OkHttpClient(),
+) : AddressEditor {
+    suspend fun route(transcript: String, context: VoiceRouterContext): Result<VoiceCommandPlan> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val reply = chat(systemPrompt(), userPrompt(transcript, context))
+                parsePlan(reply)
+            }
+        }
 
-    // Cloning a known-good Gemini model's capabilities/limits rather than
-    // hand-picking a capability list: GoogleLLMClient does its own
-    // client-side capability gate before calling out (confirmed live —
-    // a hand-picked {Temperature, Tools, Schema.JSON.Standard} list threw
-    // "Model gemini-3.8-flash does not support chat completions"), and
-    // Gemini2_5Flash's real capability set is Koog's own source of truth
-    // for what a working Gemini chat model needs, not something to re-guess.
-    private val model = GoogleModels.Gemini2_5Flash.copy(id = modelId)
+    /**
+     * The address after a spoken correction ("it should be 103.61 not 103.69", "add slash docs",
+     * "make it http"), worked out by the model from [current] and the [spoken] transcript. The reply is
+     * checked ([parseEditedAddress]); an unusable one is a failure, never a guess.
+     */
+    override suspend fun editAddress(current: String, spoken: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                parseEditedAddress(chat(ADDRESS_EDIT_PROMPT, "Current address: $current\nUser said: \"$spoken\""))
+            }
+        }
 
-    suspend fun route(transcript: String, context: VoiceRouterContext): Result<VoiceCommandPlan> {
-        val contextLine = "Current state: view=${context.activeView}, " +
-            "diffFileOpen=${context.diffFileOpen ?: "none"}, " +
-            "terminalSelected=${context.terminalSelected}, " +
-            "agentCardOpen=${context.agentCardOpen ?: "none"}, " +
-            "hasPendingPermission=${context.hasPendingPermission}, " +
-            "hasConfirmation=${context.hasConfirmation}."
-        val result = executor.executeStructured<VoiceCommandPlan>(
-            prompt = prompt("voice-command") {
-                system(SYSTEM_PROMPT)
-                user("$contextLine\n\nTranscript: \"$transcript\"")
-            },
-            model = model,
-            examples = FEW_SHOT_EXAMPLES,
-        )
-        return result.map { it.structure }
+    private fun chat(system: String, user: String): String {
+        val body = JSONObject()
+            .put("model", modelId)
+            .put("temperature", 0)
+            .put("response_format", JSONObject().put("type", "json_object"))
+            // Not turning reasoning off: z-ai/glm-5.3-flash rejects requests that do (HTTP 400, "reasoning is mandatory").
+            .put(
+                "messages",
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", system))
+                    .put(JSONObject().put("role", "user").put("content", user)),
+            )
+        val request = Request.Builder()
+            .url(baseUrl.trimEnd('/') + "/chat/completions")
+            .post(body.toString().toRequestBody(JSON_MEDIA))
+            .apply {
+                apiKey?.let { header("Authorization", "Bearer $it") }
+                extraHeaders().forEach { (name, value) -> header(name, value) }
+            }
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            check(response.isSuccessful) { "OpenRouter HTTP ${response.code}: ${errorMessage(text)}" }
+            return replyContent(text)
+        }
     }
 
     private companion object {
-        val FEW_SHOT_EXAMPLES = listOf(
-            VoiceCommandPlan(
-                listOf(
-                    VoiceStep(type = "navigate", view = "code"),
-                    VoiceStep(type = "open_file", path = "package.json", line = 20),
-                ),
-            ),
-            VoiceCommandPlan(listOf(VoiceStep(type = "search", query = "authentication middleware"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "diff"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "accept_changes"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "open_file", path = "auth.ts"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "new_agent"))),
-            VoiceCommandPlan(
-                listOf(VoiceStep(type = "ask_agent", instruction = "start a http server in this project")),
-            ),
-            VoiceCommandPlan(listOf(VoiceStep(type = "ask_agent", instruction = "add a test for the login route"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "allow"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "deny"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "current"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "all"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "terminal test agent"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "open_agent", target = "terminal test agent"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "dismiss"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "close_terminal", target = "all"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "kill_terminal"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "settings"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "browser"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_mode", mode = "plan"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_machine", machine = "dev a"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "remove_worktree", branch = "feature-x"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", fontSize = 18))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", change = "larger"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "open_url", url = "localhost:9000"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
-            VoiceCommandPlan(
-                listOf(
-                    VoiceStep(
-                        type = "ask_agent",
-                        instruction = "add retry logic to the bridge",
-                        model = "opus",
-                        mode = "plan",
-                        worktree = true,
-                    ),
-                ),
-            ),
-        )
+        val JSON_MEDIA = "application/json".toMediaType()
     }
 }
+
+/** Worked examples shown to the model in the system prompt. */
+internal object OpenRouterVoiceRouterExamples {
+    val all = listOf(
+        VoiceCommandPlan(
+            listOf(
+                VoiceStep(type = "navigate", view = "code"),
+                VoiceStep(type = "open_file", path = "package.json", line = 20),
+            ),
+        ),
+        VoiceCommandPlan(listOf(VoiceStep(type = "search", query = "authentication middleware"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "diff"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "accept_changes"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "open_file", path = "auth.ts"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "new_agent"))),
+        VoiceCommandPlan(
+            listOf(VoiceStep(type = "ask_agent", instruction = "start a http server in this project")),
+        ),
+        VoiceCommandPlan(listOf(VoiceStep(type = "ask_agent", instruction = "add a test for the login route"))),
+        // "plan" here is the task, not a permission mode: mode stays null.
+        VoiceCommandPlan(
+            listOf(VoiceStep(type = "ask_agent", instruction = "create a step-by-step plan for the dockerfile and API endpoints")),
+        ),
+        VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "allow"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "deny"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "current"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "all"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "terminal test agent"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "open_agent", target = "terminal test agent"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "dismiss"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "close_terminal", target = "all"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "kill_terminal"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "settings"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "browser"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_mode", mode = "plan"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "remove_worktree", branch = "feature-x"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", fontSize = 18))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", change = "larger"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "open_url", url = "localhost:9000"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
+        VoiceCommandPlan(
+            listOf(
+                VoiceStep(
+                    type = "ask_agent",
+                    instruction = "add retry logic to the bridge",
+                    model = "opus",
+                    mode = "plan",
+                    worktree = true,
+                ),
+            ),
+        ),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Prompt and reply handling — plain functions so they can be unit-tested.
+// ---------------------------------------------------------------------------
+
+private val planJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    coerceInputValues = true
+}
+
+private val exampleJson = Json { encodeDefaults = false }
+
+internal fun userPrompt(transcript: String, context: VoiceRouterContext): String {
+    val contextLine = "Current state: view=${context.activeView}, " +
+        "diffFileOpen=${context.diffFileOpen ?: "none"}, " +
+        "terminalSelected=${context.terminalSelected}, " +
+        "agentCardOpen=${context.agentCardOpen ?: "none"}, " +
+        "hasPendingPermission=${context.hasPendingPermission}, " +
+        "hasConfirmation=${context.hasConfirmation}." +
+        if (context.tasks.isEmpty()) "" else "\nTasks on the board:\n" + context.tasks.joinToString("\n")
+    return "$contextLine\n\nTranscript: \"$transcript\""
+}
+
+/** The routing rules, then the exact JSON shape (with each field's meaning) and worked examples. */
+@OptIn(ExperimentalSerializationApi::class)
+internal fun systemPrompt(): String {
+    val descriptor = VoiceStep.serializer().descriptor
+    val fields = (0 until descriptor.elementsCount).joinToString("\n") { i ->
+        val description = descriptor.getElementAnnotations(i).filterIsInstance<LLMDescription>().firstOrNull()?.description
+        "- ${descriptor.getElementName(i)}: ${description ?: ""}".trimEnd()
+    }
+    val examples = OpenRouterVoiceRouterExamples.all.joinToString("\n") {
+        exampleJson.encodeToString(VoiceCommandPlan.serializer(), it)
+    }
+    return SYSTEM_PROMPT.trim() + "\n\n" +
+        "Reply with ONLY a JSON object, no prose and no code fences: " +
+        "{\"actions\":[{\"type\":\"...\", ...}]}. Each action has a `type` plus only the fields it needs " +
+        "(omit the rest). Fields:\n$fields\n\nExamples of valid replies:\n$examples"
+}
+
+/** The model's text → a plan. Tolerates a ```json fence or sentences around the object. */
+internal fun parsePlan(reply: String): VoiceCommandPlan {
+    val start = reply.indexOf('{')
+    val end = reply.lastIndexOf('}')
+    require(start in 0 until end) { "The model replied with no JSON object." }
+    return planJson.decodeFromString(VoiceCommandPlan.serializer(), reply.substring(start, end + 1))
+}
+
+internal fun replyContent(responseBody: String): String {
+    val content = JSONObject(responseBody)
+        .optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")
+    require(!content.isNullOrBlank()) { "The model sent an empty reply." }
+    return content
+}
+
+internal fun errorMessage(responseBody: String): String = runCatching {
+    JSONObject(responseBody).optJSONObject("error")?.optString("message")
+}.getOrNull().takeUnless { it.isNullOrBlank() } ?: responseBody.take(200)
+
+internal const val ADDRESS_EDIT_PROMPT = """
+You fix a web address after the user speaks a correction. You get the CURRENT address and the speech-to-text
+transcript of what they said. Reply with ONLY a JSON object {"address":"<the complete new address>"} — no
+prose, no code fences, no spaces inside the address.
+Rules:
+- Apply the correction to the current address and keep everything else exactly as it is: scheme, host, port,
+  path and query.
+- The transcript may be a correction ("it should be 103.61 not 103.69", "make the last digit 1", "change 8000
+  to 8001", "add slash docs", "make it http", "remove the port"), may spell numbers ("one oh three" is 103), or
+  may be a whole new address.
+- "X not Y", "X instead of Y" and "change Y to X" mean: replace Y with X wherever Y appears in the current
+  address (match the digits and dots literally).
+- Spoken symbols: dot is ".", colon is ":", slash is "/", dash is "-".
+- A whole new address replaces the current one. Digits spoken one at a time ("one nine two dot one six eight
+  dot zero dot ten") are 192.168.0.10.
+- Never add parts the user did not say. If you cannot tell what they want, return the current address
+  unchanged.
+Examples (current -> said -> reply):
+http://100.96.103.69:8000/ -> "it should be 103.61 not 103.69" -> {"address":"http://100.96.103.61:8000/"}
+http://100.96.103.69:8000/ -> "make the last digit 1" -> {"address":"http://100.96.103.61:8000/"}
+http://192.168.1.157:3000 -> "change the port to 3001" -> {"address":"http://192.168.1.157:3001"}
+http://192.168.1.157:3000 -> "actually add slash docs" -> {"address":"http://192.168.1.157:3000/docs"}
+https://example.com/docs -> "make it http" -> {"address":"http://example.com/docs"}
+http://10.0.0.5:8080/app -> "it should be 5 not 8" -> {"address":"http://10.0.0.5:8080/app"}
+"""
+
+private val addressShape = Regex("""^([A-Za-z][A-Za-z0-9+.-]*://)?[^\s/?#]+(/\S*|\?\S*)?$""")
+
+/** The model's reply → the address, or an error when it isn't one (so a bad reply never lands in the field). */
+internal fun parseEditedAddress(reply: String): String {
+    val start = reply.indexOf('{')
+    val end = reply.lastIndexOf('}')
+    require(start in 0 until end) { "The model replied with no JSON object." }
+    val address = JSONObject(reply.substring(start, end + 1)).optString("address", "").trim()
+    require(address.isNotEmpty() && address.length <= MAX_ADDRESS_LENGTH && addressShape.matches(address)) {
+        "The model did not return a usable address."
+    }
+    return address
+}
+
+private const val MAX_ADDRESS_LENGTH = 300

@@ -207,6 +207,60 @@ data class GitStatus(
     val files: List<GitFileStatus> = emptyList(),
 )
 
+/** An agent session attached to a task by the Paseo Tasks plugin. [threadId] is the Paseo agent id. */
+@Serializable
+data class TaskThread(
+    val threadId: String = "",
+    val presetName: String = "",
+    val liveStatus: String = "",
+)
+
+/** One task from the Paseo Tasks plugin (`tasks.list`). */
+@Serializable
+data class TaskCard(
+    /** "ABC-12". */
+    val key: String = "",
+    val title: String = "",
+    /** backlog | todo | in_progress | in_review | done | canceled */
+    val status: String = "backlog",
+    /** urgent | high | medium | low | none */
+    val priority: String = "none",
+    val dueDate: String? = null,
+    val labels: List<String> = emptyList(),
+    val summary: String = "",
+    val agentsWorking: Int = 0,
+    val threads: List<TaskThread> = emptyList(),
+)
+
+/** Result of `tasks.create` / `tasks.update`. */
+@Serializable
+data class CreatedTask(val task: TaskCard = TaskCard())
+
+@Serializable
+data class TaskProject(val prefix: String = "", val name: String = "")
+
+/** A saved way to start an agent on a task (provider, model, permissions). */
+@Serializable
+data class TaskPreset(
+    val name: String = "",
+    val providerId: String = "",
+    val modelId: String = "",
+    /** "project-default" or "new-worktree". */
+    val environmentKind: String = "project-default",
+    val instructions: String = "",
+)
+
+@Serializable
+data class TasksBoard(
+    /** False when the Paseo Tasks plugin isn't running on that machine; [reason] says what to do. */
+    val available: Boolean = false,
+    val reason: String? = null,
+    val statuses: List<String> = emptyList(),
+    val projects: List<TaskProject> = emptyList(),
+    val presets: List<TaskPreset> = emptyList(),
+    val tasks: List<TaskCard> = emptyList(),
+)
+
 /** One coding-agent provider from `provider.list`, with the model ids it offers. */
 @Serializable
 data class ProviderModeInfo(
