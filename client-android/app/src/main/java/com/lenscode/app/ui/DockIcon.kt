@@ -94,6 +94,12 @@ fun DockIcon(id: String, color: Color) {
                     line(2f, 9f, 22f, 9f)
                     node(5.5f, 6.5f); node(8.5f, 6.5f)
                 }
+                "tasks" -> {
+                    // Kanban: three columns of differing card counts.
+                    box(3f, 3f, 5f, 18f, 1.5f)
+                    box(9.5f, 3f, 5f, 11f, 1.5f)
+                    box(16f, 3f, 5f, 15f, 1.5f)
+                }
                 "settings" -> {
                     drawCircle(color, 3.5f, Offset(12f, 12f), style = stroke)
                     val spokes = 8

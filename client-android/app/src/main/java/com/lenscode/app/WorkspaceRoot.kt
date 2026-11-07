@@ -60,6 +60,7 @@ import com.lenscode.app.net.BridgeClient
 import com.lenscode.app.net.PaneInfo
 import com.lenscode.app.ui.AgentChipContent
 import com.lenscode.app.ui.AgentsPanelContent
+import com.lenscode.app.ui.TasksPanelContent
 import com.lenscode.app.ui.DiffPanelContent
 import com.lenscode.app.ui.DockButtonContent
 import com.lenscode.app.ui.agentChipSurface
@@ -307,6 +308,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         ui.layoutGeneration++ // re-center the main panel and its attached rows
     }
     val gitStatus by bridge.gitStatus.collectAsState()
+    val tasksBoard by bridge.tasks.collectAsState()
+    val tasksError by bridge.tasksError.collectAsState()
+    val tasksMachineId by bridge.tasksMachineId.collectAsState()
     val gitDiffPath by bridge.gitDiffPath.collectAsState()
     val gitDiffText by bridge.gitDiffText.collectAsState()
     val branches by bridge.branches.collectAsState()
@@ -1383,6 +1387,60 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 )
             }
 
+            is com.lenscode.app.voice.VoiceAction.AddTask -> {
+                val priority = action.priority?.let { com.lenscode.app.voice.parseTaskPriority(it) }
+                bridge.createTask(
+                    action.title,
+                    priority = priority,
+                    status = "todo",
+                    onDone = { showToast("Added ${it.key}: ${it.title}") },
+                    onError = { showToast(it) },
+                )
+            }
+
+            is com.lenscode.app.voice.VoiceAction.MoveTask -> {
+                val status = com.lenscode.app.voice.parseTaskStatus(action.status)
+                val board = tasksBoard
+                if (status == null) {
+                    showToast("Which column? Try todo, in progress, in review or done.")
+                } else if (board == null) {
+                    showToast("Open the Tasks view first so I can see the board.")
+                } else {
+                    when (val m = com.lenscode.app.voice.resolveTaskChoice(action.task, action.key, action.alternatives, board.tasks)) {
+                        is com.lenscode.app.voice.TaskMatch.Found -> bridge.updateTask(
+                            m.task.key, status = status,
+                            onDone = { showToast("${m.task.key} → ${com.lenscode.app.ui.taskStatusLabel(status)}") },
+                            onError = { showToast(it) },
+                        )
+                        is com.lenscode.app.voice.TaskMatch.Ambiguous ->
+                            showToast("Which one? ${m.candidates.take(3).joinToString(" or ") { it.key }}")
+                        com.lenscode.app.voice.TaskMatch.NotFound -> showToast("No task matches \"${action.task}\".")
+                    }
+                }
+                ui.activeView = "tasks"
+            }
+
+            is com.lenscode.app.voice.VoiceAction.RunTask -> {
+                val board = tasksBoard
+                val preset = board?.let { com.lenscode.app.voice.resolvePreset(action.agent, it.presets) }
+                if (board == null) {
+                    showToast("Open the Tasks view first so I can see the board.")
+                } else if (preset == null) {
+                    showToast("No agent preset called \"${action.agent}\".")
+                } else {
+                    when (val m = com.lenscode.app.voice.resolveTaskChoice(action.task, action.key, action.alternatives, board.tasks)) {
+                        is com.lenscode.app.voice.TaskMatch.Found -> bridge.runTask(
+                            m.task, preset,
+                            onDone = { showToast("Started ${preset.name} on ${m.task.key}") },
+                            onError = { showToast(it) },
+                        )
+                        is com.lenscode.app.voice.TaskMatch.Ambiguous ->
+                            showToast("Which one? ${m.candidates.take(3).joinToString(" or ") { it.key }}")
+                        com.lenscode.app.voice.TaskMatch.NotFound -> showToast("No task matches \"${action.task}\".")
+                    }
+                }
+            }
+
             com.lenscode.app.voice.VoiceAction.Dismiss -> {
                 // Priority: most specific/most-recently-opened overlay first —
                 // in practice at most one of these is ever open at once, but
@@ -1675,6 +1733,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             agentCardOpen = ui.agentDetail?.agent?.label,
             hasPendingPermission = permissions.isNotEmpty(),
             hasConfirmation = ui.deleteConfirm != null || ui.diffDiscardConfirm != null,
+            tasks = tasksBoard?.tasks.orEmpty().take(80).map { "${it.key} [${it.status}] ${it.title}" },
         )
         // ui.voiceCommandReview stays set (not nulled here) so the overlay keeps
         // showing the transcript through the "Thinking…" state below.
@@ -1819,7 +1878,24 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 bridge.refreshAgents()
             }
             "diff" -> bridge.refreshGitStatus()
+            "tasks" -> {
+                bridge.refreshTasks()
+                bridge.refreshMachines()
+            }
             "remote" -> bridge.refreshMachines()
+        }
+    }
+
+    // Voice task commands match against the board, so have it loaded before the Tasks view is ever opened.
+    LaunchedEffect(state.bridgeConnected) { if (state.bridgeConnected) bridge.refreshTasks() }
+
+    // The task board is edited by agents (through the Tasks plugin) while it is open, so keep it fresh.
+    LaunchedEffect(ui.activeView) {
+        if (ui.activeView == "tasks") {
+            while (true) {
+                kotlinx.coroutines.delay(8_000)
+                bridge.refreshTasks()
+            }
         }
     }
 
@@ -2031,6 +2107,25 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             ui.currentThemeId = id
                             themeStore.save(id)
                             com.lenscode.app.ui.applyAppTheme(id)
+                        },
+                    )
+                    "tasks" -> TasksPanelContent(
+                        board = tasksBoard,
+                        error = tasksError,
+                        agents = agents,
+                        machines = machines,
+                        machineId = tasksMachineId,
+                        onMachine = { bridge.setTasksMachine(it) },
+                        onRefresh = { bridge.refreshTasks() },
+                        onMove = { key, status ->
+                            bridge.updateTask(key, status = status, onError = { showToast(it) })
+                        },
+                        onRun = { task, preset ->
+                            bridge.runTask(
+                                task, preset,
+                                onDone = { showToast("Started ${preset.name} on ${task.key}") },
+                                onError = { showToast(it) },
+                            )
                         },
                     )
                     "diff" -> DiffPanelContent(
@@ -2334,6 +2429,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             "agents" to "Agents",
                             "permissions" to "Permissions",
                             "remote" to "Remote",
+                            "tasks" to "Tasks",
                             "voice" to "Voice",
                             "snip" to "Snip",
                             "browser" to "Browser",
