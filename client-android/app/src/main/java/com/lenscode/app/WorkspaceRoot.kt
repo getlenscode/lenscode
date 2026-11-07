@@ -188,6 +188,8 @@ internal class WorkspaceUiState(
     var browserOverlayOpen by mutableStateOf(false)
     /** The address the Browser page is showing. Only changes when you open one (it navigates the WebView). */
     var browserUrl by mutableStateOf(initialBrowserUrl)
+    /** Which machine the Browser button opens previews on: "local" (the bridge's computer) or a remote's id. */
+    var browserHostId by mutableStateOf("local")
 
     /** The address being typed or dictated in the Browser's launch dialog; becomes [browserUrl] on Open. */
     var browserDraft by mutableStateOf(initialBrowserUrl)
@@ -307,11 +309,15 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             themeStore.load(),
             editorPrefs.loadFontSize(),
             bridge.state.value.bridgeUrl,
-        )
+        ).also { it.browserHostId = browserUrlStore.loadHost() }
     }
+    // The dropdown lists connected machines, so make sure that list is current when it opens.
     LaunchedEffect(ui.browserOverlayOpen) {
-        // Edits (typed or spoken) start from the page you are on, and don't touch it until Open.
-        if (ui.browserOverlayOpen) ui.browserDraft = ui.browserUrl
+        if (ui.browserOverlayOpen) {
+            // Edits (typed or spoken) start from the page you are on, and don't touch it until Open.
+            ui.browserDraft = ui.browserUrl
+            bridge.refreshMachines()
+        }
     }
     fun resetLayout() {
         layoutStore.resetAll()
@@ -2392,11 +2398,16 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                     },
                     onDismiss = { bridge.closeRemoteBrowse() },
                 )
+                val browserHostList = com.lenscode.app.ui.browserHosts(state.bridgeUrl, machines)
+                val browserHost = browserHostList.firstOrNull { it.id == ui.browserHostId } ?: browserHostList.first()
                 com.lenscode.app.ui.BrowserLaunchOverlay(
                     visible = ui.browserOverlayOpen,
                     url = ui.browserDraft,
                     onUrlChange = { ui.browserDraft = it },
-                    onOpen = { openInAppBrowser(ui.browserDraft) },
+                    hosts = browserHostList,
+                    selectedHostId = browserHost.id,
+                    onHostSelected = { ui.browserHostId = it; browserUrlStore.saveHost(it) },
+                    onOpen = { openInAppBrowser(com.lenscode.app.ui.applyBrowserHost(ui.browserDraft, browserHost.host)) },
                     onDismiss = { ui.browserOverlayOpen = false },
                     isListeningForUrl = (ui.isListening && ui.voiceMode == "browserUrl") || ui.browserEditing,
                     onVoiceInput = { requestVoice("browserUrl") },
