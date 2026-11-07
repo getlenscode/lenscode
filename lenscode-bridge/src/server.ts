@@ -27,6 +27,7 @@ import { RemoteFiles } from "./remoteFiles.ts";
 import { readBoard, createTask, updateTask } from "./tasks.ts";
 import { OpenRouterKeyStore, type OpenRouterStatus } from "./openrouterKey.ts";
 import { SetupHttp, lanSetupUrls } from "./setupHttp.ts";
+import { AssemblyKeyStore } from "./assemblyKey.ts";
 import { log } from "./log.ts";
 
 export const BRIDGE_VERSION = "0.1.0-alpha.4";
@@ -68,6 +69,7 @@ export class BridgeServer {
   private pairing: PairingRegistry;
   private openrouterKey: OpenRouterKeyStore;
   private setupHttp: SetupHttp;
+  private assemblyKey: AssemblyKeyStore;
   /** workspaceId → file service rooted at that workspace's directory. */
   private workspaces = new Map<string, WorkspaceFiles>();
   /** workspaceId → git service rooted at that same directory. */
@@ -90,7 +92,16 @@ export class BridgeServer {
       apiKey: cfg.openrouterApiKey,
       model: cfg.openrouterModel,
     });
+    this.assemblyKey = new AssemblyKeyStore(cfg.assemblyStorePath, {
+      apiKey: cfg.assemblyApiKey,
+      model: cfg.assemblyModel,
+    });
     this.setupHttp = new SetupHttp({
+      assembly: {
+        store: this.assemblyKey,
+        upstream: cfg.assemblyUpstream,
+        onChange: (status) => this.broadcastEvent("connection", "assemblyai_key_changed", status),
+      },
       store: this.openrouterKey,
       mode: cfg.mode,
       upstream: cfg.openrouterUpstream,
@@ -1372,6 +1383,11 @@ export class BridgeServer {
 
   private send(ws: WebSocket, msg: unknown): void {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  /** Test access to the AssemblyAI key state. */
+  assemblyStatus(): import("./assemblyKey.ts").AssemblyStatus {
+    return this.assemblyKey.status();
   }
 
   /** Test access to the /setup + OpenRouter proxy handler (setup code, status). */

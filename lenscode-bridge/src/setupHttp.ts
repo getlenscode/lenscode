@@ -2,11 +2,12 @@
  * HTTP side of the key features (the WebSocket server owns everything else):
  *
  *   GET/POST /setup          a small page, opened from a phone or PC browser, where the user
- *                            pastes the OpenRouter key once. The headset's
+ *                            pastes the OpenRouter and AssemblyAI keys once. The headset's
  *                            Settings panel only shows this URL — no typing in AR.
  *   POST /openrouter/chat/completions
  *                            a pass-through to openrouter.ai that swaps in the stored key, so
  *                            the headset never holds it.
+ *   GET /assemblyai/token    a short-lived AssemblyAI streaming token.
  *
  * Trust follows the WebSocket rules (spec §55): dev mode trusts the LAN; prod mode
  * needs a paired device's token for the proxy and the console-printed setup code
@@ -18,6 +19,13 @@ import { randomInt, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import { log } from "./log.ts";
 import { checkOpenRouterKey, type OpenRouterKeyStore, type OpenRouterStatus } from "./openrouterKey.ts";
+import {
+  ASSEMBLY_STREAMING_UPSTREAM,
+  mintAssemblyToken,
+  type AssemblyKeyStore,
+  type AssemblyStatus,
+} from "./assemblyKey.ts";
+
 export const OPENROUTER_UPSTREAM = "https://openrouter.ai/api/v1";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_SETUP_BODY_BYTES = 8 * 1024;
@@ -34,6 +42,15 @@ export interface SetupHttpOptions {
   /** Called after the stored key changes, so connected headsets can refresh. */
   onChange: (status: OpenRouterStatus) => void;
   fetchImpl?: typeof fetch;
+  /**
+   * AssemblyAI streaming speech-to-text. Shares this page and its trust rules: the key is
+   * saved from /setup, and paired headsets fetch short-lived tokens from /assemblyai/token.
+   */
+  assembly?: {
+    store: AssemblyKeyStore;
+    upstream?: string;
+    onChange: (status: AssemblyStatus) => void;
+  };
 }
 
 export class SetupHttp {
@@ -60,6 +77,13 @@ export class SetupHttp {
     const url = new URL(req.url ?? "/", "http://bridge.local");
     if (url.pathname === "/setup") {
       this.setup(req, res).catch((e) => this.fail(res, 500, `Setup failed: ${String(e)}`));
+      return true;
+    }
+    if (url.pathname === "/assemblyai/token" && this.opts.assembly) {
+      this.assemblyToken(req, res).catch((e) => {
+        log("warn", "assemblyai token failed", { error: String(e) });
+        this.sendJson(res, 502, { error: "Could not reach AssemblyAI from the bridge." });
+      });
       return true;
     }
     if (url.pathname.startsWith("/openrouter/")) {
@@ -104,6 +128,11 @@ export class SetupHttp {
       return;
     }
 
+    if (form.get("provider") === "assemblyai" && this.opts.assembly) {
+      await this.setupAssembly(form, res, this.opts.assembly);
+      return;
+    }
+
     if (form.get("action") === "clear") {
       this.opts.store.clear();
       this.afterChange();
@@ -135,6 +164,88 @@ export class SetupHttp {
     );
   }
 
+  private async setupAssembly(
+    form: URLSearchParams,
+    res: ServerResponse,
+    assembly: NonNullable<SetupHttpOptions["assembly"]>,
+  ): Promise<void> {
+    const changed = () => {
+      if (this.opts.mode === "prod") this.rotateCode();
+      assembly.onChange(assembly.store.status());
+    };
+    if (form.get("action") === "clear") {
+      assembly.store.clear();
+      changed();
+      this.sendHtml(res, 200, this.renderPage({ ok: "The saved AssemblyAI key was removed." }));
+      return;
+    }
+    const apiKey = (form.get("apiKey") ?? "").trim();
+    const model = (form.get("model") ?? "").trim();
+    if (!apiKey) {
+      this.sendHtml(res, 400, this.renderPage({ error: "Paste your AssemblyAI API key first." }));
+      return;
+    }
+    if (!/^[\w.-]*$/.test(model)) {
+      this.sendHtml(res, 400, this.renderPage({ error: "That model name has odd characters in it." }));
+      return;
+    }
+    const check = await mintAssemblyToken(apiKey, assembly.upstream, this.fetchImpl);
+    if (!check.ok) {
+      this.sendHtml(res, 400, this.renderPage({ error: check.message }));
+      return;
+    }
+    assembly.store.set(apiKey, model || undefined);
+    changed();
+    this.sendHtml(
+      res,
+      200,
+      this.renderPage({ ok: "AssemblyAI key saved. The Speak buttons now use it — you can close this page." }),
+    );
+  }
+
+  /** prod only: reject requests that are not from a paired device. Returns true if allowed. */
+  private deviceAllowed(req: IncomingMessage, res: ServerResponse, onDeny: () => void): boolean {
+    if (this.opts.mode !== "prod") return true;
+    const deviceId = headerValue(req.headers["x-lenscode-device"]);
+    const token = headerValue(req.headers["x-lenscode-token"]);
+    if (deviceId && this.opts.authorizeDevice(deviceId, token)) return true;
+    onDeny();
+    return false;
+  }
+
+  private async assemblyToken(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const assembly = this.opts.assembly!;
+    if (req.method !== "GET") {
+      res.writeHead(405, { allow: "GET" }).end();
+      return;
+    }
+    if (
+      !this.deviceAllowed(req, res, () =>
+        this.sendJson(res, 401, { error: "This device is not paired with lenscode-bridge." }),
+      )
+    ) {
+      return;
+    }
+    const apiKey = assembly.store.apiKey();
+    if (!apiKey) {
+      this.sendJson(res, 503, {
+        error: "No AssemblyAI key is set on the bridge. Open its /setup page to add one.",
+      });
+      return;
+    }
+    const upstream = assembly.upstream ?? ASSEMBLY_STREAMING_UPSTREAM;
+    const minted = await mintAssemblyToken(apiKey, upstream, this.fetchImpl);
+    if (!minted.ok) {
+      this.sendJson(res, minted.unreachable ? 502 : 401, { error: minted.message });
+      return;
+    }
+    this.sendJson(res, 200, {
+      token: minted.token,
+      model: assembly.store.model(),
+      url: `${upstream.replace(/^http/, "ws")}/v3/ws`,
+    });
+  }
+
   private afterChange(): void {
     if (this.opts.mode === "prod") this.rotateCode();
     this.opts.onChange(this.opts.store.status());
@@ -163,7 +274,7 @@ export class SetupHttp {
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LensCode · OpenRouter key</title>
+<title>LensCode · API keys</title>
 <style>
   :root { --bg:#fff; --fg:#14171f; --muted:#5b6475; --card:#f4f6fa; --line:#d6dbe6; --accent:#0a7c8c; --ok:#1a7f4b; --bad:#b3261e; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0f1218; --fg:#e8ecf4; --muted:#9aa4b8; --card:#181d27; --line:#2b3345; --accent:#38bdd0; --ok:#4ade80; --bad:#f87171; } }
@@ -200,8 +311,39 @@ ${msg.ok ? `<p class="ok">${esc(msg.ok)}</p>` : ""}${msg.error ? `<p class="bad"
   <button type="submit">Save key</button>
   ${s.source === "file" ? `<button class="link" type="submit" name="action" value="clear">Remove saved key</button>` : ""}
 </form>
+${this.renderAssemblySection(prod)}
 ${prod ? "" : `<small>Dev mode: this page is plain HTTP, so the key crosses your local network unencrypted once. Use prod mode with TLS on shared networks.</small>`}
 </main></body></html>`;
+  }
+
+  private renderAssemblySection(prod: boolean): string {
+    const assembly = this.opts.assembly;
+    if (!assembly) return "";
+    const s = assembly.store.status();
+    const status = s.configured
+      ? `Active — key from ${s.source === "file" ? "this page" : "the ASSEMBLYAI_API_KEY environment variable"}, model ${s.model}`
+      : "Not set — the Speak buttons show an error until a key is added";
+    return `<hr style="border:0;border-top:1px solid var(--line);margin:32px 0">
+<h1>AssemblyAI key (speech-to-text)</h1>
+<div>Streaming transcription for the Speak buttons. The headset gets short-lived tokens; the key stays here.</div>
+<div class="status">${esc(status)}</div>
+<form method="post" action="/setup" autocomplete="off">
+  <input type="hidden" name="provider" value="assemblyai">
+  <label for="aaiKey">API key</label>
+  <input id="aaiKey" name="apiKey" type="password" autocomplete="off" autocapitalize="none" spellcheck="false">
+  <small>Get one at assemblyai.com/dashboard</small>
+  <label for="aaiModel">Streaming model (optional)</label>
+  <input id="aaiModel" name="model" type="text" autocapitalize="none" spellcheck="false" placeholder="universal-streaming-english">
+  <small>Streaming models: universal-streaming-english, universal-streaming-multilingual, universal-3-6-pro. Universal-2 is pre-recorded only.</small>
+  ${
+    prod
+      ? `<label for="aaiCode">Setup code</label>
+  <input id="aaiCode" name="code" type="text" inputmode="numeric" autocomplete="off" placeholder="6 digits">`
+      : ""
+  }
+  <button type="submit">Save key</button>
+  ${s.source === "file" ? `<button class="link" type="submit" name="action" value="clear">Remove saved key</button>` : ""}
+</form>`;
   }
 
   // ---------------------------------------------------------------------------

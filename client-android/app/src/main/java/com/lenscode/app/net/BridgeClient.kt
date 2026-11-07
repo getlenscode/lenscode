@@ -74,13 +74,16 @@ class BridgeClient(
     val setupUrl: String get() = BridgeUrls.setupPage(url)
 
     /**
-     * Bridge credentials for the OpenRouter proxy, read per request so a
+     * Bridge credentials for the OpenRouter proxy and the AssemblyAI token route, read per request so a
      * token issued by pairing after the router was built still applies. Dev-mode bridges ignore them.
      */
     fun deviceAuthHeaders(): Map<String, String> = buildMap {
         put("X-LensCode-Device", deviceId)
         pairingStore.loadToken()?.let { put("X-LensCode-Token", it) }
     }
+
+    /** Blocking: a one-minute AssemblyAI streaming token from the bridge, or why there isn't one. */
+    fun assemblyAiToken(): AssemblyTokenResult = fetchAssemblyToken(http, url, deviceAuthHeaders())
 
     private val _terminals = MutableStateFlow<List<PaneInfo>>(emptyList())
     val terminals: StateFlow<List<PaneInfo>> = _terminals

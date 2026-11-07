@@ -63,7 +63,8 @@ internal fun SettingsSection(title: String, content: @Composable () -> Unit) {
  * Settings panel (dock → Settings): bridge connection, theme, and how to give the bridge its API keys
  * without typing them in AR. The normal path is the bridge's /setup page, opened on a phone or PC —
  * this panel only shows its address and whether the OpenRouter key (voice command routing) has
- * arrived.
+ * arrived. (Speech-to-text needs an AssemblyAI key on the same page; a missing one raises a popup
+ * when you tap Speak.)
  */
 @Composable
 fun SettingsPanelContent(
@@ -156,8 +157,9 @@ fun SettingsPanelContent(
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "OpenRouter (openrouter.ai/keys) turns spoken commands into actions. The key stays " +
-                            "on the computer running lenscode-bridge — the headset never holds it.",
+                        "OpenRouter (openrouter.ai/keys) turns spoken commands into actions; AssemblyAI " +
+                            "(assemblyai.com) is the speech-to-text behind every Speak button. Both keys stay " +
+                            "on the computer running lenscode-bridge — the headset never holds them.",
                         color = LensCodeColors.Muted,
                         fontSize = 11.5.sp,
                         lineHeight = 16.sp,

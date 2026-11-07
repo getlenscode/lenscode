@@ -533,7 +533,20 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     }
     val voiceScope = rememberCoroutineScope()
 
-    val voiceRecognizer = remember { VoiceRecognizer(context) }
+    // AssemblyAI streaming only — no fallback to the on-device recognizer. A missing key raises a popup.
+    val voiceRecognizer = remember(bridge) {
+        com.lenscode.app.voice.SpeechInput(
+            com.lenscode.app.voice.AssemblyAiRecognizer(fetchToken = { bridge.assemblyAiToken() }),
+            onSetupProblem = { problem ->
+                ui.isListening = false
+                ui.dictationSession = null
+                ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                    "Speech-to-text isn't set up",
+                    com.lenscode.app.voice.speechSetupMessage(problem, bridge.setupUrl),
+                )
+            },
+        )
+    }
 
     // Debug-only text injection — types a transcript into the same review
     // popup a real recognized phrase would land in (Submit/Cancel still

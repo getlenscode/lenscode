@@ -112,3 +112,10 @@ test("--tailscale is a plain switch", () => {
   assert.equal(applyCliArgs(["--tailscale"], env, "0.0.0").action, "run");
   assert.equal(env.LENSCODE_TAILSCALE, "1");
 });
+
+test("--assemblyai-key sets ASSEMBLYAI_API_KEY", () => {
+  const env: NodeJS.ProcessEnv = {};
+  const r = applyCliArgs(["--assemblyai-key", "abc123"], env, "0.0.0");
+  assert.equal(r.action, "run");
+  assert.equal(env.ASSEMBLYAI_API_KEY, "abc123");
+});

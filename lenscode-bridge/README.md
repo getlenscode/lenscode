@@ -36,9 +36,14 @@ npx lenscode-bridge --tls-cert fullchain.pem --tls-key privkey.pem
 
 Keep `privkey.pem` private. Anyone who has it can impersonate your bridge.
 
-## OpenRouter voice routing (optional)
+## Voice: speech-to-text and command routing
 
-Free-form voice commands ("add a test for the login route") are classified by an OpenRouter model. Open `http://<your-address>:8137/setup` on your phone or computer and paste a key from <https://openrouter.ai/keys>. Also `OPENROUTER_API_KEY` / `--openrouter-key`; model `LENSCODE_OPENROUTER_MODEL` (default `z-ai/glm-5.3-flash`). It is stored on this computer, and the headset never sees it. Without a key, a voice command shows an error popup in the headset; there is no built-in fallback.
+Open `http://<your-address>:8137/setup` on your phone or computer and paste:
+
+- an **AssemblyAI** key (<https://www.assemblyai.com/dashboard>), which every mic button needs for streaming speech-to-text (there is no on-device fallback; without it the app shows a popup). Also `ASSEMBLYAI_API_KEY` / `--assemblyai-key`; model `LENSCODE_ASSEMBLYAI_MODEL` (default `universal-streaming-english`).
+- an **OpenRouter** key (<https://openrouter.ai/keys>) for free-form commands ("add a test for the login route"). Also `OPENROUTER_API_KEY` / `--openrouter-key`; model `LENSCODE_OPENROUTER_MODEL` (default `z-ai/glm-5.3-flash`).
+
+Both are stored on this computer, and the headset never sees them. Without an OpenRouter key, a voice command shows an error popup in the headset; there is no built-in fallback.
 
 ## Control the headset from Claude Code or Claude Desktop (MCP)
 
@@ -62,4 +67,4 @@ The same settings are available as environment variables: `LENSCODE_PORT`, `LENS
 
 ## Where it keeps things
 
-`~/.config/lenscode-bridge/`: `devices.json` (paired headsets), `openrouter.json` (your OpenRouter key, readable only by you), `self-signed/` (the certificate and key made by `--secure`).
+`~/.config/lenscode-bridge/`: `devices.json` (paired headsets), `openrouter.json` and `assemblyai.json` (your API keys, readable only by you), `self-signed/` (the certificate and key made by `--secure`).

@@ -90,6 +90,13 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 
 - Paseo's Claude modes include `auto` ("Auto mode": a model classifier answers permission prompts, so the accept card rarely appears). New Claude agents now start in it unless a mode is chosen: `defaultModeIdFor` / `composerModeFor` in `ui/AgentComposer.kt`. It is pinned in the app because an older daemon, or Claude on Bedrock/Vertex (where Paseo drops Auto), defaults to "Always Ask". Only for `claude`: Codex's `auto` id is its ordinary approval flow. Voice: "auto mode" picks it; "accept edits" picks Accept File Edits.
 
+## Speech-to-text (AssemblyAI)
+
+- The Speak buttons and dictation use AssemblyAI streaming only. There is deliberately **no fallback** to Google's on-device `VoiceRecognizer` (kept in the tree, unused): a missing key or unreachable bridge raises the `VoiceProblemOverlay` popup. `voice/SpeechInput` wraps it; `voice/AssemblyAiRecognizer.kt` streams 16 kHz PCM; `AssemblyAiProtocol.kt` is the testable message/URL logic.
+- The key lives on the bridge, like OpenRouter's: paste it on `/setup` (second section), or `ASSEMBLYAI_API_KEY` / `--assemblyai-key`. Stored in `~/.config/lenscode-bridge/assemblyai.json` (0600). The headset calls `GET /assemblyai/token` (paired-device headers in prod) and gets a 60 s temporary token plus the model; the account key never reaches it.
+- Universal-2 is AssemblyAI's pre-recorded model, not a streaming one. Streaming models: `universal-streaming-english` (default), `universal-streaming-multilingual`, `universal-3-*-pro`; change it on `/setup` or `LENSCODE_ASSEMBLYAI_MODEL`.
+- Single-shot waits 1.2 s after an end-of-turn for another turn, because spoken digit groups pause. Not yet run against the real service from the headset.
+
 ## Themes and window look
 
 - Themes live in `ui/Theme.kt` (`ThemeId`, palettes, corner radii); the picker is Settings → App theme. **Terminal** (default) is square corners, thin outlines, flat translucent brown fills and monospace type. Small corners must go through `lensShape(dp)`, never `RoundedCornerShape(dp)` directly, or a sharp theme gets stray rounded corners.
