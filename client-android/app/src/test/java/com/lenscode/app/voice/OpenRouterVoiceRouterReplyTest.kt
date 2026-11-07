@@ -63,6 +63,13 @@ class OpenRouterVoiceRouterReplyTest {
     }
 
     @Test
+    fun `the user prompt lists the board's tasks`() {
+        val text = userPrompt("move login to done", VoiceRouterContext("tasks", null, false, null, tasks = listOf("LC-1 [todo] login")))
+        assertTrue(text.contains("Tasks on the board"))
+        assertTrue(text.contains("LC-1 [todo] login"))
+    }
+
+    @Test
     fun `every shipped example round-trips through the parser`() {
         for (example in OpenRouterVoiceRouterExamples.all) {
             val json = kotlinx.serialization.json.Json.encodeToString(VoiceCommandPlan.serializer(), example)

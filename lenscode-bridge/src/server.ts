@@ -24,6 +24,7 @@ import { TMUX_LIST_COMMAND, parseTmuxSessions, runLocalTmuxList, type TmuxSessio
 import { startControlServer, expandHome, shellQuote, connectStartingPaseo, type ControlCommand } from "./mcp/index.ts";
 import type { Server as HttpServer } from "node:http";
 import { RemoteFiles } from "./remoteFiles.ts";
+import { readBoard, createTask, updateTask } from "./tasks.ts";
 import { OpenRouterKeyStore, type OpenRouterStatus } from "./openrouterKey.ts";
 import { SetupHttp, lanSetupUrls } from "./setupHttp.ts";
 import { log } from "./log.ts";
@@ -519,6 +520,29 @@ export class BridgeServer {
               true,
               String(e),
             ),
+          });
+        }
+        return;
+      }
+      case "tasks.list":
+      case "tasks.create":
+      case "tasks.update": {
+        try {
+          const machine = req.machineId ?? "local";
+          if (machine !== "local" && !this.remote.isConnected(machine)) {
+            throw new Error(`Not connected to ${machine} — connect to it first.`);
+          }
+          const result =
+            req.type === "tasks.list"
+              ? await readBoard(machine)
+              : req.type === "tasks.create"
+                ? { task: await createTask(req, machine) }
+                : { task: await updateTask(req.key, req, machine) };
+          this.send(ws, { id: req.id, result });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", e instanceof Error ? e.message : "The Tasks request failed.", true, String(e)),
           });
         }
         return;

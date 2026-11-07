@@ -8,7 +8,7 @@ package com.lenscode.app.control
 data class ControlCommand(val name: String, val args: Map<String, String>)
 
 /** Views a control command may switch to. */
-val CONTROL_VIEWS = setOf("home", "code", "terminal", "agents", "permissions", "diff", "remote", "browser", "settings")
+val CONTROL_VIEWS = setOf("home", "code", "terminal", "agents", "permissions", "diff", "remote", "tasks", "browser", "settings")
 
 private val TMUX_SESSION = Regex("^[A-Za-z0-9._-]{1,64}$")
 

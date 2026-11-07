@@ -721,6 +721,127 @@ class BridgeClient(
         )
     }
 
+    // ── Paseo Tasks board ────────────────────────────────────────────────
+    // Not workspace-scoped: the plugin keeps one tracker per Paseo install, so the board has its own
+    // machine (the bridge's computer unless switched), independent of the machine Code is browsing.
+
+    private val _tasksMachineId = MutableStateFlow("local")
+    val tasksMachineId: StateFlow<String> = _tasksMachineId
+
+    fun setTasksMachine(machineId: String) {
+        if (_tasksMachineId.value == machineId) return
+        _tasksMachineId.value = machineId
+        _tasks.value = null
+        _tasksError.value = null
+        refreshTasks()
+    }
+
+    private val _tasks = MutableStateFlow<TasksBoard?>(null)
+    val tasks: StateFlow<TasksBoard?> = _tasks
+    private val _tasksError = MutableStateFlow<String?>(null)
+    val tasksError: StateFlow<String?> = _tasksError
+
+    fun refreshTasks() {
+        send(
+            "tasks.list",
+            JSONObject().put("machineId", _tasksMachineId.value),
+            onResult = { result ->
+                _tasksError.value = null
+                _tasks.value = decodeResult<TasksBoard>(result)
+            },
+            onError = { _tasksError.value = it.optString("message", "Could not read the task board.") },
+        )
+    }
+
+    fun createTask(
+        title: String,
+        project: String? = null,
+        priority: String? = null,
+        status: String? = null,
+        onDone: (TaskCard) -> Unit = {},
+        onError: (String) -> Unit = {},
+    ) {
+        val fields = JSONObject().put("title", title).put("machineId", _tasksMachineId.value)
+        if (project != null) fields.put("project", project)
+        if (priority != null) fields.put("priority", priority)
+        if (status != null) fields.put("status", status)
+        send(
+            "tasks.create",
+            fields,
+            onResult = { result ->
+                refreshTasks()
+                onDone(decodeResult<CreatedTask>(result).task)
+            },
+            onError = { onError(it.optString("message", "Could not create the task.")) },
+        )
+    }
+
+    fun updateTask(
+        key: String,
+        status: String? = null,
+        priority: String? = null,
+        onDone: (TaskCard) -> Unit = {},
+        onError: (String) -> Unit = {},
+    ) {
+        val fields = JSONObject().put("key", key).put("machineId", _tasksMachineId.value)
+        if (status != null) fields.put("status", status)
+        if (priority != null) fields.put("priority", priority)
+        // Show the move immediately; the refresh below replaces it with the plugin's own answer.
+        if (status != null) {
+            _tasks.value = _tasks.value?.let { b -> b.copy(tasks = b.tasks.map { if (it.key == key) it.copy(status = status) else it }) }
+        }
+        send(
+            "tasks.update",
+            fields,
+            onResult = { result ->
+                refreshTasks()
+                onDone(decodeResult<CreatedTask>(result).task)
+            },
+            onError = {
+                refreshTasks()
+                onError(it.optString("message", "Could not update the task."))
+            },
+        )
+    }
+
+    /**
+     * Starts an agent on [task] from a plugin [preset]. The plugin's own `delegate` command fails when
+     * called through its CLI, so this goes through the normal agent.create path. The agent's title
+     * starts with the task key, which is what tags the card with its provider on the board.
+     */
+    fun runTask(task: TaskCard, preset: TaskPreset, onDone: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val machine = _tasksMachineId.value
+        val remote = machine != "local"
+        // A remote agent needs a folder on that machine, which only the Code view knows.
+        if (remote && filesMachineId != machine) {
+            onError("Open a folder on $machine in Code first, then run the task.")
+            return
+        }
+        val prompt = buildString {
+            append("Work on task ${task.key}: ${task.title}\n\n")
+            if (task.summary.isNotBlank()) append(task.summary).append("\n\n")
+            if (preset.instructions.isNotBlank()) append(preset.instructions).append("\n\n")
+            append("Track progress with the paseo-tasks CLI: run `paseo-tasks update ${task.key} --status in_review` when it is ready, ")
+            append("and `paseo-tasks comment ${task.key} --body \"...\"` at milestones.")
+        }
+        createAgent(
+            provider = preset.providerId,
+            model = preset.modelId.ifBlank { null },
+            cwd = if (remote) currentWorkspaceId else ".",
+            prompt = prompt,
+            title = "${task.key}: ${task.title}",
+            workspaceId = currentWorkspaceId.takeIf { it != "local" && filesMachineId == machine },
+            machineId = machine,
+            worktree = preset.environmentKind == "new-worktree",
+            onCreated = {
+                updateTask(task.key, status = "in_progress")
+                refreshAgents()
+                onDone()
+            },
+            onError = onError,
+        )
+    }
+
     // ── Branch switcher ──────────────────────────────────────────────────
 
     private val _providers = MutableStateFlow<List<ProviderInfo>>(emptyList())

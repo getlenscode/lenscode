@@ -62,6 +62,14 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - tmux session names are typed into a shell (`tmux new -A -s <name>`), so both sides only accept `[A-Za-z0-9._-]{1,64}`; URLs must be http(s); folder paths for `open_project` are single-quoted (`shellQuote`) before they reach ssh. Keep these checks.
 - Dev from the repo: `claude mcp add lenscode -- node --experimental-strip-types <repo>/lenscode-bridge/src/main.ts mcp`. `npx lenscode-bridge mcp` needs bridge `0.1.0-alpha.4` or newer.
 
+## Tasks board (Paseo Tasks plugin)
+
+- The dock's **Tasks** view is a Kanban board of the Paseo Tasks plugin (`paseo plugin add anh-chu/tasks`; needs Paseo 0.11.2+ and Node 24+ on the daemon host). The bridge never touches its SQLite store: `src/tasks.ts` POSTs `argv` (always with `--json`) to the plugin's loopback `/cli` endpoint using the token in `$PASEO_HOME/plugin-data/tasks/bridge.json`, the same call its `paseo-tasks` script makes. Remote machines run that machine's script over SSH.
+- Requests: `tasks.list/create/update/delegate` (not workspace-scoped). Keys, statuses and priorities are validated before they reach the CLI.
+- Agents get the tracker's instructions injected by the plugin, so they create and update tasks themselves; the board polls every 8 s while open. A task's agent tags come from its attached sessions, mapped to a provider through the Agents list (`taskAgentTags`).
+- Voice: `add_task`, `move_task`, `run_task` in `VoiceRouter.kt`; spoken task references are resolved by `voice/TaskRef.kt`.
+- The JSON shapes were read from the plugin's source (`server/cli-runner.ts`, `shared/contract.ts`), and the plugin has not been run against this code yet: `test/tasks.test.ts` uses a stand-in endpoint.
+
 ## OpenRouter key (voice command routing)
 
 - Free-form commands ("add a test for the login route") are classified by an OpenRouter model, default **`z-ai/glm-5.3-flash`** (unverified on OpenRouter as of 2026-11-02 — change it on `/setup` or `LENSCODE_OPENROUTER_MODEL` if it 404s). `voice/VoiceRouter.kt`: `OpenRouterVoiceRouter` makes one chat-completions call, asks for plain JSON (`response_format: json_object`), and parses leniently (`parsePlan`); the grammar's `@LLMDescription`s become the schema in the system prompt. Koog is only used for that annotation now.

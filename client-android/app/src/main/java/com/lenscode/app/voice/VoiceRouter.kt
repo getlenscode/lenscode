@@ -29,7 +29,7 @@ sealed class VoiceAction {
     @LLMDescription("Switch the active view.")
     data class Navigate(
         @property:LLMDescription(
-            "one of: code, diff, terminal, git, agents, permissions, remote, browser, settings, home",
+            "one of: code, diff, terminal, git, agents, permissions, remote, tasks, browser, settings, home",
         )
         val view: String,
     ) : VoiceAction()
@@ -268,6 +268,55 @@ sealed class VoiceAction {
     data object Dismiss : VoiceAction()
 
     @Serializable
+    @SerialName("add_task")
+    @LLMDescription(
+        "Add a task to the project's task board (the Tasks view) — \"add a task to fix the login " +
+            "redirect\", \"new task: write release notes, high priority\", \"remind me to update the " +
+            "docs\". This only records the task; use ask_agent when the user wants the work done now.",
+    )
+    data class AddTask(
+        @property:LLMDescription("the task title as a short phrase")
+        val title: String,
+        @property:LLMDescription("urgent, high, medium or low if one was named; else null")
+        val priority: String? = null,
+    ) : VoiceAction()
+
+    @Serializable
+    @SerialName("move_task")
+    @LLMDescription(
+        "Move a task on the board to another column — \"move the login task to in progress\", " +
+            "\"mark ABC 12 done\", \"put the docs task in review\". Columns: backlog, todo, in progress, " +
+            "in review, done, canceled.",
+    )
+    data class MoveTask(
+        @property:LLMDescription("which task, as heard: its key (\"ABC 12\"), number or title words")
+        val task: String,
+        @property:LLMDescription("the column as heard")
+        val status: String,
+        @property:LLMDescription("the key of the board task this most likely means, corrected for mishearing")
+        val key: String? = null,
+        @property:LLMDescription("other plausible keys when unsure")
+        val alternatives: List<String> = emptyList(),
+    ) : VoiceAction()
+
+    @Serializable
+    @SerialName("run_task")
+    @LLMDescription(
+        "Start a coding agent on an existing task from the board — \"have Claude work on the login " +
+            "task\", \"give ABC 12 to codex\", \"run task 7 with pi\".",
+    )
+    data class RunTask(
+        @property:LLMDescription("which task, as heard: its key, number or title words")
+        val task: String,
+        @property:LLMDescription("the agent as heard: claude, codex, pi, opencode…")
+        val agent: String,
+        @property:LLMDescription("the key of the board task this most likely means, corrected for mishearing")
+        val key: String? = null,
+        @property:LLMDescription("other plausible keys when unsure")
+        val alternatives: List<String> = emptyList(),
+    ) : VoiceAction()
+
+    @Serializable
     @SerialName("respond_permission")
     @LLMDescription(
         "Answer an agent's pending tool-call permission request (\"allow it\", \"approve\", " +
@@ -300,12 +349,13 @@ data class VoiceStep(
         "one of: navigate, open_file, accept_changes, discard_changes, new_terminal, " +
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
             "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
-            "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size, open_url",
+            "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size, open_url, " +
+            "add_task, move_task, run_task",
     )
     val type: String,
     @property:LLMDescription(
         "required when type=navigate: one of code, diff, terminal, git, agents, " +
-            "permissions, remote, home. Null otherwise.",
+            "permissions, remote, tasks, home. Null otherwise.",
     )
     val view: String? = null,
     @property:LLMDescription("required when type=open_file: the file's name/path, as heard. Null otherwise.")
@@ -359,7 +409,30 @@ data class VoiceStep(
         "required when type=open_url: the address to open, as heard (\"localhost:9000\"). Null otherwise.",
     )
     val url: String? = null,
+    @property:LLMDescription("required when type=add_task: the new task's title. Null otherwise.")
+    val taskTitle: String? = null,
+    @property:LLMDescription("type=add_task: urgent/high/medium/low if named. Null otherwise.")
+    val taskPriority: String? = null,
+    @property:LLMDescription("required when type=move_task or run_task: which task, as heard (key, number or title words). Null otherwise.")
+    val taskRef: String? = null,
+    @property:LLMDescription("required when type=move_task: the column as heard (in progress, review, done…). Null otherwise.")
+    val taskStatus: String? = null,
+    @property:LLMDescription("required when type=run_task: the agent as heard (claude, codex, pi…). Null otherwise.")
+    val taskAgent: String? = null,
+    @property:LLMDescription(
+        "type=move_task / run_task: the key from the 'Tasks on the board' list that the user most likely " +
+            "means, correcting speech-to-text mistakes (\"L C one\" is LC-1; \"log in\" is login). Null only " +
+            "when no listed task is plausible.",
+    )
+    val taskKey: String? = null,
+    @property:LLMDescription(
+        "type=move_task / run_task: comma-separated keys of other plausible tasks when the choice is " +
+            "uncertain; null when sure.",
+    )
+    val taskAlternatives: String? = null,
 ) {
+    private fun altKeys() = taskAlternatives.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
     fun toVoiceAction(): VoiceAction? = when (type) {
         "open_url" -> url?.takeIf { it.isNotBlank() }?.let { VoiceAction.OpenUrl(it) }
         "navigate" -> view?.let { VoiceAction.Navigate(it) }
@@ -383,6 +456,9 @@ data class VoiceStep(
         "remove_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.RemoveWorktree(it) }
         "composer_status" -> VoiceAction.ComposerStatus
         "set_font_size" -> if (fontSize != null || change != null) VoiceAction.SetFontSize(fontSize, change) else null
+        "add_task" -> taskTitle?.takeIf { it.isNotBlank() }?.let { VoiceAction.AddTask(it, taskPriority) }
+        "move_task" -> if (!taskRef.isNullOrBlank() && !taskStatus.isNullOrBlank()) VoiceAction.MoveTask(taskRef, taskStatus, taskKey?.trim(), altKeys()) else null
+        "run_task" -> if (!taskRef.isNullOrBlank() && !taskAgent.isNullOrBlank()) VoiceAction.RunTask(taskRef, taskAgent, taskKey?.trim(), altKeys()) else null
         "confirm" -> VoiceAction.Confirm
         "respond_permission" -> behavior?.let { VoiceAction.RespondPermission(it) }
         else -> null
@@ -409,6 +485,8 @@ data class VoiceRouterContext(
     val hasPendingPermission: Boolean = false,
     /** True when a confirmation card (delete, discard, Bypass…) is open — makes "yes"/"confirm" mean confirm. */
     val hasConfirmation: Boolean = false,
+    /** The board's tasks as "KEY [status] title" lines, so the model can correct a misheard task reference. */
+    val tasks: List<String> = emptyList(),
 )
 
 private const val SYSTEM_PROMPT = """
@@ -478,6 +556,15 @@ an ordered list of actions from the fixed grammar. Rules:
 - A name with a file extension ("open main.ts", "show server.ts") is open_file with that name as
   the path — never navigate. "main" in a filename is not the home view; the leading "open"
   is not part of the path.
+- The Tasks view is a Kanban board of the project's tasks. "add a task ...", "new task ...",
+  "remind me to ..." -> add_task (title only; no agent is started). "move/mark/put <task> in/to
+  <column>" -> move_task. "have <agent> work on <task>", "give <task> to <agent>", "run <task>
+  with <agent>" -> run_task. Open "tasks" / "the board" / "kanban" -> navigate with view=tasks.
+  A request to actually do work now ("fix the login bug") is still ask_agent, not add_task.
+  For move_task and run_task the context lists "Tasks on the board". Speech-to-text garbles task
+  references ("L C one" for LC-1, "log in" or "login" for the login task, "to do" for todo), so pick
+  the listed task the user most likely means and put its key in taskKey; put other plausible keys in
+  taskAlternatives. Use only keys that appear in the list.
 - Speech-to-text transcripts can be rough (dropped words, filenames spoken oddly, e.g.
   "package json" for "package.json") — use judgment.
 - Only use confirm when the context says a confirmation card is open ("confirm", "yes do
@@ -633,7 +720,8 @@ internal fun userPrompt(transcript: String, context: VoiceRouterContext): String
         "terminalSelected=${context.terminalSelected}, " +
         "agentCardOpen=${context.agentCardOpen ?: "none"}, " +
         "hasPendingPermission=${context.hasPendingPermission}, " +
-        "hasConfirmation=${context.hasConfirmation}."
+        "hasConfirmation=${context.hasConfirmation}." +
+        if (context.tasks.isEmpty()) "" else "\nTasks on the board:\n" + context.tasks.joinToString("\n")
     return "$contextLine\n\nTranscript: \"$transcript\""
 }
 
