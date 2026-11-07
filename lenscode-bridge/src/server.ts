@@ -26,6 +26,7 @@ import type { Server as HttpServer } from "node:http";
 import { RemoteFiles } from "./remoteFiles.ts";
 import { GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
 import { GeminiHttp, lanSetupUrls } from "./geminiHttp.ts";
+import { AssemblyKeyStore } from "./assemblyKey.ts";
 import { log } from "./log.ts";
 
 export const BRIDGE_VERSION = "0.1.0-alpha.4";
@@ -67,6 +68,7 @@ export class BridgeServer {
   private pairing: PairingRegistry;
   private geminiKey: GeminiKeyStore;
   private geminiHttp: GeminiHttp;
+  private assemblyKey: AssemblyKeyStore;
   /** workspaceId → file service rooted at that workspace's directory. */
   private workspaces = new Map<string, WorkspaceFiles>();
   /** workspaceId → git service rooted at that same directory. */
@@ -89,7 +91,16 @@ export class BridgeServer {
       apiKey: cfg.geminiApiKey,
       model: cfg.geminiModel,
     });
+    this.assemblyKey = new AssemblyKeyStore(cfg.assemblyStorePath, {
+      apiKey: cfg.assemblyApiKey,
+      model: cfg.assemblyModel,
+    });
     this.geminiHttp = new GeminiHttp({
+      assembly: {
+        store: this.assemblyKey,
+        upstream: cfg.assemblyUpstream,
+        onChange: (status) => this.broadcastEvent("connection", "assemblyai_key_changed", status),
+      },
       store: this.geminiKey,
       mode: cfg.mode,
       upstream: cfg.geminiUpstream,
@@ -1348,6 +1359,11 @@ export class BridgeServer {
 
   private send(ws: WebSocket, msg: unknown): void {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  /** Test access to the AssemblyAI key state. */
+  assemblyStatus(): import("./assemblyKey.ts").AssemblyStatus {
+    return this.assemblyKey.status();
   }
 
   /** Test access to the Gemini /setup + proxy handler (setup code, status). */

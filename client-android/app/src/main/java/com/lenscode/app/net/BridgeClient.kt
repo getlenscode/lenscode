@@ -82,6 +82,9 @@ class BridgeClient(
         pairingStore.loadToken()?.let { put("X-LensCode-Token", it) }
     }
 
+    /** Blocking: a one-minute AssemblyAI streaming token from the bridge, or why there isn't one. */
+    fun assemblyAiToken(): AssemblyTokenResult = fetchAssemblyToken(http, url, geminiAuthHeaders())
+
     private val _terminals = MutableStateFlow<List<PaneInfo>>(emptyList())
     val terminals: StateFlow<List<PaneInfo>> = _terminals
 

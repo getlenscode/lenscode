@@ -226,6 +226,9 @@ internal class WorkspaceUiState(
     var dictationSession: com.lenscode.app.voice.VoiceRecognizer.DictationSession? = null
     var voicePartial by mutableStateOf("")
     var voiceError by mutableStateOf<String?>(null)
+
+    /** Popup when voice can't work (no AssemblyAI/OpenRouter key, bridge unreachable, routing failed). */
+    var voiceProblem by mutableStateOf<com.lenscode.app.ui.VoiceProblem?>(null)
     var voiceMode by mutableStateOf("fileSearch")
     var pendingVoiceMode by mutableStateOf("fileSearch")
     // Final transcript from the global voice-command mic, awaiting Submit/Cancel
@@ -479,7 +482,20 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     // file search still goes through candidates/confidence, and a voice
     // agent-prompt lands in the text field for you to review and hit Send,
     // never fires straight into agent.prompt on its own.
-    val voiceRecognizer = remember { VoiceRecognizer(context) }
+    // AssemblyAI streaming only — no fallback to the on-device recognizer. A missing key raises a popup.
+    val voiceRecognizer = remember(bridge) {
+        com.lenscode.app.voice.SpeechInput(
+            com.lenscode.app.voice.AssemblyAiRecognizer(fetchToken = { bridge.assemblyAiToken() }),
+            onSetupProblem = { problem ->
+                ui.isListening = false
+                ui.dictationSession = null
+                ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                    "Speech-to-text isn't set up",
+                    com.lenscode.app.voice.speechSetupMessage(problem, bridge.geminiSetupUrl),
+                )
+            },
+        )
+    }
 
     // Debug-only text injection — types a transcript into the same review
     // popup a real recognized phrase would land in (Submit/Cancel still
@@ -2223,6 +2239,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 // archive, Bypass enable. Voice answers them with "confirm"/"cancel".
                 com.lenscode.app.ui.BranchConflictCard(ui.branchConflict)
                 com.lenscode.app.ui.DeleteConfirmCard(ui.deleteConfirm)
+                com.lenscode.app.ui.VoiceProblemOverlay(
+                    problem = ui.voiceProblem,
+                    onDismiss = { ui.voiceProblem = null },
+                )
                 // A bridge using its own certificate (--secure): confirm its fingerprint once.
                 com.lenscode.app.ui.CertTrustOverlay(
                     prompt = certPrompt,

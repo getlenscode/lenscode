@@ -17,6 +17,8 @@ Usage: lenscode-bridge [options]
                       No domain or certificate authority needed.
   --tls-cert <file>   TLS certificate (PEM, full chain) from a public authority. With --tls-key
   --tls-key <file>    this also turns on secure mode.
+  --assemblyai-key <key>  AssemblyAI API key for streaming speech-to-text (same as ASSEMBLYAI_API_KEY).
+                      Stays on this machine; the headset gets short-lived tokens. Prefer the env var.
   --paseo-url <url>   Paseo daemon WebSocket (default ws://127.0.0.1:6767/ws)
   --project-root <d>  folder the "local" workspace's files are served from (default: cwd)
   -v, --version       print the version
@@ -27,7 +29,7 @@ That is fine for a debug build of the app; a store build only connects over wss:
 (use --secure, or your own certificate).
 
 Environment: LENSCODE_PORT, LENSCODE_MODE, LENSCODE_TLS_CERT, LENSCODE_TLS_KEY,
-LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY, LENSCODE_SECURE=1.
+LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY, ASSEMBLYAI_API_KEY, LENSCODE_SECURE=1.
 `;
 
 const VALUE_FLAGS: Record<string, string> = {
@@ -36,6 +38,7 @@ const VALUE_FLAGS: Record<string, string> = {
   "--tls-key": "LENSCODE_TLS_KEY",
   "--paseo-url": "LENSCODE_PASEO_URL",
   "--project-root": "LENSCODE_PROJECT_ROOT",
+  "--assemblyai-key": "ASSEMBLYAI_API_KEY",
 };
 
 export type CliResult =

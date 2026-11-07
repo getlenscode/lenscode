@@ -26,6 +26,13 @@ export interface BridgeConfig {
   geminiModel?: string;
   /** Test-only: stub for generativelanguage.googleapis.com. */
   geminiUpstream?: string;
+  /** Where the /setup page persists the AssemblyAI key (mode 0600). */
+  assemblyStorePath: string;
+  /** Fallback key from ASSEMBLYAI_API_KEY; a key saved via /setup wins over it. */
+  assemblyApiKey?: string;
+  assemblyModel?: string;
+  /** Test-only: stub for streaming.assemblyai.com. */
+  assemblyUpstream?: string;
 }
 
 /**
@@ -54,6 +61,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     geminiApiKey: env.GEMINI_API_KEY || undefined,
     geminiModel: env.LENSCODE_GEMINI_MODEL || undefined,
     geminiUpstream: env.LENSCODE_GEMINI_UPSTREAM || undefined,
+    assemblyStorePath:
+      env.LENSCODE_ASSEMBLYAI_STORE ?? join(homedir(), ".config", "lenscode-bridge", "assemblyai.json"),
+    assemblyApiKey: env.ASSEMBLYAI_API_KEY || undefined,
+    assemblyModel: env.LENSCODE_ASSEMBLYAI_MODEL || undefined,
+    assemblyUpstream: env.LENSCODE_ASSEMBLYAI_UPSTREAM || undefined,
   };
   if (cfg.mode === "prod" && (!cfg.tlsKeyPath || !cfg.tlsCertPath)) {
     // Spec §56: production must never silently downgrade to plaintext.

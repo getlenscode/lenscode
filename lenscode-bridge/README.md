@@ -36,6 +36,10 @@ npx lenscode-bridge --tls-cert fullchain.pem --tls-key privkey.pem
 
 Keep `privkey.pem` private. Anyone who has it can impersonate your bridge.
 
+## Speech-to-text (AssemblyAI)
+
+Every mic button in the app streams to AssemblyAI. Open `http://<your-address>:8137/setup` on your phone or computer and paste a key from <https://www.assemblyai.com/dashboard> under "AssemblyAI key" (or set `ASSEMBLYAI_API_KEY` / `--assemblyai-key`; model `LENSCODE_ASSEMBLYAI_MODEL`, default `universal-streaming-english`). The key is stored on this computer and the headset only receives one-minute tokens. There is no on-device fallback: without a key the app shows a popup.
+
 ## Gemini voice routing (optional)
 
 Free-form voice commands ("add a test for the login route") use Google's Gemini. Open `http://<your-address>:8137/setup` on your phone or computer and paste a key from <https://aistudio.google.com/apikey>. It is stored on this computer, and the headset never sees it. Without a key, voice still works through built-in commands (navigate, open a file, accept or discard changes).
