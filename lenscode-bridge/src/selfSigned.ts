@@ -11,7 +11,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { hostname, homedir } from "node:os";
 import { join } from "node:path";
 import { generate } from "selfsigned";
-import { lanAddresses } from "./geminiHttp.ts";
+import { lanAddresses } from "./setupHttp.ts";
 import { log } from "./log.ts";
 
 const VALID_DAYS = 3650;

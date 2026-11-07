@@ -1,7 +1,8 @@
 import { applyCliArgs } from "./cli.ts";
 import { loadConfig } from "./config.ts";
 import { BridgeServer, BRIDGE_VERSION } from "./server.ts";
-import { lanAddresses } from "./geminiHttp.ts";
+import { lanAddresses } from "./setupHttp.ts";
+import { advertiseBridge } from "./discovery.ts";
 import { tailscaleAddresses, tailscaleDnsName } from "./tailscale.ts";
 import { log } from "./log.ts";
 import { ensureSelfSignedCert, shortFingerprint, type SelfSignedCert } from "./selfSigned.ts";
@@ -54,6 +55,16 @@ if (server.controlEndpoint) {
 
 // The JSON log lines above are for machines; this is what a person needs to set up the app.
 const secure = cfg.mode === "prod" && !cfg.insecureProd;
+const stopAdvertising =
+  process.env.LENSCODE_NO_DISCOVERY === "1"
+    ? () => {}
+    : advertiseBridge({
+        port: cfg.port,
+        secure,
+        version: BRIDGE_VERSION,
+        fingerprint: selfSigned ? shortFingerprint(selfSigned.fingerprint) : undefined,
+      });
+
 const addresses = (wantTailscale ? tailscaleIps : lanAddresses()).map((ip) => `${secure ? "wss" : "ws"}://${ip}:${cfg.port}`);
 process.stdout.write(
   [
@@ -67,6 +78,9 @@ process.stdout.write(
           `Tailscale: enter ${tailscaleIps[0]}${tailscaleName ? ` (or ${tailscaleName})` : ""} in the app. The headset needs Tailscale signed in to the same tailnet.`,
         ]
       : []),
+    ...(process.env.LENSCODE_NO_DISCOVERY === "1"
+      ? []
+      : ["Or open the app's Settings → Bridge connection and tap this computer under \"Found on your network\"."]),
     ...(selfSigned
       ? [
           `Certificate fingerprint: ${shortFingerprint(selfSigned.fingerprint)}`,
@@ -84,6 +98,7 @@ process.stdout.write(
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     log("info", "shutting down");
+    stopAdvertising();
     server.close();
     process.exit(0);
   });

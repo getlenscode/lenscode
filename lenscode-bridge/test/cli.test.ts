@@ -93,6 +93,20 @@ test("the version in the code matches package.json (the published version)", () 
   assert.equal(BRIDGE_VERSION, pkg.version);
 });
 
+test("--no-discovery turns off mDNS", () => {
+  const env: NodeJS.ProcessEnv = {};
+  const r = applyCliArgs(["--no-discovery"], env, "0.0.0");
+  assert.equal(r.action, "run");
+  assert.equal(env.LENSCODE_NO_DISCOVERY, "1");
+});
+
+test("--openrouter-key sets OPENROUTER_API_KEY", () => {
+  const env: NodeJS.ProcessEnv = {};
+  const r = applyCliArgs(["--openrouter-key", "abc123"], env, "0.0.0");
+  assert.equal(r.action, "run");
+  assert.equal(env.OPENROUTER_API_KEY, "abc123");
+});
+
 test("--tailscale is a plain switch", () => {
   const env: NodeJS.ProcessEnv = {};
   assert.equal(applyCliArgs(["--tailscale"], env, "0.0.0").action, "run");

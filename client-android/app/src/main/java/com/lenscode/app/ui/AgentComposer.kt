@@ -66,8 +66,22 @@ fun agentChoices(providers: List<ProviderInfo>): List<ProviderInfo> {
         .sortedBy { preferred.indexOf(it.provider).let { i -> if (i < 0) preferred.size else i } }
 }
 
-fun composerModeFor(id: String, provider: String, providers: List<ProviderInfo>): ComposerMode =
-    composerModesFor(provider, providers).firstOrNull { it.id == id } ?: ComposerDefaultMode
+/**
+ * The mode a new agent starts in when none was chosen. Claude's "Auto mode" (a model classifier answers
+ * permission prompts, so the accept-permission card rarely appears) when Paseo offers it; otherwise
+ * "" = the provider's own default. Only Claude: Codex also has a mode with id "auto", but that is its
+ * ordinary approval flow. Pinned here rather than left to the daemon because an older daemon, or
+ * Claude on Bedrock/Vertex, defaults to "Always Ask".
+ */
+fun defaultModeIdFor(provider: String, providers: List<ProviderInfo>): String =
+    if (provider == "claude" && composerModesFor(provider, providers).any { it.id == AUTO_MODE_ID }) AUTO_MODE_ID else ""
+
+const val AUTO_MODE_ID = "auto"
+
+fun composerModeFor(id: String, provider: String, providers: List<ProviderInfo>): ComposerMode {
+    val wanted = id.ifEmpty { defaultModeIdFor(provider, providers) }
+    return composerModesFor(provider, providers).firstOrNull { it.id == wanted } ?: ComposerDefaultMode
+}
 
 /**
  * Everything a new agent is created with, shared by the Code-view composer and
@@ -333,7 +347,9 @@ fun AgentComposer(
                 }
             }
             "mode" -> MenuCard("choose a mode for ${state.provider}") {
-                for (m in listOf(ComposerDefaultMode) + composerModesFor(state.provider, providers)) {
+                // Claude starts in Auto mode, so "Provider default" would only be a second name for a row below.
+                val withDefault = if (defaultModeIdFor(state.provider, providers).isEmpty()) listOf(ComposerDefaultMode) else emptyList()
+                for (m in withDefault + composerModesFor(state.provider, providers)) {
                     MenuRow(m.label, m.description, selected = m.id == mode.id, hint = "“${m.spoken}”") {
                         state.menu = null
                         onModeChosen(m)

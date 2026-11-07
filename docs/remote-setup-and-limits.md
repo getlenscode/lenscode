@@ -46,7 +46,7 @@ Use a dedicated project directory for each demo. You do not need to expose Paseo
 | New project folder | No New Project or New Folder button. Ask an agent with SSH access to create it, or create it in an external SSH shell. |
 | XR agent list, messages, creation, permissions | Bound to local Paseo; native remote agents are not aggregated into these views. |
 | Agent card → Open Workspace | Explicitly switches to local. If no workspace ID exists, it opens Terminal at the agent's working directory instead of opening Code. |
-| New AI from voice | Requires the configured Gemini/Koog router; creates local Claude with cwd `.` when it cannot reuse an existing target. No machine/provider creation form exists. |
+| New AI from voice | Requires the OpenRouter key on the bridge (voice commands error out without it); creates local Claude with cwd `.` when it cannot reuse an existing target. No machine/provider creation form exists. |
 | Follow-up voice tasks | An open agent card wins; otherwise the previous live voice agent can be reused. Saying “new project” does not necessarily create a fresh agent. |
 | Agent permission mode | Agents offers Auto, Bypass, and Manual for newly voice-created agents. Manual allows you to inspect requests in Permissions. Changing it does not reconfigure existing agents. |
 | Code updates | Reopen a file to fetch new content; reopen the remote folder to refresh its listing. Do not assume live file watching. |

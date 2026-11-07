@@ -19,7 +19,7 @@ flowchart TB
     end
 
     subgraph DESKTOP["Bridge computer (your desktop/laptop)"]
-        BRIDGE["lenscode-bridge (Node/TS server)<br/>server.ts — routing & aggregation<br/>pairing.ts — device pairing<br/>machines.ts — SSH alias discovery<br/>remote.ts — SSH tunnel mgmt<br/>geminiHttp.ts — /setup page + /gemini proxy"]
+        BRIDGE["lenscode-bridge (Node/TS server)<br/>server.ts — routing & aggregation<br/>pairing.ts — device pairing<br/>machines.ts — SSH alias discovery<br/>remote.ts — SSH tunnel mgmt<br/>setupHttp.ts — /setup page + /openrouter proxy"]
         SSHCFG["~/.ssh/config<br/>(bridge user's keys & host aliases)"]
         LPASEO["Bridge computer's Paseo daemon<br/>127.0.0.1:6767 · /ws"]
         BRIDGE -. reads .-> SSHCFG
@@ -38,10 +38,10 @@ flowchart TB
         RPASEOB --- CLIB
     end
 
-    GEMINI["Google Gemini API<br/>(optional voice routing)"]
+    OPENROUTER["OpenRouter API<br/>(optional voice routing)"]
 
     BC <-->|"dev: ws:// :8137<br/>secure: wss:// :8443<br/>(10.0.2.2 in emulator)"| BRIDGE
-    BRIDGE -->|"HTTPS, bridge-held key"| GEMINI
+    BRIDGE -->|"HTTPS, bridge-held key"| OPENROUTER
 
     BRIDGE -->|"SSH (BatchMode)<br/>tunnel → forward to<br/>127.0.0.1:6767"| RPASEOA
     BRIDGE -->|"SSH (BatchMode)<br/>tunnel → forward to<br/>127.0.0.1:6767"| RPASEOB
@@ -56,7 +56,7 @@ flowchart TB
     class DESKTOP,BRIDGE,LPASEO,SSHCFG desktop;
     class DEVA,DEVB,RPASEOA,RPASEOB,CLIA,CLIB remote;
     class GLASSES,APP,BC client;
-    class GEMINI external;
+    class OPENROUTER external;
 ```
 
 ## Key points
@@ -80,9 +80,9 @@ flowchart TB
 - **Remote Paseo daemons stay on loopback** (`127.0.0.1:6767`) on their own
   hosts; they're reachable only via the SSH tunnel `lenscode-bridge` opens,
   never exposed publicly.
-- **The Gemini key stays on the bridge.** It is set on the bridge's `/setup`
-  page (or `GEMINI_API_KEY`), and the headset calls Gemini through the bridge's
-  `/gemini/*` proxy, which adds the key. In secure mode the page needs the setup
+- **The OpenRouter key stays on the bridge.** It is set on the bridge's `/setup`
+  page (or `OPENROUTER_API_KEY`), and the headset calls OpenRouter through the
+  bridge's `/openrouter/chat/completions` proxy, which adds the key. In secure mode the page needs the setup
   code the bridge prints, and the proxy needs a paired device.
 - **Route B** (dotted lines): a coding CLI started in an independent
   `ssh dev-a`/`dev-b` session runs outside `lenscode-bridge`, which is why
@@ -100,4 +100,4 @@ flowchart TB
 - [Bridge routing and agent handlers](../lenscode-bridge/src/server.ts)
 - [Device pairing](../lenscode-bridge/src/pairing.ts)
 - [Self-made certificate for secure mode](../lenscode-bridge/src/selfSigned.ts)
-- [Gemini setup page and proxy](../lenscode-bridge/src/geminiHttp.ts)
+- [Setup page and OpenRouter proxy](../lenscode-bridge/src/setupHttp.ts)

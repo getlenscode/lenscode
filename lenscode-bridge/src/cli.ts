@@ -17,6 +17,10 @@ Usage: lenscode-bridge [options]
                       No domain or certificate authority needed.
   --tls-cert <file>   TLS certificate (PEM, full chain) from a public authority. With --tls-key
   --tls-key <file>    this also turns on secure mode.
+  --no-discovery      don't advertise the bridge on the local network (mDNS)
+  --openrouter-key <key>  OpenRouter API key for voice command routing (same as OPENROUTER_API_KEY). It
+                      stays on this machine; the headset never sees it. Prefer the env var: flags show up
+                      in the process list. Model: LENSCODE_OPENROUTER_MODEL (default z-ai/glm-5.3-flash).
   --tailscale         find this machine's Tailscale address and show it as the one to enter in the
                       app (works from anywhere on your tailnet, not just this wifi)
   --paseo-url <url>   Paseo daemon WebSocket (default ws://127.0.0.1:6767/ws)
@@ -29,7 +33,7 @@ That is fine for a debug build of the app; a store build only connects over wss:
 (use --secure, or your own certificate).
 
 Environment: LENSCODE_PORT, LENSCODE_MODE, LENSCODE_TLS_CERT, LENSCODE_TLS_KEY,
-LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY, LENSCODE_SECURE=1, LENSCODE_TAILSCALE=1.
+LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, OPENROUTER_API_KEY, LENSCODE_SECURE=1, LENSCODE_NO_DISCOVERY=1, LENSCODE_TAILSCALE=1.
 `;
 
 const VALUE_FLAGS: Record<string, string> = {
@@ -38,6 +42,7 @@ const VALUE_FLAGS: Record<string, string> = {
   "--tls-key": "LENSCODE_TLS_KEY",
   "--paseo-url": "LENSCODE_PASEO_URL",
   "--project-root": "LENSCODE_PROJECT_ROOT",
+  "--openrouter-key": "OPENROUTER_API_KEY",
 };
 
 export type CliResult =
@@ -59,6 +64,10 @@ export function applyCliArgs(argv: string[], env: NodeJS.ProcessEnv, version: st
     }
     if (arg === "--tailscale") {
       env.LENSCODE_TAILSCALE = "1";
+      continue;
+    }
+    if (arg === "--no-discovery") {
+      env.LENSCODE_NO_DISCOVERY = "1";
       continue;
     }
     if (arg === "-h" || arg === "--help") return { action: "exit", code: 0, message: USAGE };
