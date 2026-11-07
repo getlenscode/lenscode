@@ -326,8 +326,10 @@ data class VoiceStep(
     )
     val target: String? = null,
     @property:LLMDescription(
-        "type=set_mode: the mode as heard (required). type=ask_agent: a permission mode named " +
-            "for just this request, else null. Null otherwise.",
+        "type=set_mode: the mode as heard (required). type=ask_agent: ONLY when the user names a " +
+            "permission mode as a setting (\"in plan mode\", \"with accept edits\", \"in manual mode\") — " +
+            "never because the task mentions a plan, e.g. \"create a plan for…\" or \"plan the API\" " +
+            "is just the task: leave this null. Null otherwise.",
     )
     val mode: String? = null,
     @property:LLMDescription(
@@ -461,6 +463,11 @@ an ordered list of actions from the fixed grammar. Rules:
   mode, add retry logic") return a single ask_agent with the task in `instruction` and the
   named settings in its mode/model/worktree fields — do NOT split them into set_* steps, which
   would change the defaults permanently.
+- Never set ask_agent's `mode` from the words of the task itself. "Create a step-by-step plan
+  for the API", "plan the migration", "write an edit script", "ask before changing things"
+  describe the work, not a permission mode — mode stays null, so the agent starts in the
+  default Auto mode. Only an explicit mode phrase ("in plan mode", "use plan mode", "with
+  accept edits", "in manual mode", "bypass permissions") sets it.
 - Font size: "set the font size to 16", "text size 20" -> set_font_size with fontSize=16 / 20.
   "bigger", "larger", "zoom in on the code", "increase the font" -> set_font_size with
   change="larger"; "smaller", "decrease", "shrink the text" -> change="smaller"; "reset the
@@ -568,6 +575,10 @@ internal object OpenRouterVoiceRouterExamples {
             listOf(VoiceStep(type = "ask_agent", instruction = "start a http server in this project")),
         ),
         VoiceCommandPlan(listOf(VoiceStep(type = "ask_agent", instruction = "add a test for the login route"))),
+        // "plan" here is the task, not a permission mode: mode stays null.
+        VoiceCommandPlan(
+            listOf(VoiceStep(type = "ask_agent", instruction = "create a step-by-step plan for the dockerfile and API endpoints")),
+        ),
         VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "allow"))),
         VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "deny"))),
         VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "current"))),

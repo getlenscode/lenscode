@@ -1092,7 +1092,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                     "bypass" in h || "skip" in h || "fullaccess" in h -> it.dangerous
                     "manual" in h || "ask" in h -> it.id in listOf("default", "ask")
                     "plan" in h -> it.id == "plan"
-                    "accept" in h || "edit" in h || "auto" in h -> it.id in listOf("acceptEdits", "auto", "write")
+                    "accept" in h || "edit" in h -> it.id in listOf("acceptEdits", "write")
+                    "auto" in h -> it.id == com.lenscode.app.ui.AUTO_MODE_ID
                     else -> false
                 }
             }

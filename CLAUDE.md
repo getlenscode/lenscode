@@ -76,6 +76,10 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - The dialog edits `ui.browserDraft`, a copy of the page's `ui.browserUrl`; the page only changes on Open. (They used to be the same state, which the WebView must not follow keystroke by keystroke.) `BrowserLoadTracker` makes the WebView navigate when the committed address changes (http↔https, port) and reload once per ↻ press.
 
 
+## Claude Auto mode (fewer permission prompts)
+
+- Paseo's Claude modes include `auto` ("Auto mode": a model classifier answers permission prompts, so the accept card rarely appears). New Claude agents now start in it unless a mode is chosen: `defaultModeIdFor` / `composerModeFor` in `ui/AgentComposer.kt`. It is pinned in the app because an older daemon, or Claude on Bedrock/Vertex (where Paseo drops Auto), defaults to "Always Ask". Only for `claude`: Codex's `auto` id is its ordinary approval flow. Voice: "auto mode" picks it; "accept edits" picks Accept File Edits.
+
 ## Themes and window look
 
 - Themes live in `ui/Theme.kt` (`ThemeId`, palettes, corner radii); the picker is Settings → App theme. **Terminal** (default) is square corners, thin outlines, flat translucent brown fills and monospace type. Small corners must go through `lensShape(dp)`, never `RoundedCornerShape(dp)` directly, or a sharp theme gets stray rounded corners.
