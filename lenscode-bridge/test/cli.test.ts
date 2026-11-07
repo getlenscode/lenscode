@@ -92,3 +92,10 @@ test("the version in the code matches package.json (the published version)", () 
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(BRIDGE_VERSION, pkg.version);
 });
+
+test("--openrouter-key sets OPENROUTER_API_KEY", () => {
+  const env: NodeJS.ProcessEnv = {};
+  const r = applyCliArgs(["--openrouter-key", "abc123"], env, "0.0.0");
+  assert.equal(r.action, "run");
+  assert.equal(env.OPENROUTER_API_KEY, "abc123");
+});

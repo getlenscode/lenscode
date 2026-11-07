@@ -136,7 +136,7 @@ fun VoiceOverlay(
  * Global voice command overlay — record, then review the transcript before
  * anything happens. Four mutually exclusive states: listening (live partial
  * text), an error, the review step (final transcript + Submit/Cancel), or
- * routing (Gemini classifying the confirmed transcript). Submit hands the
+ * routing (OpenRouter classifying the confirmed transcript). Submit hands the
  * transcript to [com.lenscode.app.voice.KoogVoiceRouter] (MainActivity owns
  * dispatch); Cancel discards it — nothing is ever acted on without this
  * explicit confirmation, same discipline as every other destructive-action

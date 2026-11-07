@@ -1,24 +1,22 @@
 package com.lenscode.app.voice
 
 import ai.koog.agents.core.tools.annotations.LLMDescription
-import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.executor.clients.google.GoogleClientSettings
-import ai.koog.prompt.executor.clients.google.GoogleLLMClient
-import ai.koog.prompt.executor.clients.google.GoogleModels
-import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
-import ai.koog.prompt.structure.executeStructured
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.defaultRequest
-import io.ktor.client.request.header
-import okhttp3.OkHttpClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Agentic voice command grammar (docs/paseo-migration-plan.md follow-up).
- * Gemini (via Koog, entirely on-device) returns these directly as structured
- * output — no manual keyword matching. A [VoiceCommandPlan] carries a
+ * An OpenRouter model returns these as JSON — no manual keyword matching. A [VoiceCommandPlan] carries a
  * *sequence* of actions so a compound utterance ("navigate to code and open
  * line 20 in package.json") resolves to multiple steps, unlike the old
  * deterministic [VoiceCommandRouter], which could only ever match one intent
@@ -283,11 +281,11 @@ sealed class VoiceAction {
 }
 
 /**
- * The wire shape Gemini actually fills in — flat, with every action's fields
+ * The wire shape the model fills in — flat, with every action's fields
  * laid out as optionals on one type, rather than [VoiceAction]'s sealed
  * hierarchy. Confirmed live (2026-09-06): a `oneOf`-style discriminated
  * union (which is what a Kotlin sealed class compiles to in the generated
- * JSON schema) is unreliable for Gemini's structured output — the model
+ * JSON schema) is unreliable for structured output (seen with Gemini) — the model
  * kept collapsing onto a nearby parameterless variant instead of
  * constructing one with real extracted field values, even with matching
  * few-shot examples. A flat schema with no `oneOf` fixed it outright. See
@@ -490,117 +488,229 @@ an ordered list of actions from the fixed grammar. Rules:
 """
 
 /**
- * Wraps a single Gemini call (via Koog's structured-output executor) that
- * classifies a voice transcript into a [VoiceCommandPlan]. One instance per
- * app process — cheap to hold, the underlying client is just an HTTP client.
+ * One OpenRouter chat-completions call that classifies a voice transcript into a [VoiceCommandPlan].
+ * One instance per app process; the underlying client is just an HTTP client.
  *
- * By default it talks to Google directly with [apiKey]. Pass [baseUrl] to send
- * the same requests through lenscode-bridge's /gemini proxy instead: the bridge
- * holds the real key, so [apiKey] is just a placeholder Koog insists on, and
- * [extraHeaders] (read per request) carries this device's credentials.
+ * The request is sent to [baseUrl] — normally lenscode-bridge's `/openrouter/` proxy, where the bridge
+ * holds the real key, so none is sent from here and [extraHeaders] (read per request) carries this
+ * device's credentials instead. Pass [apiKey] to call OpenRouter directly (tests, or no bridge).
+ *
+ * The model is asked for plain JSON and the reply is parsed leniently (fences, prose around the
+ * object), because which structured-output modes a model supports varies by provider.
  */
-class KoogVoiceRouter(
-    apiKey: String,
-    modelId: String,
-    baseUrl: String? = null,
-    extraHeaders: () -> Map<String, String> = { emptyMap() },
-    okHttpClient: OkHttpClient? = null,
-) {
-    // See the build.gradle.kts comment on the ktor-client-okhttp dependency —
-    // Koog's default Ktor engine crashes on Android once a custom
-    // network_security_config.xml is present in the app, regardless of host.
-    // Koog adds its own defaultRequest (base URL + key) on top of this one; ktor
-    // chains the blocks, so these headers survive.
-    // [okHttpClient] is the bridge's pinned-certificate client: through a --secure bridge the
-    // default system-trust client fails the handshake ("Trust anchor ... not found").
-    private val httpClient = HttpClient(OkHttp) {
-        okHttpClient?.let { preconfigured -> engine { this.preconfigured = preconfigured } }
-        defaultRequest { extraHeaders().forEach { (name, value) -> header(name, value) } }
-    }
-    private val settings = if (baseUrl == null) GoogleClientSettings() else GoogleClientSettings(baseUrl = baseUrl)
-    private val executor = SingleLLMPromptExecutor(GoogleLLMClient(apiKey, settings, httpClient))
+class OpenRouterVoiceRouter(
+    private val modelId: String,
+    private val baseUrl: String,
+    private val apiKey: String? = null,
+    private val extraHeaders: () -> Map<String, String> = { emptyMap() },
+    private val client: OkHttpClient = OkHttpClient(),
+) : AddressEditor {
+    suspend fun route(transcript: String, context: VoiceRouterContext): Result<VoiceCommandPlan> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val reply = chat(systemPrompt(), userPrompt(transcript, context))
+                parsePlan(reply)
+            }
+        }
 
-    // Cloning a known-good Gemini model's capabilities/limits rather than
-    // hand-picking a capability list: GoogleLLMClient does its own
-    // client-side capability gate before calling out (confirmed live —
-    // a hand-picked {Temperature, Tools, Schema.JSON.Standard} list threw
-    // "Model gemini-3.8-flash does not support chat completions"), and
-    // Gemini2_5Flash's real capability set is Koog's own source of truth
-    // for what a working Gemini chat model needs, not something to re-guess.
-    private val model = GoogleModels.Gemini2_5Flash.copy(id = modelId)
+    /**
+     * The address after a spoken correction ("it should be 103.61 not 103.69", "add slash docs",
+     * "make it http"), worked out by the model from [current] and the [spoken] transcript. The reply is
+     * checked ([parseEditedAddress]); an unusable one is a failure, never a guess.
+     */
+    override suspend fun editAddress(current: String, spoken: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                parseEditedAddress(chat(ADDRESS_EDIT_PROMPT, "Current address: $current\nUser said: \"$spoken\""))
+            }
+        }
 
-    suspend fun route(transcript: String, context: VoiceRouterContext): Result<VoiceCommandPlan> {
-        val contextLine = "Current state: view=${context.activeView}, " +
-            "diffFileOpen=${context.diffFileOpen ?: "none"}, " +
-            "terminalSelected=${context.terminalSelected}, " +
-            "agentCardOpen=${context.agentCardOpen ?: "none"}, " +
-            "hasPendingPermission=${context.hasPendingPermission}, " +
-            "hasConfirmation=${context.hasConfirmation}."
-        val result = executor.executeStructured<VoiceCommandPlan>(
-            prompt = prompt("voice-command") {
-                system(SYSTEM_PROMPT)
-                user("$contextLine\n\nTranscript: \"$transcript\"")
-            },
-            model = model,
-            examples = FEW_SHOT_EXAMPLES,
-        )
-        return result.map { it.structure }
+    private fun chat(system: String, user: String): String {
+        val body = JSONObject()
+            .put("model", modelId)
+            .put("temperature", 0)
+            .put("response_format", JSONObject().put("type", "json_object"))
+            // Not turning reasoning off: z-ai/glm-5.3-flash rejects requests that do (HTTP 400, "reasoning is mandatory").
+            .put(
+                "messages",
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", system))
+                    .put(JSONObject().put("role", "user").put("content", user)),
+            )
+        val request = Request.Builder()
+            .url(baseUrl.trimEnd('/') + "/chat/completions")
+            .post(body.toString().toRequestBody(JSON_MEDIA))
+            .apply {
+                apiKey?.let { header("Authorization", "Bearer $it") }
+                extraHeaders().forEach { (name, value) -> header(name, value) }
+            }
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            check(response.isSuccessful) { "OpenRouter HTTP ${response.code}: ${errorMessage(text)}" }
+            return replyContent(text)
+        }
     }
 
     private companion object {
-        val FEW_SHOT_EXAMPLES = listOf(
-            VoiceCommandPlan(
-                listOf(
-                    VoiceStep(type = "navigate", view = "code"),
-                    VoiceStep(type = "open_file", path = "package.json", line = 20),
-                ),
-            ),
-            VoiceCommandPlan(listOf(VoiceStep(type = "search", query = "authentication middleware"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "diff"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "accept_changes"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "open_file", path = "auth.ts"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "new_agent"))),
-            VoiceCommandPlan(
-                listOf(VoiceStep(type = "ask_agent", instruction = "start a http server in this project")),
-            ),
-            VoiceCommandPlan(listOf(VoiceStep(type = "ask_agent", instruction = "add a test for the login route"))),
-            // "plan" here is the task, not a permission mode: mode stays null.
-            VoiceCommandPlan(
-                listOf(VoiceStep(type = "ask_agent", instruction = "create a step-by-step plan for the dockerfile and API endpoints")),
-            ),
-            VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "allow"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "deny"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "current"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "all"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "terminal test agent"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "open_agent", target = "terminal test agent"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "dismiss"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "close_terminal", target = "all"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "kill_terminal"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "settings"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "browser"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_mode", mode = "plan"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "remove_worktree", branch = "feature-x"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", fontSize = 18))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", change = "larger"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "open_url", url = "localhost:9000"))),
-            VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
-            VoiceCommandPlan(
-                listOf(
-                    VoiceStep(
-                        type = "ask_agent",
-                        instruction = "add retry logic to the bridge",
-                        model = "opus",
-                        mode = "plan",
-                        worktree = true,
-                    ),
-                ),
-            ),
-        )
+        val JSON_MEDIA = "application/json".toMediaType()
     }
 }
+
+/** Worked examples shown to the model in the system prompt. */
+internal object OpenRouterVoiceRouterExamples {
+    val all = listOf(
+        VoiceCommandPlan(
+            listOf(
+                VoiceStep(type = "navigate", view = "code"),
+                VoiceStep(type = "open_file", path = "package.json", line = 20),
+            ),
+        ),
+        VoiceCommandPlan(listOf(VoiceStep(type = "search", query = "authentication middleware"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "diff"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "accept_changes"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "open_file", path = "auth.ts"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "new_agent"))),
+        VoiceCommandPlan(
+            listOf(VoiceStep(type = "ask_agent", instruction = "start a http server in this project")),
+        ),
+        VoiceCommandPlan(listOf(VoiceStep(type = "ask_agent", instruction = "add a test for the login route"))),
+        // "plan" here is the task, not a permission mode: mode stays null.
+        VoiceCommandPlan(
+            listOf(VoiceStep(type = "ask_agent", instruction = "create a step-by-step plan for the dockerfile and API endpoints")),
+        ),
+        VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "allow"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "respond_permission", behavior = "deny"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "current"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "all"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "archive_agent", target = "terminal test agent"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "open_agent", target = "terminal test agent"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "dismiss"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "close_terminal", target = "all"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "kill_terminal"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "settings"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "browser"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_mode", mode = "plan"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "remove_worktree", branch = "feature-x"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "composer_status"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", fontSize = 18))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_font_size", change = "larger"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "open_url", url = "localhost:9000"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "confirm"))),
+        VoiceCommandPlan(
+            listOf(
+                VoiceStep(
+                    type = "ask_agent",
+                    instruction = "add retry logic to the bridge",
+                    model = "opus",
+                    mode = "plan",
+                    worktree = true,
+                ),
+            ),
+        ),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Prompt and reply handling — plain functions so they can be unit-tested.
+// ---------------------------------------------------------------------------
+
+private val planJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    coerceInputValues = true
+}
+
+private val exampleJson = Json { encodeDefaults = false }
+
+internal fun userPrompt(transcript: String, context: VoiceRouterContext): String {
+    val contextLine = "Current state: view=${context.activeView}, " +
+        "diffFileOpen=${context.diffFileOpen ?: "none"}, " +
+        "terminalSelected=${context.terminalSelected}, " +
+        "agentCardOpen=${context.agentCardOpen ?: "none"}, " +
+        "hasPendingPermission=${context.hasPendingPermission}, " +
+        "hasConfirmation=${context.hasConfirmation}."
+    return "$contextLine\n\nTranscript: \"$transcript\""
+}
+
+/** The routing rules, then the exact JSON shape (with each field's meaning) and worked examples. */
+@OptIn(ExperimentalSerializationApi::class)
+internal fun systemPrompt(): String {
+    val descriptor = VoiceStep.serializer().descriptor
+    val fields = (0 until descriptor.elementsCount).joinToString("\n") { i ->
+        val description = descriptor.getElementAnnotations(i).filterIsInstance<LLMDescription>().firstOrNull()?.description
+        "- ${descriptor.getElementName(i)}: ${description ?: ""}".trimEnd()
+    }
+    val examples = OpenRouterVoiceRouterExamples.all.joinToString("\n") {
+        exampleJson.encodeToString(VoiceCommandPlan.serializer(), it)
+    }
+    return SYSTEM_PROMPT.trim() + "\n\n" +
+        "Reply with ONLY a JSON object, no prose and no code fences: " +
+        "{\"actions\":[{\"type\":\"...\", ...}]}. Each action has a `type` plus only the fields it needs " +
+        "(omit the rest). Fields:\n$fields\n\nExamples of valid replies:\n$examples"
+}
+
+/** The model's text → a plan. Tolerates a ```json fence or sentences around the object. */
+internal fun parsePlan(reply: String): VoiceCommandPlan {
+    val start = reply.indexOf('{')
+    val end = reply.lastIndexOf('}')
+    require(start in 0 until end) { "The model replied with no JSON object." }
+    return planJson.decodeFromString(VoiceCommandPlan.serializer(), reply.substring(start, end + 1))
+}
+
+internal fun replyContent(responseBody: String): String {
+    val content = JSONObject(responseBody)
+        .optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")
+    require(!content.isNullOrBlank()) { "The model sent an empty reply." }
+    return content
+}
+
+internal fun errorMessage(responseBody: String): String = runCatching {
+    JSONObject(responseBody).optJSONObject("error")?.optString("message")
+}.getOrNull().takeUnless { it.isNullOrBlank() } ?: responseBody.take(200)
+
+internal const val ADDRESS_EDIT_PROMPT = """
+You fix a web address after the user speaks a correction. You get the CURRENT address and the speech-to-text
+transcript of what they said. Reply with ONLY a JSON object {"address":"<the complete new address>"} — no
+prose, no code fences, no spaces inside the address.
+Rules:
+- Apply the correction to the current address and keep everything else exactly as it is: scheme, host, port,
+  path and query.
+- The transcript may be a correction ("it should be 103.61 not 103.69", "make the last digit 1", "change 8000
+  to 8001", "add slash docs", "make it http", "remove the port"), may spell numbers ("one oh three" is 103), or
+  may be a whole new address.
+- "X not Y", "X instead of Y" and "change Y to X" mean: replace Y with X wherever Y appears in the current
+  address (match the digits and dots literally).
+- Spoken symbols: dot is ".", colon is ":", slash is "/", dash is "-".
+- A whole new address replaces the current one. Digits spoken one at a time ("one nine two dot one six eight
+  dot zero dot ten") are 192.168.0.10.
+- Never add parts the user did not say. If you cannot tell what they want, return the current address
+  unchanged.
+Examples (current -> said -> reply):
+http://100.96.103.69:8000/ -> "it should be 103.61 not 103.69" -> {"address":"http://100.96.103.61:8000/"}
+http://100.96.103.69:8000/ -> "make the last digit 1" -> {"address":"http://100.96.103.61:8000/"}
+http://192.168.1.157:3000 -> "change the port to 3001" -> {"address":"http://192.168.1.157:3001"}
+http://192.168.1.157:3000 -> "actually add slash docs" -> {"address":"http://192.168.1.157:3000/docs"}
+https://example.com/docs -> "make it http" -> {"address":"http://example.com/docs"}
+http://10.0.0.5:8080/app -> "it should be 5 not 8" -> {"address":"http://10.0.0.5:8080/app"}
+"""
+
+private val addressShape = Regex("""^([A-Za-z][A-Za-z0-9+.-]*://)?[^\s/?#]+(/\S*|\?\S*)?$""")
+
+/** The model's reply → the address, or an error when it isn't one (so a bad reply never lands in the field). */
+internal fun parseEditedAddress(reply: String): String {
+    val start = reply.indexOf('{')
+    val end = reply.lastIndexOf('}')
+    require(start in 0 until end) { "The model replied with no JSON object." }
+    val address = JSONObject(reply.substring(start, end + 1)).optString("address", "").trim()
+    require(address.isNotEmpty() && address.length <= MAX_ADDRESS_LENGTH && addressShape.matches(address)) {
+        "The model did not return a usable address."
+    }
+    return address
+}
+
+private const val MAX_ADDRESS_LENGTH = 300
