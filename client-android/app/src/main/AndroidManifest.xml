@@ -8,6 +8,9 @@
          this runtime permission on immersive devices — see
          developer.android.com/develop/xr/jetpack-xr-sdk/arcore/device-pose. -->
     <uses-permission android:name="android.permission.HEAD_TRACKING" />
+    <!-- Dock "Record": MediaProjection screen recording runs in a foreground service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Home view weather HUD — coarse is enough for a current-conditions
          lookup, no need for GPS-grade precision. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -64,5 +67,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".capture.ScreenRecordService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>

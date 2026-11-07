@@ -330,6 +330,21 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         }
     }
 
+    // ── Record dock button: live screen recording (MediaProjection) ───────
+    val recording by com.lenscode.app.capture.ScreenRecordService.isRecording.collectAsState()
+    val recordPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
+            com.lenscode.app.capture.ScreenRecordService.start(context, result.resultCode, data)
+        } else {
+            showToast("Screen recording was not allowed.")
+        }
+    }
+    fun toggleRecording() {
+        if (recording) com.lenscode.app.capture.ScreenRecordService.stop(context)
+        else recordPermission.launch(com.lenscode.app.capture.ScreenRecordService.captureIntent(context))
+    }
+
     // ── Browser dock button ──────────────────────────────────────────────
     // No embedded live preview in Code (docs/remote-setup-and-limits.md), so
     // this is the app's only way to see a change actually running — it opens
@@ -2336,6 +2351,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             "remote" to "Remote",
                             "voice" to "Voice",
                             "snip" to "Snip",
+                            "record" to if (recording) "Stop" else "Record",
                             "browser" to "Browser",
                             "settings" to "Settings",
                         )) {
@@ -2344,12 +2360,13 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                                     DockButtonContent(
                                         id,
                                         label,
-                                        active = ui.activeView == id,
+                                        active = ui.activeView == id || (id == "record" && recording),
                                         attention = id == "permissions" && permissions.isNotEmpty(),
                                     ) {
                                         when (id) {
                                             "voice" -> requestVoiceCommand()
                                             "snip" -> startSnip()
+                                            "record" -> toggleRecording()
                                             "browser" -> ui.browserOverlayOpen = true
                                             else -> ui.activeView = id
                                         }
