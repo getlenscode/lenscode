@@ -17,6 +17,7 @@ Usage: lenscode-bridge [options]
                       No domain or certificate authority needed.
   --tls-cert <file>   TLS certificate (PEM, full chain) from a public authority. With --tls-key
   --tls-key <file>    this also turns on secure mode.
+  --no-discovery      don't advertise the bridge on the local network (mDNS)
   --paseo-url <url>   Paseo daemon WebSocket (default ws://127.0.0.1:6767/ws)
   --project-root <d>  folder the "local" workspace's files are served from (default: cwd)
   -v, --version       print the version
@@ -27,7 +28,7 @@ That is fine for a debug build of the app; a store build only connects over wss:
 (use --secure, or your own certificate).
 
 Environment: LENSCODE_PORT, LENSCODE_MODE, LENSCODE_TLS_CERT, LENSCODE_TLS_KEY,
-LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY, LENSCODE_SECURE=1.
+LENSCODE_PASEO_URL, LENSCODE_PASEO_PASSWORD, GEMINI_API_KEY, LENSCODE_SECURE=1, LENSCODE_NO_DISCOVERY=1.
 `;
 
 const VALUE_FLAGS: Record<string, string> = {
@@ -53,6 +54,10 @@ export function applyCliArgs(argv: string[], env: NodeJS.ProcessEnv, version: st
     const arg = argv[i];
     if (arg === "--secure") {
       env.LENSCODE_SECURE = "1";
+      continue;
+    }
+    if (arg === "--no-discovery") {
+      env.LENSCODE_NO_DISCOVERY = "1";
       continue;
     }
     if (arg === "-h" || arg === "--help") return { action: "exit", code: 0, message: USAGE };

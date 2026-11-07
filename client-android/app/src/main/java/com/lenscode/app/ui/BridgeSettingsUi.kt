@@ -42,6 +42,9 @@ data class BridgeSettingsUi(
     val onInputChange: (String) -> Unit,
     val onSpeak: () -> Unit,
     val onSave: () -> Unit,
+    /** Bridges advertising themselves on the local network. */
+    val found: List<com.lenscode.app.net.FoundBridge> = emptyList(),
+    val onPickFound: (com.lenscode.app.net.FoundBridge) -> Unit = {},
 )
 
 /**
@@ -55,6 +58,7 @@ fun BridgeConnectionSection(ui: BridgeSettingsUi) {
     SettingsSection("BRIDGE CONNECTION") {
         BridgeStatusRow(ui)
         Spacer(Modifier.height(12.dp))
+        FoundBridges(ui)
         BridgeAddressField(ui)
         Spacer(Modifier.height(10.dp))
         BridgeActionRow(ui)
@@ -144,4 +148,41 @@ private fun BridgeAction(label: String, color: androidx.compose.ui.graphics.Colo
         fontWeight = FontWeight.Bold,
         modifier = Modifier.clip(lensShape(3.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
     )
+}
+
+/** Bridges seen on the LAN; tapping one fills in and saves its address, no IP typing. */
+@Suppress("FunctionNaming")
+@Composable
+private fun FoundBridges(ui: BridgeSettingsUi) {
+    Text("FOUND ON YOUR NETWORK", color = LensCodeColors.Eyebrow, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+    Spacer(Modifier.height(6.dp))
+    if (ui.found.isEmpty()) {
+        Text(
+            "Searching… start the bridge on your computer (npx lenscode-bridge --secure) on the same wifi.",
+            color = LensCodeColors.Muted,
+            fontSize = 11.5.sp,
+        )
+    }
+    for (b in ui.found) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(lensShape(4.dp))
+                .background(LensCodeColors.CardBg)
+                .clickable { ui.onPickFound(b) }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(b.name.removePrefix("LensCode bridge ").trim('(', ')'), color = LensCodeColors.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text(
+                b.host + if (b.fingerprint != null) "  ·  ${b.fingerprint}" else "",
+                color = LensCodeColors.Muted,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+    Spacer(Modifier.height(6.dp))
 }

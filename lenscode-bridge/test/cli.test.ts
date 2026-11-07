@@ -92,3 +92,10 @@ test("the version in the code matches package.json (the published version)", () 
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(BRIDGE_VERSION, pkg.version);
 });
+
+test("--no-discovery turns off mDNS", () => {
+  const env: NodeJS.ProcessEnv = {};
+  const r = applyCliArgs(["--no-discovery"], env, "0.0.0");
+  assert.equal(r.action, "run");
+  assert.equal(env.LENSCODE_NO_DISCOVERY, "1");
+});
