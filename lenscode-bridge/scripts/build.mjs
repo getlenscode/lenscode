@@ -15,7 +15,7 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
-  external: ["ws", "zod", "selfsigned", "@getpaseo/*"],
+  external: ["ws", "zod", "selfsigned", "bonjour-service", "@getpaseo/*"],
   banner: { js: "#!/usr/bin/env node" },
   logLevel: "info",
 });

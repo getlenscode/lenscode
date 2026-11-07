@@ -89,6 +89,12 @@ fun DockIcon(id: String, color: Color) {
                     line(17f, 9f, 21f, 6f)
                     line(17f, 15f, 21f, 18f)
                 }
+                "record" -> {
+                    // Camcorder: body plus lens wedge, with a record dot.
+                    box(2f, 6f, 14f, 12f, 3f)
+                    line(16f, 10f, 22f, 7f, 22f, 17f, 16f, 14f)
+                    drawCircle(color, 2f, Offset(9f, 12f))
+                }
                 "browser" -> {
                     box(2f, 4f, 20f, 16f, 3f)
                     line(2f, 9f, 22f, 9f)

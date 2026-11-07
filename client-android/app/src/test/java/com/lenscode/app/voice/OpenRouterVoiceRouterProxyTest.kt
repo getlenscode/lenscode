@@ -14,13 +14,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.concurrent.thread
 
 /**
- * Pins how the router addresses lenscode-bridge's /gemini proxy: Koog must append
- * `v1beta/models/<id>:generateContent` under the proxy base path, and the device
- * credentials must ride along on every request. The stub answers 500 on purpose —
- * only the request shape is under test. Koog surfaces an HTTP error as an exception
- * (WorkspaceRoot.submitVoiceCommand catches it and falls back to the local matcher).
+ * Pins how the router addresses lenscode-bridge's /openrouter proxy: `chat/completions` under the proxy
+ * base path, the device credentials on every request, and no key of its own. The stub answers 500 on
+ * purpose — only the request shape is under test. An HTTP error comes back as a failed Result
+ * (WorkspaceRoot.submitVoiceCommand falls back to the local matcher).
  */
-class KoogVoiceRouterProxyTest {
+class OpenRouterVoiceRouterProxyTest {
 
     private class Seen(val path: String, val query: String?, val headers: Map<String, String>)
 
@@ -76,24 +75,24 @@ class KoogVoiceRouterProxyTest {
     @Test
     fun `requests go to the proxy path with device credentials and no real key`() = runBlocking {
         var token = "tok-1"
-        val router = KoogVoiceRouter(
-            apiKey = "via-lenscode-bridge",
-            modelId = "gemini-test",
-            baseUrl = com.lenscode.app.net.GeminiBridgeUrls.proxyBase("ws://127.0.0.1:${server.localPort}"),
+        val router = OpenRouterVoiceRouter(
+            modelId = "vendor/test-model",
+            baseUrl = com.lenscode.app.net.BridgeUrls.proxyBase("ws://127.0.0.1:${server.localPort}"),
             extraHeaders = { mapOf("X-LensCode-Device" to "xr-1", "X-LensCode-Token" to token) },
         )
         val context = VoiceRouterContext("home", null, false, null)
 
-        val first = runCatching { router.route("open the diff", context) }
-        assertTrue("the stub's 500 must not look like a success", first.isFailure || first.getOrThrow().isFailure)
+        val first = router.route("open the diff", context)
+        assertTrue("the stub's 500 must come back as a failure", first.isFailure)
+        assertTrue(first.exceptionOrNull()!!.message!!.contains("stub"))
         token = "tok-2"
-        runCatching { router.route("open the diff", context) }
+        router.route("open the diff", context)
 
         val req = seen.first()
-        assertEquals("/gemini/v1beta/models/gemini-test:generateContent", req.path)
-        assertEquals("key=via-lenscode-bridge", req.query)
+        assertEquals("/openrouter/chat/completions", req.path)
         assertEquals("xr-1", req.headers["x-lenscode-device"])
         assertEquals("tok-1", req.headers["x-lenscode-token"])
         assertEquals("headers are re-read per request", "tok-2", seen.last().headers["x-lenscode-token"])
+        assertEquals("no key is sent from the headset", null, req.headers["authorization"])
     }
 }

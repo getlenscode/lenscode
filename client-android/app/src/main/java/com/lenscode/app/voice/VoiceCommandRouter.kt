@@ -68,7 +68,7 @@ fun parseVoiceCommand(rawText: String): VoiceCommand {
         Regex("\\b(archive|close|stop|kill)\\b.*\\bagents?\\b").containsMatchIn(text) ->
             VoiceCommand.ArchiveAgent(extractTarget(text, "agents?"))
         // Only the unambiguous "agent named/called X" phrasing — anything looser
-        // ("open the frontend agent") is left to the Gemini router; a bare "open
+        // ("open the frontend agent") is left to the LLM router; a bare "open
         // agent" with no name still falls through to plain Navigate below.
         openAgentName != null -> VoiceCommand.OpenAgent(openAgentName)
         // Checked before kill_terminal: "close" means remove the pane entirely
@@ -126,7 +126,7 @@ internal fun fileSearchQuery(rawText: String): String? {
 /**
  * Only the unambiguous "agent(s) named/called X" phrasing, gated on an
  * open-ish verb being present — anything looser ("open the frontend agent")
- * is left to the Gemini router (KoogVoiceRouter); this is just the no-key
+ * is left to the LLM router (OpenRouterVoiceRouter); this is just the no-key
  * degraded path, so it stays conservative to avoid misreading a plain
  * "open agents" as naming something.
  */
@@ -144,7 +144,7 @@ private val CLOSE_VERBS = listOf("archive", "close", "stop", "kill")
  * otherwise whatever name sits before/after the [subjectPattern] word
  * (e.g. "kill the terminal test agent" → "terminal test", "archive agent B"
  * → "B", "close all my open terminals" → "all"), or "current" when nothing
- * more specific is said. The Gemini router (KoogVoiceRouter) does this
+ * more specific is said. The LLM router (OpenRouterVoiceRouter) does this
  * extraction properly when a key is configured — this is only the no-key
  * degraded path.
  */
