@@ -1,0 +1,19 @@
+# Voice command routing
+
+How a spoken command becomes an action: the OpenRouter router and key, and switching machine, agent and model by voice. Speech-to-text is in [speech-to-text.md](speech-to-text.md); the Browser dialog's address editing is in [browser-voice-address.md](browser-voice-address.md).
+
+## OpenRouter key (voice command routing)
+
+- Free-form commands ("add a test for the login route") are classified by an OpenRouter model, default **`z-ai/glm-5.3-flash`** (unverified on OpenRouter as of 2026-11-02 — change it on `/setup` or `LENSCODE_OPENROUTER_MODEL` if it 404s). `voice/VoiceRouter.kt`: `OpenRouterVoiceRouter` makes one chat-completions call, asks for plain JSON (`response_format: json_object`), and parses leniently (`parsePlan`); the grammar's `@LLMDescription`s become the schema in the system prompt. Koog is only used for that annotation now.
+- The key lives on the **bridge**, not the headset. Open `http://<mac-ip>:8137/setup` on a phone or PC and paste it (the headset's Settings shows this URL; the bridge logs it at startup while no key is set). Saved to `~/.config/lenscode-bridge/openrouter.json` (0600); `OPENROUTER_API_KEY` / `--openrouter-key` also work, and a page-saved key wins.
+- The headset calls `POST /openrouter/chat/completions` on the bridge, which swaps in the real key (nothing else on OpenRouter is reachable). `openrouter_key_changed` events and hello's `openrouter` field turn Settings green by themselves. **No fallback:** with no key, or when the call fails, `submitVoiceCommand` raises the `VoiceProblemOverlay` popup and runs nothing. `VoiceCommandRouter.kt` (keyword matcher) is no longer called by the app.
+- Dev mode (default): `/setup` and the proxy are open to the LAN, like the WebSocket. Prod mode: `/setup` needs the 6-digit code the bridge prints, and the proxy needs a paired device's token.
+- The old adb `lenscode-config.json` and build-time `-PgeminiApiKey` key paths were removed with Gemini.
+- The base URL passed to `OpenRouterVoiceRouter` is the bridge's `/openrouter/`; it appends `chat/completions`.
+
+## Switching machine, agent and model
+
+- `set_machine` (`VoiceAction.SetMachine`) switches the composer's host like tapping its row in the machine menu (`bridge.connectMachine`, then the folder picker). The spoken name is checked by `voice/ChoiceMatch.kt` (`matchMachine`: exact, then prefix, then contains, ignoring spacing and filler like "the … machine"; a hostname's domain suffix is ignored and the "local" pseudo-machine is never matched). `set_model` (`resolveModel`) covers claude/codex/pi/omp and their models.
+- **No match is a popup, not a guess**: "Not in connected machines" / "Not an available agent or model", listing what is available (`unknownMachineMessage`, `unknownAgentModelMessage`). Several equally good matches also raise the popup. "Connected" means the machines the app lists (registered SSH hosts); an unconnected one is accepted and connected, as a tap would.
+- The machine list is refreshed on every submitted voice command.
+- **Did you mean?** For an unknown agent/model (`set_model`, or `ask_agent` naming one), `decideAgentModel` (`voice/ChoiceMatch.kt`) returns `Use` (`resolveAgentModel`: agent name or model-id contains it), `Suggest` (`closestAgentModel`: edit distance over agent names, model ids and their pieces, threshold 0.6) or `Reject` (popup listing what exists). `suggestAgentModel` in `WorkspaceRoot.kt` just applies that; a `Suggest` shows `agentModelSuggestionCard` (`ui/AgentModelSuggestion.kt`, voice: "confirm" / "cancel"). Nothing is applied or started until the yes. Machines still get the popup only. Tests: `AgentModelDecisionTest`, `AgentModelSuggestionCardTest`, `ClosestAgentModelTest`; the final step (the agent actually starting after "confirm") has no test and was not tried on the headset.

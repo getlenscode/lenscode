@@ -1,0 +1,6 @@
+# Browser: address bar by voice
+
+Editing the Browser launch dialog's address by voice.
+
+- The Browser launch dialog's mic is agentic. While you speak, the quick deterministic parser (`applySpokenAddressEdit(current, spoken, paths = true)` in `voice/SpokenAddress.kt`) previews the edit. When you stop, `editBrowserAddressByVoice` (`WorkspaceRoot.kt`) sends the current address and the transcript to the OpenRouter model (`OpenRouterVoiceRouter.editAddress`, prompt `ADDRESS_EDIT_PROMPT`, reply checked by `parseEditedAddress`), so free-form corrections work: "it should be 103.61 not 103.69", "make the last digit one", "change the port to 8001", "add slash docs", "make it https", "remove the port". A whole spoken address (`replacesWholeAddress`) skips the model and replaces the field. **No key or a bad reply = popup and the address stays as it was**, never a guess. The bridge-address field in Settings deliberately keeps the quick parser only (`paths = false`): fixing a wrong bridge address cannot depend on that bridge.
+- The dialog edits `ui.browserDraft`, a copy of the page's `ui.browserUrl`; the page only changes on Open. (They used to be the same state, which the WebView must not follow keystroke by keystroke.) `BrowserLoadTracker` makes the WebView navigate when the committed address changes (http↔https, port) and reload once per ↻ press.
