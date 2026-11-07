@@ -165,6 +165,15 @@ sealed class VoiceAction {
     data class SetModel(@property:LLMDescription("the agent or model name as heard") val model: String) : VoiceAction()
 
     @Serializable
+    @SerialName("set_machine")
+    @LLMDescription(
+        "Switch the machine (host) new agents run on and Code browses — a registered SSH host such as " +
+            "\"dev-a\" or \"the mac mini\": \"use dev-a\", \"switch to the mac mini\", \"connect to dev-b\". " +
+            "The app checks the name against its machine list and tells the user if it isn't there.",
+    )
+    data class SetMachine(@property:LLMDescription("the machine name as heard") val machine: String) : VoiceAction()
+
+    @Serializable
     @SerialName("set_worktree")
     @LLMDescription(
         "Turn the worktree checkbox on/off — \"use a new worktree\", \"run in a worktree\", " +
@@ -350,7 +359,7 @@ data class VoiceStep(
             "kill_terminal, close_terminal, archive_agent, open_agent, dismiss, search, " +
             "new_agent, ask_agent, respond_permission, set_mode, set_model, set_worktree, " +
             "switch_branch, create_worktree, remove_worktree, composer_status, confirm, set_font_size, open_url, " +
-            "add_task, move_task, run_task",
+            "add_task, move_task, run_task, set_machine",
     )
     val type: String,
     @property:LLMDescription(
@@ -387,6 +396,8 @@ data class VoiceStep(
             "named for just this request, else null. Null otherwise.",
     )
     val model: String? = null,
+    @property:LLMDescription("required when type=set_machine: the machine/host name as heard. Null otherwise.")
+    val machine: String? = null,
     @property:LLMDescription(
         "type=switch_branch / create_worktree / remove_worktree: the branch name as heard " +
             "(required). Null otherwise.",
@@ -450,6 +461,7 @@ data class VoiceStep(
         "ask_agent" -> instruction?.let { VoiceAction.AskAgent(it, model, mode, worktree) }
         "set_mode" -> mode?.takeIf { it.isNotBlank() }?.let { VoiceAction.SetMode(it) }
         "set_model" -> model?.takeIf { it.isNotBlank() }?.let { VoiceAction.SetModel(it) }
+        "set_machine" -> machine?.takeIf { it.isNotBlank() }?.let { VoiceAction.SetMachine(it) }
         "set_worktree" -> worktree?.let { VoiceAction.SetWorktree(it) }
         "switch_branch" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.SwitchBranch(it) }
         "create_worktree" -> branch?.takeIf { it.isNotBlank() }?.let { VoiceAction.CreateWorktree(it) }
@@ -532,7 +544,9 @@ an ordered list of actions from the fixed grammar. Rules:
 - The Code view has a composer with mode / model / branch / worktree settings for new agents.
   "plan mode", "accept edits", "manual mode", "bypass permissions" -> set_mode; "use Opus",
   "switch to Sonnet", "use codex", "switch to pi", "use omp" / "oh my pi" -> set_model (the agent
-  and model dropdowns); "use a new worktree" / "no worktree" -> set_worktree;
+  and model dropdowns); "use dev-a" / "switch to the mac mini" / "connect to dev-b" / "run on
+  <machine>" -> set_machine with the machine name as heard (the machine dropdown; any registered
+  SSH host — never invent one, the app checks the name); "use a new worktree" / "no worktree" -> set_worktree;
   "switch to <branch>" / "checkout <branch>" -> switch_branch; "make/create a worktree for
   <branch>" -> create_worktree; "remove/delete the <branch> worktree" -> remove_worktree;
   "open git", "show branches" or "show worktrees" -> navigate with view=code (the branch
