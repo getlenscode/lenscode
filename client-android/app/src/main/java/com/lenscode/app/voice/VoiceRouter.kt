@@ -693,6 +693,7 @@ internal object OpenRouterVoiceRouterExamples {
         VoiceCommandPlan(listOf(VoiceStep(type = "navigate", view = "browser"))),
         VoiceCommandPlan(listOf(VoiceStep(type = "set_mode", mode = "plan"))),
         VoiceCommandPlan(listOf(VoiceStep(type = "set_model", model = "opus"))),
+        VoiceCommandPlan(listOf(VoiceStep(type = "set_machine", machine = "dev a"))),
         VoiceCommandPlan(listOf(VoiceStep(type = "set_worktree", worktree = true))),
         VoiceCommandPlan(listOf(VoiceStep(type = "switch_branch", branch = "main"))),
         VoiceCommandPlan(listOf(VoiceStep(type = "create_worktree", branch = "feature-x"))),

@@ -76,6 +76,17 @@ class OpenRouterVoiceRouterReplyTest {
             assertEquals(example, parsePlan(json))
         }
     }
+
+    @Test
+    fun `the prompt keeps a plan in the task from becoming plan mode`() {
+        val prompt = systemPrompt()
+        assertTrue(prompt.contains("Never set ask_agent's `mode` from the words of the task itself"))
+        assertTrue(prompt.contains("create a step-by-step plan for the dockerfile and API endpoints"))
+        // The example for that sentence leaves mode unset.
+        val example = OpenRouterVoiceRouterExamples.all.flatMap { it.actions }
+            .first { it.instruction?.startsWith("create a step-by-step plan") == true }
+        assertEquals(null, example.mode)
+    }
 }
 
 class AddressEditReplyTest {
