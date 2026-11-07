@@ -140,7 +140,7 @@ in the field, then send it — the spoken text never dispatches on its own.*
 3. Check the **Did I get that right?** transcript and click **Submit**. Click **Cancel** if it is wrong.
 4. To message a specific existing agent, open its card and use the small microphone next to **Send a message…** instead. Review the field, then click **Send**.
 
-Creating an agent from a spoken coding task requires the Gemini/Koog voice router to be configured in the APK. Without it, the fallback handles navigation and file search, not arbitrary coding tasks. There is no clickable **New Agent** form today. The voice creation path uses local Claude with `cwd = "."` and may reuse a previous voice agent. It does not inherit the remote folder you are viewing. See the [limitations](remote-setup-and-limits.md#current-limits-that-affect-these-exercises) before using it to start a new task.
+Creating an agent from a spoken coding task requires the OpenRouter voice router (a key on the bridge); without it the app shows an error popup. Without it, the fallback handles navigation and file search, not arbitrary coding tasks. There is no clickable **New Agent** form today. The voice creation path uses local Claude with `cwd = "."` and may reuse a previous voice agent. It does not inherit the remote folder you are viewing. See the [limitations](remote-setup-and-limits.md#current-limits-that-affect-these-exercises) before using it to start a new task.
 
 ## What to check after each exercise
 

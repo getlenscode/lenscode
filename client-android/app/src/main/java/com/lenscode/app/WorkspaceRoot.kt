@@ -185,7 +185,14 @@ internal class WorkspaceUiState(
     // several active agents to attach it to — cleared on pick or dismiss.
     var snipPendingMessage by mutableStateOf<String?>(null)
     var browserOverlayOpen by mutableStateOf(false)
+    /** The address the Browser page is showing. Only changes when you open one (it navigates the WebView). */
     var browserUrl by mutableStateOf(initialBrowserUrl)
+
+    /** The address being typed or dictated in the Browser's launch dialog; becomes [browserUrl] on Open. */
+    var browserDraft by mutableStateOf(initialBrowserUrl)
+
+    /** A spoken correction to the Browser address is being worked out by the model. */
+    var browserEditing by mutableStateOf(false)
     var currentThemeId by mutableStateOf(initialThemeId)
     /** Code editor font size in sp; changed by voice (VoiceAction.SetFontSize), persisted by EditorPrefsStore. */
     var editorFontSize by mutableStateOf(initialEditorFontSize)
@@ -226,6 +233,9 @@ internal class WorkspaceUiState(
     var dictationSession: com.lenscode.app.voice.VoiceRecognizer.DictationSession? = null
     var voicePartial by mutableStateOf("")
     var voiceError by mutableStateOf<String?>(null)
+
+    /** Popup when voice can't work (no AssemblyAI/OpenRouter key, bridge unreachable, routing failed). */
+    var voiceProblem by mutableStateOf<com.lenscode.app.ui.VoiceProblem?>(null)
     var voiceMode by mutableStateOf("fileSearch")
     var pendingVoiceMode by mutableStateOf("fileSearch")
     // Final transcript from the global voice-command mic, awaiting Submit/Cancel
@@ -234,10 +244,6 @@ internal class WorkspaceUiState(
     var composerSendRequested by mutableStateOf(false)
     var weatherReading by mutableStateOf<com.lenscode.app.net.WeatherReading?>(null)
     var weatherLocationDenied by mutableStateOf(false)
-    // Bumped by the Settings panel's Reload button to force geminiConfigResult
-    // (and koogVoiceRouter below) to re-read lenscode-config.json — see
-    // net/GeminiConfigStore.kt and ui/SettingsPanelContent.kt.
-    var geminiConfigReloadKey by mutableStateOf(0)
     var isRoutingVoiceCommand by mutableStateOf(false)
     // ArDevice (Follow Me's head pose) needs Config.DeviceTrackingMode.SPATIAL enabled on
     // the session — DISABLED by default (confirmed live: constructing it threw
@@ -265,7 +271,7 @@ internal class WorkspaceUiState(
 @Composable
 fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnterFullSpace: (() -> Unit)? = null) {
     val state by bridge.state.collectAsState()
-    val bridgeGemini by bridge.geminiStatus.collectAsState()
+    val bridgeLlm by bridge.llmStatus.collectAsState()
     val certPrompt by bridge.certPrompt.collectAsState()
     val terminals by bridge.terminals.collectAsState()
     val terminalOutput by bridge.terminalOutput.collectAsState()
@@ -301,6 +307,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             editorPrefs.loadFontSize(),
             bridge.state.value.bridgeUrl,
         )
+    }
+    LaunchedEffect(ui.browserOverlayOpen) {
+        // Edits (typed or spoken) start from the page you are on, and don't touch it until Open.
+        if (ui.browserOverlayOpen) ui.browserDraft = ui.browserUrl
     }
     fun resetLayout() {
         layoutStore.resetAll()
@@ -479,6 +489,25 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     // file search still goes through candidates/confidence, and a voice
     // agent-prompt lands in the text field for you to review and hit Send,
     // never fires straight into agent.prompt on its own.
+    /**
+     * Voice command router — null when the bridge has no OpenRouter key, in which case
+     * submitVoiceCommand raises a popup instead of making a doomed call. The key lives on the bridge (paste it once at its /setup page from a phone or PC); calls go
+     * through its /openrouter proxy, so the headset never holds the key.
+     */
+    val voiceRouter = remember(bridgeLlm.configured, bridgeLlm.model, bridge) {
+        if (!bridgeLlm.configured) {
+            null
+        } else {
+            com.lenscode.app.voice.OpenRouterVoiceRouter(
+                modelId = bridgeLlm.model ?: com.lenscode.app.net.DEFAULT_OPENROUTER_MODEL,
+                baseUrl = bridge.openRouterProxyBase,
+                extraHeaders = bridge::deviceAuthHeaders,
+                client = bridge.pinnedHttpClient,
+            )
+        }
+    }
+    val voiceScope = rememberCoroutineScope()
+
     val voiceRecognizer = remember { VoiceRecognizer(context) }
 
     // Debug-only text injection — types a transcript into the same review
@@ -532,6 +561,40 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         return TextFieldValue(merged, selection = TextRange(sel.min + s.length))
     }
 
+    /**
+     * The Browser address after a spoken correction. A whole new address just replaces it; anything else
+     * ("it should be 103.61 not 103.69", "add slash docs", "make it http") is worked out by the OpenRouter
+     * model from the current address and the transcript. No key, or a reply that isn't an address, is the
+     * usual popup and the address stays as it was — never a guess. (The live preview while speaking is the
+     * quick parser; this replaces it with the model's answer.)
+     */
+    fun editBrowserAddressByVoice(before: String, spoken: String) {
+        if (com.lenscode.app.voice.replacesWholeAddress(before, spoken)) {
+            ui.browserDraft = com.lenscode.app.voice.applySpokenAddressEdit(before, spoken, paths = true)
+            return
+        }
+        ui.browserDraft = before // drop the quick preview until the model answers
+        ui.browserEditing = true
+        voiceScope.launch {
+            val outcome = com.lenscode.app.voice.resolveSpokenAddress(before, spoken, voiceRouter)
+            ui.browserEditing = false
+            when (outcome) {
+                is com.lenscode.app.voice.AddressEditOutcome.Set -> ui.browserDraft = outcome.address
+                com.lenscode.app.voice.AddressEditOutcome.NeedsKey -> ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                    "Voice commands aren't set up",
+                    com.lenscode.app.voice.commandKeyMissingMessage(bridge.setupUrl),
+                )
+                is com.lenscode.app.voice.AddressEditOutcome.Failed -> {
+                    android.util.Log.w("LensCodeVoice", "address edit failed", outcome.error)
+                    ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                        "Couldn't change the address",
+                        com.lenscode.app.voice.commandRoutingFailedMessage(spoken, outcome.error, bridge.setupUrl),
+                    )
+                }
+            }
+        }
+    }
+
     fun startListening(mode: String) {
         ui.voiceMode = mode
         ui.voiceError = null
@@ -575,12 +638,17 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             return
         }
 
+        // Address fields are edited, not overwritten: "add port 8443" or "make the last digit 6" amends
+        // what was there when listening started; a whole address still replaces it.
+        val addressBefore = if (mode == "browserUrl") ui.browserDraft else ui.bridgeAddressInput
         voiceRecognizer.listen(
             onPartial = { text ->
                 ui.voicePartial = text
-                if (mode == "browserUrl") ui.browserUrl = com.lenscode.app.voice.normalizeSpokenAddress(text)
+                if (mode == "browserUrl") {
+                    ui.browserDraft = com.lenscode.app.voice.applySpokenAddressEdit(addressBefore, text, paths = true)
+                }
                 if (mode == "bridgeAddress") {
-                    ui.bridgeAddressInput = com.lenscode.app.voice.normalizeSpokenAddress(text)
+                    ui.bridgeAddressInput = com.lenscode.app.voice.applySpokenAddressEdit(addressBefore, text)
                 }
             },
             onResult = { text ->
@@ -591,8 +659,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                     // An address, not a sentence — "one nine two dot one six
                     // eight..." needs the digit/symbol-word collapsing, not
                     // the raw transcript.
-                    "browserUrl" -> ui.browserUrl = com.lenscode.app.voice.normalizeSpokenAddress(text)
-                    "bridgeAddress" -> ui.bridgeAddressInput = com.lenscode.app.voice.normalizeSpokenAddress(text)
+                    "browserUrl" -> editBrowserAddressByVoice(addressBefore, text)
+                    "bridgeAddress" ->
+                        ui.bridgeAddressInput = com.lenscode.app.voice.applySpokenAddressEdit(addressBefore, text)
                     // Never dispatches straight from speech — always lands in
                     // the review card first so a misheard word can't fire a
                     // destructive command (spec §57's confirmation discipline,
@@ -705,7 +774,7 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
 
     /**
      * Executes one classified action (docs/paseo-migration-plan.md follow-up
-     * — the agentic Koog/Gemini rewrite of the original regex router).
+     * — the agentic LLM rewrite of the original regex router).
      * Navigation, file open, and search act immediately — they're not
      * destructive. Everything else reuses the app's existing confirmation-card
      * types (StopConfirmState/DeleteConfirmState) rather than acting directly,
@@ -1607,65 +1676,22 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             com.lenscode.app.voice.VoiceAction.SetFontSize(size, change)
     }
 
-    val geminiConfigResult = remember(ui.geminiConfigReloadKey) {
-        com.lenscode.app.net.GeminiConfigStore.load(context)
-    }
-
-    val geminiKeySource = com.lenscode.app.net.resolveGeminiKeySource(
-        file = geminiConfigResult,
-        buildKeyPresent = BuildConfig.GEMINI_API_KEY.isNotBlank(),
-        bridge = bridgeGemini,
-    )
 
     /**
-     * Koog/Gemini router — null (and every call skipped) when no API key is
-     * configured, so an un-keyed build/device degrades straight to the
-     * deterministic local router rather than making a doomed network call.
-     * The key can come from three places (see resolveGeminiKeySource):
-     *   - on-device: lenscode-config.json pushed with adb
-     *   - the bridge: pasted once at its /setup page from a phone or PC — the
-     *     normal path, since typing a key in AR is miserable; calls then go
-     *     through the bridge's /gemini proxy and the key never reaches the headset
-     *   - build-time: ./gradlew :app:assembleDebug -PgeminiApiKey=AIza...
-     */
-    val koogVoiceRouter = remember(ui.geminiConfigReloadKey, geminiKeySource, bridgeGemini.model) {
-        val fileConfig = (geminiConfigResult as? com.lenscode.app.net.GeminiConfigResult.Loaded)?.config
-        val fileModel = fileConfig?.model?.takeIf { it.isNotBlank() }
-        when (geminiKeySource) {
-            com.lenscode.app.net.GeminiKeySource.NONE -> null
-            com.lenscode.app.net.GeminiKeySource.BRIDGE -> com.lenscode.app.voice.KoogVoiceRouter(
-                // Koog requires a key; the bridge discards this one and adds the real one.
-                apiKey = "via-lenscode-bridge",
-                modelId = fileModel ?: bridgeGemini.model ?: BuildConfig.GEMINI_MODEL,
-                baseUrl = bridge.geminiProxyBase,
-                extraHeaders = bridge::geminiAuthHeaders,
-                okHttpClient = bridge.pinnedHttpClient,
-            )
-            com.lenscode.app.net.GeminiKeySource.CONFIG_FILE -> com.lenscode.app.voice.KoogVoiceRouter(
-                apiKey = checkNotNull(fileConfig?.apiKey),
-                modelId = fileModel ?: BuildConfig.GEMINI_MODEL,
-            )
-            com.lenscode.app.net.GeminiKeySource.BUILD -> com.lenscode.app.voice.KoogVoiceRouter(
-                apiKey = BuildConfig.GEMINI_API_KEY,
-                modelId = fileModel ?: BuildConfig.GEMINI_MODEL,
-            )
-        }
-    }
-    val voiceScope = rememberCoroutineScope()
-
-    /**
-     * Submit handler for the voice-command review card. Tries the agentic
-     * Koog/Gemini router first; on any failure (no key, network, malformed
-     * response) falls back to the deterministic local router rather than
-     * leaving the command unhandled — the fallback always succeeds (worst
-     * case it resolves to a plain file search of the raw transcript).
+     * Submit handler for the voice-command review card. Routes through the
+     * OpenRouter router. There is deliberately no fallback to the keyword
+     * matcher: a missing key or a failed call raises a popup (voiceProblem)
+     * and the command is not run.
      */
     fun submitVoiceCommand(transcript: String) {
-        val router = koogVoiceRouter
+        val router = voiceRouter
         if (router == null) {
-            android.util.Log.d("LensCodeVoice", "no Gemini key configured — using local router")
-            executeVoiceAction(com.lenscode.app.voice.parseVoiceCommand(transcript).toAction())
+            // No fallback to the keyword matcher: say what's missing instead.
             ui.voiceCommandReview = null
+            ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                "Voice commands aren't set up",
+                com.lenscode.app.voice.commandKeyMissingMessage(bridge.setupUrl),
+            )
             return
         }
         val context = com.lenscode.app.voice.VoiceRouterContext(
@@ -1682,11 +1708,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         voiceScope.launch {
             // Confirmed live: router.route()'s Result<VoiceCommandPlan> does
             // NOT actually guarantee every failure is caught — a raw network
-            // exception (DNS resolution failure, no connectivity) escaped
-            // Koog's own Result-wrapping and crashed the whole app via this
-            // otherwise-unhandled coroutine. A wrapping try/catch is required
-            // for the "always falls back, never crashes" guarantee this
-            // function's own doc comment already promised but didn't deliver.
+            // exception (DNS resolution failure, no connectivity) escaped the
+            // Result-wrapping and crashed the whole app via this otherwise-
+            // unhandled coroutine. The try/catch turns it into the popup.
             val result = try {
                 router.route(transcript, context)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1697,11 +1721,14 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             ui.isRoutingVoiceCommand = false
             ui.voiceCommandReview = null
             result.onSuccess { plan ->
-                android.util.Log.d("LensCodeVoice", "Gemini plan: $plan")
+                android.util.Log.d("LensCodeVoice", "OpenRouter plan: $plan")
                 executeVoicePlan(plan)
             }.onFailure { e ->
-                android.util.Log.w("LensCodeVoice", "Gemini routing failed, falling back to local router", e)
-                executeVoiceAction(com.lenscode.app.voice.parseVoiceCommand(transcript).toAction())
+                android.util.Log.w("LensCodeVoice", "OpenRouter routing failed", e)
+                ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                    "Voice command failed",
+                    com.lenscode.app.voice.commandRoutingFailedMessage(transcript, e, bridge.setupUrl),
+                )
             }
         }
     }
@@ -2019,13 +2046,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             onSpeak = { requestVoice("bridgeAddress") },
                             onSave = { saveBridgeAddress() },
                         ),
-                        geminiResult = geminiConfigResult,
-                        geminiKeySource = geminiKeySource,
-                        bridgeGemini = bridgeGemini,
+                        bridgeLlm = bridgeLlm,
                         bridgeConnected = state.bridgeConnected,
-                        setupUrl = bridge.geminiSetupUrl,
-                        configPath = com.lenscode.app.net.GeminiConfigStore.configFile(context).absolutePath,
-                        onReload = { ui.geminiConfigReloadKey++ },
+                        setupUrl = bridge.setupUrl,
                         currentThemeId = ui.currentThemeId,
                         onThemeChange = { id ->
                             ui.currentThemeId = id
@@ -2223,6 +2246,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 // archive, Bypass enable. Voice answers them with "confirm"/"cancel".
                 com.lenscode.app.ui.BranchConflictCard(ui.branchConflict)
                 com.lenscode.app.ui.DeleteConfirmCard(ui.deleteConfirm)
+                com.lenscode.app.ui.VoiceProblemOverlay(
+                    problem = ui.voiceProblem,
+                    onDismiss = { ui.voiceProblem = null },
+                )
                 // A bridge using its own certificate (--secure): confirm its fingerprint once.
                 com.lenscode.app.ui.CertTrustOverlay(
                     prompt = certPrompt,
@@ -2243,11 +2270,11 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 )
                 com.lenscode.app.ui.BrowserLaunchOverlay(
                     visible = ui.browserOverlayOpen,
-                    url = ui.browserUrl,
-                    onUrlChange = { ui.browserUrl = it },
-                    onOpen = { openInAppBrowser(ui.browserUrl) },
+                    url = ui.browserDraft,
+                    onUrlChange = { ui.browserDraft = it },
+                    onOpen = { openInAppBrowser(ui.browserDraft) },
                     onDismiss = { ui.browserOverlayOpen = false },
-                    isListeningForUrl = ui.isListening && ui.voiceMode == "browserUrl",
+                    isListeningForUrl = (ui.isListening && ui.voiceMode == "browserUrl") || ui.browserEditing,
                     onVoiceInput = { requestVoice("browserUrl") },
                 )
                 ui.snipBitmap?.let { bitmap ->
