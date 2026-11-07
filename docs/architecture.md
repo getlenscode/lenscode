@@ -82,7 +82,9 @@ flowchart TB
   never exposed publicly.
 - **The OpenRouter key stays on the bridge.** It is set on the bridge's `/setup`
   page (or `OPENROUTER_API_KEY`), and the headset calls OpenRouter through the
-  bridge's `/openrouter/chat/completions` proxy, which adds the key. In secure mode the page needs the setup
+  bridge's `/openrouter/chat/completions` proxy, which adds the key. The AssemblyAI
+  key stays there too: the headset gets a one-minute streaming token from
+  `/assemblyai/token`. In secure mode the page needs the setup
   code the bridge prints, and the proxy needs a paired device.
 - **Route B** (dotted lines): a coding CLI started in an independent
   `ssh dev-a`/`dev-b` session runs outside `lenscode-bridge`, which is why
@@ -100,4 +102,4 @@ flowchart TB
 - [Bridge routing and agent handlers](../lenscode-bridge/src/server.ts)
 - [Device pairing](../lenscode-bridge/src/pairing.ts)
 - [Self-made certificate for secure mode](../lenscode-bridge/src/selfSigned.ts)
-- [Setup page and OpenRouter proxy](../lenscode-bridge/src/setupHttp.ts)
+- [Setup page, OpenRouter proxy and AssemblyAI token](../lenscode-bridge/src/setupHttp.ts)
