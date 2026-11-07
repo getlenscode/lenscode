@@ -44,6 +44,7 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - Run: `./scripts/setup-single-pc.sh` (port 8137; config via `LENSCODE_PORT`, `LENSCODE_PASEO_URL`). It exits if the `paseo` CLI isn't on PATH even when the daemon is running; then `cd lenscode-bridge && npm run dev` does the same job.
 - The bridge takes flags too (`npm run dev -- --port 9000`, `--tls-cert/--tls-key`; `--help` lists them) and prints the address to enter in the app on startup.
 - LAN discovery: the bridge advertises `_lenscode._tcp` over mDNS (`src/discovery.ts`, `bonjour-service`; TXT `v`, `secure`, `fp`); `--no-discovery` turns it off. The app lists bridges under Settings → Bridge connection (`net/BridgeDiscovery.kt`, only while Settings is open); picking one just fills in the address, trust still comes from the pairing code + cert prompt.
+- `--tailscale` (`src/tailscale.ts`) finds the 100.64.0.0/10 interface address (and the MagicDNS name via the CLI if present) and prints it as the address to enter; it exits if there is none.
 - Remote machines are all registered hosts reached over SSH; there is no special "local" machine in the app.
 
 ### Publishing the bridge (npm)

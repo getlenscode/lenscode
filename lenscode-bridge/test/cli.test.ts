@@ -106,3 +106,9 @@ test("--openrouter-key sets OPENROUTER_API_KEY", () => {
   assert.equal(r.action, "run");
   assert.equal(env.OPENROUTER_API_KEY, "abc123");
 });
+
+test("--tailscale is a plain switch", () => {
+  const env: NodeJS.ProcessEnv = {};
+  assert.equal(applyCliArgs(["--tailscale"], env, "0.0.0").action, "run");
+  assert.equal(env.LENSCODE_TAILSCALE, "1");
+});
