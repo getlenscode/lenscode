@@ -92,3 +92,9 @@ test("the version in the code matches package.json (the published version)", () 
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(BRIDGE_VERSION, pkg.version);
 });
+
+test("--tailscale is a plain switch", () => {
+  const env: NodeJS.ProcessEnv = {};
+  assert.equal(applyCliArgs(["--tailscale"], env, "0.0.0").action, "run");
+  assert.equal(env.LENSCODE_TAILSCALE, "1");
+});

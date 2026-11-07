@@ -43,6 +43,7 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - Ports: plain `ws://` bridge = **8137**, secure (`--secure` / TLS) = **8443** (`defaultPort()` in `lenscode-bridge/src/config.ts`, mirrored by `DEFAULT_BRIDGE_PORT` / `DEFAULT_SECURE_BRIDGE_PORT` in `net/BridgeAddress.kt`). A bare IP typed in the app takes its port from the scheme, so a store build (always secure) needs only the IP; `--port` overrides.
 - Run: `./scripts/setup-single-pc.sh` (port 8137; config via `LENSCODE_PORT`, `LENSCODE_PASEO_URL`). It exits if the `paseo` CLI isn't on PATH even when the daemon is running; then `cd lenscode-bridge && npm run dev` does the same job.
 - The bridge takes flags too (`npm run dev -- --port 9000`, `--tls-cert/--tls-key`; `--help` lists them) and prints the address to enter in the app on startup.
+- `--tailscale` (`src/tailscale.ts`) finds the 100.64.0.0/10 interface address (and the MagicDNS name via the CLI if present) and prints it as the address to enter; it exits if there is none.
 - Remote machines are all registered hosts reached over SSH; there is no special "local" machine in the app.
 
 ### Publishing the bridge (npm)
