@@ -67,7 +67,8 @@ fun BridgeConnectionSection(ui: BridgeSettingsUi) {
             "Enter the address of the computer running lenscode-bridge. The port is added for you " +
                 "(8443 for a secure address, 8137 for a plain one). " +
                 "To avoid typing, tap Speak and say the digits and \"dot\" — for example \"one nine two dot " +
-                "one six eight dot zero dot one zero\".",
+                "one six eight dot zero dot one zero\". Tap Speak again to amend it: \"add port 8443\", \"wss instead " +
+                "of ws\", \"make the last digit 6\", \"third octet 5\".",
             color = LensCodeColors.Muted,
             fontSize = 11.5.sp,
             lineHeight = 16.sp,

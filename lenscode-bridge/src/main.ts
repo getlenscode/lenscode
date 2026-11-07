@@ -1,7 +1,7 @@
 import { applyCliArgs } from "./cli.ts";
 import { loadConfig } from "./config.ts";
 import { BridgeServer, BRIDGE_VERSION } from "./server.ts";
-import { lanAddresses } from "./geminiHttp.ts";
+import { lanAddresses } from "./setupHttp.ts";
 import { advertiseBridge } from "./discovery.ts";
 import { log } from "./log.ts";
 import { ensureSelfSignedCert, shortFingerprint, type SelfSignedCert } from "./selfSigned.ts";

@@ -99,3 +99,10 @@ test("--no-discovery turns off mDNS", () => {
   assert.equal(r.action, "run");
   assert.equal(env.LENSCODE_NO_DISCOVERY, "1");
 });
+
+test("--openrouter-key sets OPENROUTER_API_KEY", () => {
+  const env: NodeJS.ProcessEnv = {};
+  const r = applyCliArgs(["--openrouter-key", "abc123"], env, "0.0.0");
+  assert.equal(r.action, "run");
+  assert.equal(env.OPENROUTER_API_KEY, "abc123");
+});

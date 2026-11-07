@@ -1,11 +1,12 @@
 /**
- * HTTP side of the Gemini key feature (the WebSocket server owns everything else):
+ * HTTP side of the key features (the WebSocket server owns everything else):
  *
- *   GET/POST /setup     a small page, opened from a phone or PC browser, where the
- *                       user pastes the key once. The headset's Settings panel only
- *                       shows this URL — no typing in AR.
- *   ANY /gemini/v1beta/* a pass-through to generativelanguage.googleapis.com that
- *                       swaps in the stored key, so the headset never holds it.
+ *   GET/POST /setup          a small page, opened from a phone or PC browser, where the user
+ *                            pastes the OpenRouter key once. The headset's
+ *                            Settings panel only shows this URL — no typing in AR.
+ *   POST /openrouter/chat/completions
+ *                            a pass-through to openrouter.ai that swaps in the stored key, so
+ *                            the headset never holds it.
  *
  * Trust follows the WebSocket rules (spec §55): dev mode trusts the LAN; prod mode
  * needs a paired device's token for the proxy and the console-printed setup code
@@ -16,36 +17,35 @@ import { networkInterfaces } from "node:os";
 import { randomInt, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import { log } from "./log.ts";
-import { checkGeminiKey, type GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
-
-export const GEMINI_UPSTREAM = "https://generativelanguage.googleapis.com";
+import { checkOpenRouterKey, type OpenRouterKeyStore, type OpenRouterStatus } from "./openrouterKey.ts";
+export const OPENROUTER_UPSTREAM = "https://openrouter.ai/api/v1";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_SETUP_BODY_BYTES = 8 * 1024;
 const MAX_CODE_FAILURES = 5;
 const PROXY_TIMEOUT_MS = 60_000;
 
-export interface GeminiHttpOptions {
-  store: GeminiKeyStore;
+export interface SetupHttpOptions {
+  store: OpenRouterKeyStore;
   mode: "dev" | "prod";
-  /** Base URL requests are forwarded to; overridable so tests can stub Google. */
+  /** Base URL requests are forwarded to; overridable so tests can stub OpenRouter. */
   upstream?: string;
   /** prod only: does this device id + token belong to a paired, unrevoked device? */
   authorizeDevice: (deviceId: string, token: string | undefined) => boolean;
   /** Called after the stored key changes, so connected headsets can refresh. */
-  onChange: (status: GeminiStatus) => void;
+  onChange: (status: OpenRouterStatus) => void;
   fetchImpl?: typeof fetch;
 }
 
-export class GeminiHttp {
-  private opts: GeminiHttpOptions;
+export class SetupHttp {
+  private opts: SetupHttpOptions;
   private upstream: string;
   private fetchImpl: typeof fetch;
   private setupCode: string | null = null;
   private codeFailures = 0;
 
-  constructor(opts: GeminiHttpOptions) {
+  constructor(opts: SetupHttpOptions) {
     this.opts = opts;
-    this.upstream = opts.upstream ?? GEMINI_UPSTREAM;
+    this.upstream = opts.upstream ?? OPENROUTER_UPSTREAM;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.mode === "prod") this.rotateCode();
   }
@@ -62,10 +62,10 @@ export class GeminiHttp {
       this.setup(req, res).catch((e) => this.fail(res, 500, `Setup failed: ${String(e)}`));
       return true;
     }
-    if (url.pathname.startsWith("/gemini/")) {
+    if (url.pathname.startsWith("/openrouter/")) {
       this.proxy(req, res, url).catch((e) => {
-        log("warn", "gemini proxy failed", { error: String(e) });
-        this.sendJson(res, 502, geminiError(502, "Could not reach Google from the bridge."));
+        log("warn", "openrouter proxy failed", { error: String(e) });
+        this.sendJson(res, 502, llmError(502, "Could not reach OpenRouter from the bridge."));
       });
       return true;
     }
@@ -107,21 +107,21 @@ export class GeminiHttp {
     if (form.get("action") === "clear") {
       this.opts.store.clear();
       this.afterChange();
-      this.sendHtml(res, 200, this.renderPage({ ok: "The saved key was removed." }));
+      this.sendHtml(res, 200, this.renderPage({ ok: "The saved OpenRouter key was removed." }));
       return;
     }
 
     const apiKey = (form.get("apiKey") ?? "").trim();
     const model = (form.get("model") ?? "").trim();
     if (!apiKey) {
-      this.sendHtml(res, 400, this.renderPage({ error: "Paste your Gemini API key first." }));
+      this.sendHtml(res, 400, this.renderPage({ error: "Paste your OpenRouter API key first." }));
       return;
     }
-    if (!/^[\w.-]*$/.test(model)) {
+    if (!/^[\w./:-]*$/.test(model)) {
       this.sendHtml(res, 400, this.renderPage({ error: "That model name has odd characters in it." }));
       return;
     }
-    const check = await checkGeminiKey(apiKey, this.upstream, this.fetchImpl);
+    const check = await checkOpenRouterKey(apiKey, this.upstream, this.fetchImpl);
     if (!check.ok) {
       this.sendHtml(res, 400, this.renderPage({ error: check.message }));
       return;
@@ -131,7 +131,7 @@ export class GeminiHttp {
     this.sendHtml(
       res,
       200,
-      this.renderPage({ ok: "Key saved. Voice routing is now active — you can close this page." }),
+      this.renderPage({ ok: "OpenRouter key saved. Voice routing is now active — you can close this page." }),
     );
   }
 
@@ -150,20 +150,20 @@ export class GeminiHttp {
   private rotateCode(): void {
     this.setupCode = String(randomInt(0, 1_000_000)).padStart(6, "0");
     this.codeFailures = 0;
-    log("info", "GEMINI SETUP CODE — enter this on the /setup page", { code: this.setupCode });
+    log("info", "SETUP CODE — enter this on the /setup page", { code: this.setupCode });
   }
 
   private renderPage(msg: { ok?: string; error?: string } = {}): string {
     const s = this.opts.store.status();
     const status = s.configured
-      ? `Active — key from ${s.source === "file" ? "this page" : "the GEMINI_API_KEY environment variable"}` +
-        (s.model ? `, model ${s.model}` : "")
-      : "Not set — voice commands use the built-in matcher only";
+      ? `Active — key from ${s.source === "file" ? "this page" : "the OPENROUTER_API_KEY environment variable"}` +
+        `, model ${s.model}`
+      : "Not set — voice commands show an error until a key is added";
     const prod = this.opts.mode === "prod";
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LensCode · Gemini key</title>
+<title>LensCode · OpenRouter key</title>
 <style>
   :root { --bg:#fff; --fg:#14171f; --muted:#5b6475; --card:#f4f6fa; --line:#d6dbe6; --accent:#0a7c8c; --ok:#1a7f4b; --bad:#b3261e; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0f1218; --fg:#e8ecf4; --muted:#9aa4b8; --card:#181d27; --line:#2b3345; --accent:#38bdd0; --ok:#4ade80; --bad:#f87171; } }
@@ -179,17 +179,17 @@ export class GeminiHttp {
   small { color:var(--muted); display:block; margin-top:6px; }
 </style></head>
 <body><main>
-<h1>Gemini key for LensCode</h1>
-<div>Paste it here once instead of typing it in the headset. It stays on this computer.</div>
+<h1>OpenRouter key for LensCode</h1>
+<div>Used to turn spoken commands into actions. Paste it here once instead of typing it in the headset. It stays on this computer.</div>
 <div class="status">${esc(status)}</div>
 ${msg.ok ? `<p class="ok">${esc(msg.ok)}</p>` : ""}${msg.error ? `<p class="bad">${esc(msg.error)}</p>` : ""}
 <form method="post" action="/setup" autocomplete="off">
   <label for="apiKey">API key</label>
-  <input id="apiKey" name="apiKey" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="AIza…">
-  <small>Get one at aistudio.google.com/apikey</small>
+  <input id="apiKey" name="apiKey" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="sk-or-…">
+  <small>Get one at openrouter.ai/keys</small>
   <label for="model">Model (optional)</label>
-  <input id="model" name="model" type="text" autocapitalize="none" spellcheck="false" placeholder="gemini-3.8-flash">
-  <small>Leave blank to use the default, gemini-3.8-flash.</small>
+  <input id="model" name="model" type="text" autocapitalize="none" spellcheck="false" placeholder="z-ai/glm-5.3-flash">
+  <small>Any OpenRouter model id. Leave blank to use the default, z-ai/glm-5.3-flash.</small>
   ${
     prod
       ? `<label for="code">Setup code</label>
@@ -205,7 +205,7 @@ ${prod ? "" : `<small>Dev mode: this page is plain HTTP, so the key crosses your
   }
 
   // ---------------------------------------------------------------------------
-  // /gemini proxy
+  // /openrouter proxy
   // ---------------------------------------------------------------------------
 
   private async proxy(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
@@ -213,7 +213,7 @@ ${prod ? "" : `<small>Dev mode: this page is plain HTTP, so the key crosses your
       const deviceId = headerValue(req.headers["x-lenscode-device"]);
       const token = headerValue(req.headers["x-lenscode-token"]);
       if (!deviceId || !this.opts.authorizeDevice(deviceId, token)) {
-        this.sendJson(res, 401, geminiError(401, "This device is not paired with lenscode-bridge."));
+        this.sendJson(res, 401, llmError(401, "This device is not paired with lenscode-bridge."));
         return;
       }
     }
@@ -222,21 +222,24 @@ ${prod ? "" : `<small>Dev mode: this page is plain HTTP, so the key crosses your
       this.sendJson(
         res,
         503,
-        geminiError(503, "No Gemini key is set on the bridge. Open its /setup page to add one."),
+        llmError(503, "No OpenRouter key is set on the bridge. Open its /setup page to add one."),
       );
       return;
     }
-    const upstreamPath = url.pathname.slice("/gemini".length);
-    if (!upstreamPath.startsWith("/v1beta/") || (req.method !== "POST" && req.method !== "GET")) {
-      this.sendJson(res, 404, geminiError(404, "Unsupported Gemini endpoint."));
+    // Chat completions only: the headset has no reason to reach any other OpenRouter endpoint
+    // (keys, credits, models) with the bridge's key.
+    const upstreamPath = url.pathname.slice("/openrouter".length);
+    if (upstreamPath !== "/chat/completions" || req.method !== "POST") {
+      this.sendJson(res, 404, llmError(404, "Unsupported OpenRouter endpoint."));
       return;
     }
 
-    // The client's own `key` param is a placeholder (Koog always appends one); drop it
-    // and authenticate upstream with the real key in a header so it never hits a URL.
-    url.searchParams.delete("key");
-    const target = `${this.upstream}${upstreamPath}${url.search}`;
-    const headers: Record<string, string> = { "x-goog-api-key": apiKey };
+    // The real key goes in a header, never a URL; whatever auth the client sent is dropped.
+    const target = `${this.upstream}${upstreamPath}`;
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${apiKey}`,
+      "x-title": "LensCode",
+    };
     const contentType = headerValue(req.headers["content-type"]);
     if (contentType) headers["content-type"] = contentType;
     const accept = headerValue(req.headers.accept);
@@ -250,7 +253,7 @@ ${prod ? "" : `<small>Dev mode: this page is plain HTTP, so the key crosses your
       body,
       signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
     });
-    log("info", "gemini proxy", { status: upstreamRes.status, ms: Date.now() - started });
+    log("info", "openrouter proxy", { status: upstreamRes.status, ms: Date.now() - started });
 
     // fetch() already decoded any gzip, so don't pass the encoding/length through.
     res.writeHead(upstreamRes.status, {
@@ -290,9 +293,9 @@ ${prod ? "" : `<small>Dev mode: this page is plain HTTP, so the key crosses your
   }
 }
 
-/** Google's own error envelope, so Koog surfaces our failures like any API error. */
-function geminiError(code: number, message: string) {
-  return { error: { code, message, status: code === 401 ? "UNAUTHENTICATED" : "FAILED_PRECONDITION" } };
+/** OpenRouter's own error envelope, so the headset reads our failures like any API error. */
+function llmError(code: number, message: string) {
+  return { error: { code, message } };
 }
 
 function headerValue(v: string | string[] | undefined): string | undefined {
