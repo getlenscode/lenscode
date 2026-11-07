@@ -2,7 +2,7 @@
 
 Android XR client (`client-android/`) -> `lenscode-bridge/` (Node/TS) -> Paseo daemon. Protocol schema in `protocol/`. Marketing/docs site in `website/`. Licensed GPL-3.0-or-later (root `LICENSE`).
 
-## Android XR app: build, install, run
+## Quick start: build, install, run the Android app
 
 ```bash
 cd client-android
@@ -13,112 +13,37 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 ```
 
 - My real addresses are in `CLAUDE.local.md` (gitignored, personal): @CLAUDE.local.md
-- Replace `<mac-ip>` with the Mac's LAN IP and `<device-ip>:<port>` with the XR device from `adb devices`. Both change: the LAN IP with the network, the wireless-debugging port on every restart.
-- `bridgeUrl` is the Mac's LAN IP (a literal IP; `adb reverse` can't help). It is only the first-run default: the address saved in the app (Settings → Bridge connection, typed or dictated) wins, so a changed IP needs no rebuild.
-- Reinstalling resets the Follow Me toggle to off.
+- Both addresses change (the LAN IP with the network, the wireless-debugging port on every restart): get the device from `adb devices`. Details in [docs/android-build-and-release.md](docs/android-build-and-release.md).
 
-## Release build (Play Store)
+## Rules that must not be broken
 
-- Play takes an **AAB**: `cd client-android && ./gradlew :app:bundleRelease` → `app/build/outputs/bundle/release/app-release.aab`. (`:app:assembleRelease` gives an APK for side-loading.)
-- Signing reads `client-android/keystore.properties` (gitignored, as are `*.jks`): `storeFile=` (relative to `client-android/`), `storePassword=`, `keyAlias=`, `keyPassword=`. Without that file the build still works but is **unsigned**, and Play/adb reject it.
-- Create the upload key once and back it up (losing it means a support request to Google): `keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`. Enroll in Play App Signing so Google holds the real app-signing key.
-- Bump `versionCode` in `app/build.gradle.kts` for every upload (Play rejects a repeat); `versionName` is the semver shown to people (currently `0.1.0-alpha.N`).
-- The bridge address is set on the headset (Settings → Bridge connection; the Speak button takes a dictated IP), so none is baked into the release.
+- **Bridge trust:** the store build refuses `ws://` (`secureOnly = !BuildConfig.DEBUG`); don't relax it. Never write a TrustManager that accepts everything. `PinnedTrustManager` stays an `X509ExtendedTrustManager`, and the fingerprint format stays identical in `selfSigned.ts` and `CertPin.kt`. Never commit `privkey.pem`, `*.key` or `*.pem`. See [docs/tls-and-bridge-trust.md](docs/tls-and-bridge-trust.md).
+- **Keys live on the bridge, not the headset**: the headset only sees proxied calls and short-lived tokens. See [docs/voice-routing.md](docs/voice-routing.md) and [docs/speech-to-text.md](docs/speech-to-text.md).
+- **Voice has no silent fallback:** a missing key or failed call raises the `VoiceProblemOverlay` popup and runs nothing; unknown machines, agents and models give a popup or a "did you mean" card, never a guess.
+- **MCP control endpoint** stays on `127.0.0.1` (never the LAN). Keep the checks on tmux session names (`[A-Za-z0-9._-]{1,64}`), http(s) URLs and single-quoted folder paths. See [docs/mcp-implementation-notes.md](docs/mcp-implementation-notes.md).
+- **Home Space:** `FULL_SPACE_ENABLED = false` in `MainActivity.kt`; don't switch it on without asking. Small corners go through `lensShape(dp)`, never `RoundedCornerShape(dp)`. See [docs/themes-and-window-look.md](docs/themes-and-window-look.md).
+- **Releases:** bump `versionCode` in `app/build.gradle.kts` for every Play upload. Bump the bridge `version` and `BRIDGE_VERSION` together, and never publish the same npm version twice (`E409`). See [docs/bridge-publishing.md](docs/bridge-publishing.md).
 
-### TLS and bridge trust
+## Docs
 
-- Release builds allow cleartext `http://` (`app/src/main/res/xml/network_security_config.xml`) so the Browser view can open a LAN dev server, but the app itself still refuses a `ws://` bridge address (`secureOnly = !BuildConfig.DEBUG`, `BridgeAddress.kt`): the bridge must run with TLS (`--secure`) and be entered as `wss://host` (port 8443 is assumed). Don't relax that check. The debug network config (`app/src/debug/res/xml/network_security_config.xml`) overrides the main one and also trusts user CAs; it is why debug accepts any LAN IP.
-- **Self-signed + pinning (the store-friendly path):** `lenscode-bridge --secure` makes its own EC certificate (`~/.config/lenscode-bridge/self-signed/`, reused so pins survive restarts, renewed 30 days before expiry) and prints its fingerprint (first 80 bits of SHA-256, e.g. `510D-4148-395F-0618-6472`).
-  - On first contact the app probes the certificate (`PinnedTls.probeCertificate`: the handshake is recorded then deliberately failed, so no data is sent), shows `CertTrustOverlay`, and on confirmation stores the full SHA-256 in `PinStore` under `host:port`.
-  - After that `PinnedTrustManager` accepts the system's trust OR exactly that certificate, and `PinnedHostnameVerifier` accepts the pinned certificate for any host, so a changed IP keeps working. A changed certificate raises the same prompt with a red warning.
-  - Never write a TrustManager that accepts everything: Play flags it, and it defeats the point.
-  - `PinnedTrustManager` must stay an `X509ExtendedTrustManager` that passes the socket/engine variants through. Debug builds have a `<domain-config>`, and then Android's trust manager rejects the plain 2-arg check for every certificate ("Domain specific configurations require that hostname aware checkServerTrusted ... is used").
-  - The fingerprint format must stay identical in `lenscode-bridge/src/selfSigned.ts` and `net/CertPin.kt` (both have a test with the same vector).
-- A public-CA certificate (`--tls-cert/--tls-key`: a domain + Let's Encrypt, `tailscale cert`, a tunnel) is supported and needs no prompt. Never commit `privkey.pem`/`*.key`/`*.pem` (gitignored): a shared private key lets anyone impersonate the bridge.
-- **Local CA for testing:** `./scripts/make-dev-tls.sh <mac-ip>` makes a CA + server cert in `~/.config/lenscode-bridge/tls/` (valid only for that address). Run the bridge with `LENSCODE_MODE=prod LENSCODE_TLS_CERT=…/server.pem LENSCODE_TLS_KEY=…/server.key npm run dev`, enter `<mac-ip>` in the app (`wss://<mac-ip>:8443`), then pair on Home (the 6-digit code is printed in the bridge console). `test/tls.test.ts` covers this path. Debug builds only trust that CA if it is installed on the device (debug-only `user` trust in the debug network config; Android needs a screen lock before it installs a CA).
+Read the one that matches the work; each is short.
 
-## Bridge and Paseo
+**Build and release**
+- [docs/android-build-and-release.md](docs/android-build-and-release.md): build, install, run; the Play Store AAB, signing and `versionCode`.
+- [docs/tls-and-bridge-trust.md](docs/tls-and-bridge-trust.md): `--secure`, self-signed certificate pinning, public certificates, the local test CA.
+- [docs/bridge-and-paseo.md](docs/bridge-and-paseo.md): ports, flags, running the bridge, LAN discovery (mDNS), `--tailscale`.
+- [docs/bridge-publishing.md](docs/bridge-publishing.md): npm release steps for `lenscode-bridge`.
 
-- Paseo daemon: `paseo daemon` (listens on `ws://127.0.0.1:6767/ws`).
-- Ports: plain `ws://` bridge = **8137**, secure (`--secure` / TLS) = **8443** (`defaultPort()` in `lenscode-bridge/src/config.ts`, mirrored by `DEFAULT_BRIDGE_PORT` / `DEFAULT_SECURE_BRIDGE_PORT` in `net/BridgeAddress.kt`). A bare IP typed in the app takes its port from the scheme, so a store build (always secure) needs only the IP; `--port` overrides.
-- Run: `./scripts/setup-single-pc.sh` (port 8137; config via `LENSCODE_PORT`, `LENSCODE_PASEO_URL`). It exits if the `paseo` CLI isn't on PATH even when the daemon is running; then `cd lenscode-bridge && npm run dev` does the same job.
-- The bridge takes flags too (`npm run dev -- --port 9000`, `--tls-cert/--tls-key`; `--help` lists them) and prints the address to enter in the app on startup.
-- LAN discovery: the bridge advertises `_lenscode._tcp` over mDNS (`src/discovery.ts`, `bonjour-service`; TXT `v`, `secure`, `fp`); `--no-discovery` turns it off. The app lists bridges under Settings → Bridge connection (`net/BridgeDiscovery.kt`, only while Settings is open); picking one just fills in the address, trust still comes from the pairing code + cert prompt.
-- `--tailscale` (`src/tailscale.ts`) finds the 100.64.0.0/10 interface address (and the MagicDNS name via the CLI if present) and prints it as the address to enter; it exits if there is none.
-- Remote machines are all registered hosts reached over SSH; there is no special "local" machine in the app.
+**Features**
+- [docs/tasks-board.md](docs/tasks-board.md): the Tasks (Kanban) view and the Paseo Tasks plugin.
+- [docs/voice-routing.md](docs/voice-routing.md): OpenRouter command routing, and switching machine, agent and model by voice.
+- [docs/speech-to-text.md](docs/speech-to-text.md): AssemblyAI streaming dictation.
+- [docs/browser-voice-address.md](docs/browser-voice-address.md): editing the Browser dialog's address by voice.
+- [docs/claude-auto-mode.md](docs/claude-auto-mode.md): why new Claude agents start in Auto mode.
+- [docs/mcp-implementation-notes.md](docs/mcp-implementation-notes.md): the MCP server's code layout and checks. The user guide is [docs/mcp-headset-control.md](docs/mcp-headset-control.md).
+- [docs/themes-and-window-look.md](docs/themes-and-window-look.md): themes, the Home Space window, headset screenshots.
+- [docs/follow-me.md](docs/follow-me.md): Follow Me requirements and the debug broadcast.
+- [docs/website.md](docs/website.md): the `website/` dev server, Cloudflare deploy and icons.
 
-### Publishing the bridge (npm)
-
-- `cd lenscode-bridge && npm run build` bundles `dist/lenscode-bridge.js` (esbuild; `@lenscode/protocol` is bundled in, the npm deps stay external); `npm pack` makes the tarball. Published as the unscoped `lenscode-bridge` (the `@lenscode` scope does not exist); users run `npx lenscode-bridge`. Current: `0.1.0-alpha.3`.
-- Release: bump `version` in `lenscode-bridge/package.json` and `BRIDGE_VERSION` in `src/server.ts` together (a test checks they match; `npm version <v> --no-git-tag-version` also updates the lockfile), run `npm test`, then `npm login` (if needed) and `npm publish`. A version number can never be reused.
-- Publishing opens a browser auth step and can sit "staged" for a few minutes before `npm view` shows it; don't publish again (`E409`). A `404` on `PUT` means you're logged out (`npm whoami` gives 401), not a missing package.
-- License: GPL-3.0-or-later. The root `LICENSE` is copied into `lenscode-bridge/` and listed in its `files`. `alpha.1` and `alpha.2` were ISC (deprecate with `npm deprecate`; installed copies stay ISC); `alpha.3` is the first GPL release.
-
-### MCP: drive the headset from Claude Code / Claude Desktop
-
-- User guide (why, setup, tools, examples): `docs/mcp-headset-control.md`. Everything is in `lenscode-bridge/src/mcp/` (see its `README.md`; tests in `test/mcp/`): `commands.ts` (the commands and their checks), `endpoint.ts` (loopback listener, token, `control.json`), `tools.ts`, `client.ts`, `server.ts` (stdio MCP, hand-written JSON-RPC, no SDK), `remoteDaemon.ts` (starts a remote Paseo for `open_project`), `index.ts`. The rest of the bridge imports only from `./mcp/index.ts`.
-- `lenscode-bridge mcp` starts no bridge: it reads `~/.config/lenscode-bridge/control.json` (port + token, 0600, written by `main.ts` at startup) and POSTs to the running bridge's control endpoint. That endpoint is a separate HTTP listener on `127.0.0.1`, random port, bearer token. Never bind it to the LAN.
-- Headset commands go to paired clients as `control` topic events. The app side is the `com.lenscode.app.control` package (`ControlCommands.kt`, tests in `test/.../control/`); `handleControlCommand` in `WorkspaceRoot.kt` acts on them.
-- tmux session names are typed into a shell (`tmux new -A -s <name>`), so both sides only accept `[A-Za-z0-9._-]{1,64}`; URLs must be http(s); folder paths for `open_project` are single-quoted (`shellQuote`) before they reach ssh. Keep these checks.
-- Dev from the repo: `claude mcp add lenscode -- node --experimental-strip-types <repo>/lenscode-bridge/src/main.ts mcp`. `npx lenscode-bridge mcp` needs bridge `0.1.0-alpha.4` or newer.
-
-## Tasks board (Paseo Tasks plugin)
-
-- The dock's **Tasks** view is a Kanban board of the Paseo Tasks plugin (`paseo plugin add anh-chu/tasks`; needs Paseo 0.11.2+ and Node 24+ on the daemon host). The bridge never touches its SQLite store: `src/tasks.ts` POSTs `argv` (always with `--json`) to the plugin's loopback `/cli` endpoint using the token in `$PASEO_HOME/plugin-data/tasks/bridge.json`, the same call its `paseo-tasks` script makes. Remote machines run that machine's script over SSH.
-- Requests: `tasks.list/create/update/delegate` (not workspace-scoped). Keys, statuses and priorities are validated before they reach the CLI.
-- Agents get the tracker's instructions injected by the plugin, so they create and update tasks themselves; the board polls every 8 s while open. A task's agent tags come from its attached sessions, mapped to a provider through the Agents list (`taskAgentTags`).
-- Voice: `add_task`, `move_task`, `run_task` in `VoiceRouter.kt`; spoken task references are resolved by `voice/TaskRef.kt`.
-- The JSON shapes were read from the plugin's source (`server/cli-runner.ts`, `shared/contract.ts`), and the plugin has not been run against this code yet: `test/tasks.test.ts` uses a stand-in endpoint.
-
-## OpenRouter key (voice command routing)
-
-- Free-form commands ("add a test for the login route") are classified by an OpenRouter model, default **`z-ai/glm-5.3-flash`** (unverified on OpenRouter as of 2026-11-02 — change it on `/setup` or `LENSCODE_OPENROUTER_MODEL` if it 404s). `voice/VoiceRouter.kt`: `OpenRouterVoiceRouter` makes one chat-completions call, asks for plain JSON (`response_format: json_object`), and parses leniently (`parsePlan`); the grammar's `@LLMDescription`s become the schema in the system prompt. Koog is only used for that annotation now.
-- The key lives on the **bridge**, not the headset. Open `http://<mac-ip>:8137/setup` on a phone or PC and paste it (the headset's Settings shows this URL; the bridge logs it at startup while no key is set). Saved to `~/.config/lenscode-bridge/openrouter.json` (0600); `OPENROUTER_API_KEY` / `--openrouter-key` also work, and a page-saved key wins.
-- The headset calls `POST /openrouter/chat/completions` on the bridge, which swaps in the real key (nothing else on OpenRouter is reachable). `openrouter_key_changed` events and hello's `openrouter` field turn Settings green by themselves. **No fallback:** with no key, or when the call fails, `submitVoiceCommand` raises the `VoiceProblemOverlay` popup and runs nothing. `VoiceCommandRouter.kt` (keyword matcher) is no longer called by the app.
-- Dev mode (default): `/setup` and the proxy are open to the LAN, like the WebSocket. Prod mode: `/setup` needs the 6-digit code the bridge prints, and the proxy needs a paired device's token.
-- The old adb `lenscode-config.json` and build-time `-PgeminiApiKey` key paths were removed with Gemini.
-- The base URL passed to `OpenRouterVoiceRouter` is the bridge's `/openrouter/`; it appends `chat/completions`.
-
-
-## Browser: address bar by voice
-
-- The Browser launch dialog's mic is agentic. While you speak, the quick deterministic parser (`applySpokenAddressEdit(current, spoken, paths = true)` in `voice/SpokenAddress.kt`) previews the edit. When you stop, `editBrowserAddressByVoice` (`WorkspaceRoot.kt`) sends the current address and the transcript to the OpenRouter model (`OpenRouterVoiceRouter.editAddress`, prompt `ADDRESS_EDIT_PROMPT`, reply checked by `parseEditedAddress`), so free-form corrections work: "it should be 103.61 not 103.69", "make the last digit one", "change the port to 8001", "add slash docs", "make it https", "remove the port". A whole spoken address (`replacesWholeAddress`) skips the model and replaces the field. **No key or a bad reply = popup and the address stays as it was**, never a guess. The bridge-address field in Settings deliberately keeps the quick parser only (`paths = false`): fixing a wrong bridge address cannot depend on that bridge.
-- The dialog edits `ui.browserDraft`, a copy of the page's `ui.browserUrl`; the page only changes on Open. (They used to be the same state, which the WebView must not follow keystroke by keystroke.) `BrowserLoadTracker` makes the WebView navigate when the committed address changes (http↔https, port) and reload once per ↻ press.
-
-
-## Claude Auto mode (fewer permission prompts)
-
-- Paseo's Claude modes include `auto` ("Auto mode": a model classifier answers permission prompts, so the accept card rarely appears). New Claude agents now start in it unless a mode is chosen: `defaultModeIdFor` / `composerModeFor` in `ui/AgentComposer.kt`. It is pinned in the app because an older daemon, or Claude on Bedrock/Vertex (where Paseo drops Auto), defaults to "Always Ask". Only for `claude`: Codex's `auto` id is its ordinary approval flow. Voice: "auto mode" picks it; "accept edits" picks Accept File Edits.
-
-## Speech-to-text (AssemblyAI)
-
-- The Speak buttons and dictation use AssemblyAI streaming only. There is deliberately **no fallback** to Google's on-device `VoiceRecognizer` (kept in the tree, unused): a missing key or unreachable bridge raises the `VoiceProblemOverlay` popup. `voice/SpeechInput` wraps it; `voice/AssemblyAiRecognizer.kt` streams 16 kHz PCM; `AssemblyAiProtocol.kt` is the testable message/URL logic.
-- The key lives on the bridge, like OpenRouter's: paste it on `/setup` (second section), or `ASSEMBLYAI_API_KEY` / `--assemblyai-key`. Stored in `~/.config/lenscode-bridge/assemblyai.json` (0600). The headset calls `GET /assemblyai/token` (paired-device headers in prod) and gets a 60 s temporary token plus the model; the account key never reaches it.
-- Universal-2 is AssemblyAI's pre-recorded model, not a streaming one. Streaming models: `universal-streaming-english` (default), `universal-streaming-multilingual`, `universal-3-*-pro`; change it on `/setup` or `LENSCODE_ASSEMBLYAI_MODEL`.
-- Single-shot waits 1.2 s after an end-of-turn for another turn, because spoken digit groups pause. Not yet run against the real service from the headset.
-
-## Voice: switching machine, agent and model
-
-- `set_machine` (`VoiceAction.SetMachine`) switches the composer's host like tapping its row in the machine menu (`bridge.connectMachine`, then the folder picker). The spoken name is checked by `voice/ChoiceMatch.kt` (`matchMachine`: exact, then prefix, then contains, ignoring spacing and filler like "the … machine"; a hostname's domain suffix is ignored and the "local" pseudo-machine is never matched). `set_model` (`resolveModel`) covers claude/codex/pi/omp and their models.
-- **No match is a popup, not a guess**: "Not in connected machines" / "Not an available agent or model", listing what is available (`unknownMachineMessage`, `unknownAgentModelMessage`). Several equally good matches also raise the popup. "Connected" means the machines the app lists (registered SSH hosts); an unconnected one is accepted and connected, as a tap would.
-- The machine list is refreshed on every submitted voice command.
-- **Did you mean?** For an unknown agent/model (`set_model`, or `ask_agent` naming one), `decideAgentModel` (`voice/ChoiceMatch.kt`) returns `Use` (`resolveAgentModel`: agent name or model-id contains it), `Suggest` (`closestAgentModel`: edit distance over agent names, model ids and their pieces, threshold 0.6) or `Reject` (popup listing what exists). `suggestAgentModel` in `WorkspaceRoot.kt` just applies that; a `Suggest` shows `agentModelSuggestionCard` (`ui/AgentModelSuggestion.kt`, voice: "confirm" / "cancel"). Nothing is applied or started until the yes. Machines still get the popup only. Tests: `AgentModelDecisionTest`, `AgentModelSuggestionCardTest`, `ClosestAgentModelTest`; the final step (the agent actually starting after "confirm") has no test and was not tried on the headset.
-
-## Themes and window look
-
-- Themes live in `ui/Theme.kt` (`ThemeId`, palettes, corner radii); the picker is Settings → App theme. **Terminal** (default) is square corners, thin outlines, flat translucent brown fills and monospace type. Small corners must go through `lensShape(dp)`, never `RoundedCornerShape(dp)` directly, or a sharp theme gets stray rounded corners.
-- The app runs in Home Space (`FULL_SPACE_ENABLED = false` in `MainActivity.kt`; don't switch it on without asking). A Home Space window is opaque (transparent pixels render black) and its outer rounded frame is drawn by the XR system. Setting `scene.mainPanelEntity.cornerRadius` is accepted and reads back, but the frame does not change (tried 2026-10-20). So panels sit on a themed backdrop gradient (`windowBg`/`windowBgAlt`) instead of the room; real see-through needs `SpatialPanel`s in Full Space.
-- Headset screenshots: `adb -s <dev> exec-out screencap -p` prints a "multiple displays" warning before the PNG, so strip everything before the `\x89PNG` signature. A 3840x1200 all-black capture means the headset is asleep (`dumpsys power | grep mWakefulness`), not that the app is broken.
-
-## Follow Me (non-obvious)
-
-- `FollowingSubspace` + `FollowTarget.ArDevice` must use `FollowBehavior.Soft()`. `ArDevice` is not compatible with `Tight` (nothing renders). The layout is pushed ~0.6 m in front of the head (`followMeDistanceM`).
-- Needs the `HEAD_TRACKING` permission and `DeviceTrackingMode.SPATIAL`.
-- Debug builds: `adb shell am broadcast -a com.lenscode.app.DEBUG_FOLLOW_ME --ez on true --ef m 0.6` toggles it and sets the distance live.
-
-## Website (`website/`)
-
-- Dev server: `npm run dev` (http://localhost:3000, or 3001 if 3000 is busy).
-- Deploy to Cloudflare (static): `website/scripts/deploy-cloudflare.sh` (`--domain <host>`, `--preview`, `--dry-run`, `--build-only`; see `--help`). Needs `npx wrangler login` or `CLOUDFLARE_API_TOKEN`. The workers.dev URL ends in the account subdomain; use a custom domain to hide it.
-- Icons: `public/lenscode-logo.png` (transparent background) is the source for `public/favicon.png`, `public/apple-touch-icon.png` and `app/favicon.ico`.
-- `tests/rendered-html.test.mjs` still asserts the pre-pitch copy and fails until updated.
+**Existing background docs**
+- [docs/architecture.md](docs/architecture.md), [docs/remote-setup-and-limits.md](docs/remote-setup-and-limits.md), [docs/agent-compatibility.md](docs/agent-compatibility.md), [docs/try-it-workflows.md](docs/try-it-workflows.md), [docs/paseo-migration-plan.md](docs/paseo-migration-plan.md), [docs/snip-and-agent-management-plan.md](docs/snip-and-agent-management-plan.md).
