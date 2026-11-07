@@ -279,6 +279,39 @@ export const GitBranchesRequest = z.object({
   ...machineScope,
 });
 
+/**
+ * Kanban board from the Paseo "Tasks" plugin (https://paseo.sh/plugins/anh-chu/tasks), read and
+ * written through its `paseo-tasks` CLI on the Paseo machine. Not workspace-scoped: the plugin
+ * keeps one tracker per Paseo install.
+ */
+export const TasksListRequest = z.object({
+  ...requestBase,
+  type: z.literal("tasks.list"),
+  ...machineScope,
+});
+
+export const TasksCreateRequest = z.object({
+  ...requestBase,
+  type: z.literal("tasks.create"),
+  title: z.string().trim().min(1).max(200),
+  /** Project prefix, e.g. "ABC". Optional when the tracker has exactly one project. */
+  project: z.string().optional(),
+  priority: z.enum(["urgent", "high", "medium", "low", "none"]).optional(),
+  status: z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"]).optional(),
+  description: z.string().max(4000).optional(),
+  ...machineScope,
+});
+
+export const TasksUpdateRequest = z.object({
+  ...requestBase,
+  type: z.literal("tasks.update"),
+  /** Task key like "ABC-12". */
+  key: z.string().min(1),
+  status: z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"]).optional(),
+  priority: z.enum(["urgent", "high", "medium", "low", "none"]).optional(),
+  ...machineScope,
+});
+
 /** Unified diff for one file, relative to HEAD (untracked files diff against empty). */
 export const GitDiffRequest = z.object({
   ...requestBase,
@@ -557,6 +590,9 @@ export const XrRequest = z.discriminatedUnion("type", [
   GitDiffRequest,
   GitHunkApplyRequest,
   GitBranchesRequest,
+  TasksListRequest,
+  TasksCreateRequest,
+  TasksUpdateRequest,
   MachineListRequest,
   MachineConnectRequest,
   MachineDisconnectRequest,
@@ -604,17 +640,17 @@ export type XrServerMessage = z.infer<typeof XrServerMessage>;
 // ---------------------------------------------------------------------------
 
 /**
- * Whether the bridge holds a Gemini key for voice routing. The key itself never
- * leaves the bridge: the headset calls Gemini through the bridge's /gemini proxy
- * and is pointed at its /setup page to add one from a phone or PC.
+ * Whether the bridge holds an OpenRouter key for voice command routing. The key itself never
+ * leaves the bridge: the headset calls OpenRouter through the bridge's /openrouter proxy and
+ * is pointed at its /setup page to add one from a phone or PC.
  */
-export const GeminiStatus = z.object({
+export const OpenRouterStatus = z.object({
   configured: z.boolean(),
   source: z.enum(["file", "env"]).nullable(),
-  /** Model override chosen on the setup page; null = use the client default. */
-  model: z.string().nullable(),
+  /** The model voice routing uses: the one chosen on the setup page, else the bridge default. */
+  model: z.string(),
 });
-export type GeminiStatus = z.infer<typeof GeminiStatus>;
+export type OpenRouterStatus = z.infer<typeof OpenRouterStatus>;
 
 export const HelloResult = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -623,8 +659,8 @@ export const HelloResult = z.object({
   /** Paseo daemon version string (e.g. "0.7.2"), null if never connected. */
   backendProtocol: z.string().nullable(),
   backendConnected: z.boolean(),
-  /** Absent on bridges that predate the Gemini proxy. */
-  gemini: GeminiStatus.optional(),
+  /** Absent on bridges that predate the OpenRouter proxy. */
+  openrouter: OpenRouterStatus.optional(),
 });
 export type HelloResult = z.infer<typeof HelloResult>;
 

@@ -43,7 +43,7 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export const VIEWS = ["home", "code", "terminal", "agents", "permissions", "diff", "remote", "browser", "settings"] as const;
+export const VIEWS = ["home", "code", "terminal", "agents", "permissions", "diff", "remote", "tasks", "browser", "settings"] as const;
 
 /**
  * A tmux session name safe to type into a shell (`tmux new -A -s <name>`): letters, digits, dot,

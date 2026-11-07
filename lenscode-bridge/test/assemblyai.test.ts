@@ -50,7 +50,7 @@ before(async () => {
     loadConfig({
       LENSCODE_PORT: String(PORT),
       LENSCODE_PAIRING_STORE: tmpFile("devices.json"),
-      LENSCODE_GEMINI_STORE: tmpFile("gemini.json"),
+      LENSCODE_OPENROUTER_STORE: tmpFile("openrouter.json"),
       LENSCODE_ASSEMBLYAI_STORE: store,
       LENSCODE_ASSEMBLYAI_UPSTREAM: assemblyUrl,
     } as NodeJS.ProcessEnv),
@@ -109,10 +109,10 @@ test("a model name with odd characters is refused", async () => {
   assert.equal(res.status, 400);
 });
 
-test("the Gemini form is unaffected by the AssemblyAI one", async () => {
+test("the OpenRouter form is unaffected by the AssemblyAI one", async () => {
   const res = await fetch(`${base}/setup`, form({ apiKey: "" }));
   assert.equal(res.status, 400);
-  assert.match(await res.text(), /Gemini API key/);
+  assert.match(await res.text(), /OpenRouter API key/);
 });
 
 test("removing the key turns the route off again", async () => {

@@ -1,7 +1,9 @@
 import { applyCliArgs } from "./cli.ts";
 import { loadConfig } from "./config.ts";
 import { BridgeServer, BRIDGE_VERSION } from "./server.ts";
-import { lanAddresses } from "./geminiHttp.ts";
+import { lanAddresses } from "./setupHttp.ts";
+import { advertiseBridge } from "./discovery.ts";
+import { tailscaleAddresses, tailscaleDnsName } from "./tailscale.ts";
 import { log } from "./log.ts";
 import { ensureSelfSignedCert, shortFingerprint, type SelfSignedCert } from "./selfSigned.ts";
 import { runMcpServer, writeControlFile } from "./mcp/index.ts";
@@ -17,6 +19,15 @@ if (cli.action === "mcp") {
   await runMcpServer(BRIDGE_VERSION);
   process.exit(0);
 }
+
+// --tailscale: fail fast, before anything starts, when there is no Tailscale address to give out.
+const wantTailscale = process.env.LENSCODE_TAILSCALE === "1";
+const tailscaleIps = wantTailscale ? tailscaleAddresses() : [];
+if (wantTailscale && tailscaleIps.length === 0) {
+  process.stderr.write("--tailscale: no Tailscale address found on this machine. Is Tailscale running and signed in?\n");
+  process.exit(2);
+}
+const tailscaleName = wantTailscale ? await tailscaleDnsName() : undefined;
 
 // --secure: make (or reuse) the bridge's own certificate and serve it, in place of a user-supplied one.
 let selfSigned: SelfSignedCert | undefined;
@@ -44,7 +55,17 @@ if (server.controlEndpoint) {
 
 // The JSON log lines above are for machines; this is what a person needs to set up the app.
 const secure = cfg.mode === "prod" && !cfg.insecureProd;
-const addresses = lanAddresses().map((ip) => `${secure ? "wss" : "ws"}://${ip}:${cfg.port}`);
+const stopAdvertising =
+  process.env.LENSCODE_NO_DISCOVERY === "1"
+    ? () => {}
+    : advertiseBridge({
+        port: cfg.port,
+        secure,
+        version: BRIDGE_VERSION,
+        fingerprint: selfSigned ? shortFingerprint(selfSigned.fingerprint) : undefined,
+      });
+
+const addresses = (wantTailscale ? tailscaleIps : lanAddresses()).map((ip) => `${secure ? "wss" : "ws"}://${ip}:${cfg.port}`);
 process.stdout.write(
   [
     "",
@@ -52,6 +73,14 @@ process.stdout.write(
     addresses.length > 0
       ? `In the app: Settings → Bridge connection → ${addresses.join("  or  ")}`
       : "No network address found — connect this machine to your network.",
+    ...(wantTailscale
+      ? [
+          `Tailscale: enter ${tailscaleIps[0]}${tailscaleName ? ` (or ${tailscaleName})` : ""} in the app. The headset needs Tailscale signed in to the same tailnet.`,
+        ]
+      : []),
+    ...(process.env.LENSCODE_NO_DISCOVERY === "1"
+      ? []
+      : ["Or open the app's Settings → Bridge connection and tap this computer under \"Found on your network\"."]),
     ...(selfSigned
       ? [
           `Certificate fingerprint: ${shortFingerprint(selfSigned.fingerprint)}`,
@@ -69,6 +98,7 @@ process.stdout.write(
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     log("info", "shutting down");
+    stopAdvertising();
     server.close();
     process.exit(0);
   });

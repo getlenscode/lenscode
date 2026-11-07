@@ -48,8 +48,13 @@ fun BrowserLaunchOverlay(
     onDismiss: () -> Unit,
     isListeningForUrl: Boolean = false,
     onVoiceInput: () -> Unit = {},
+    hosts: List<BrowserHost> = emptyList(),
+    selectedHostId: String = "local",
+    onHostSelected: (String) -> Unit = {},
 ) {
     if (!visible) return
+    var hostMenuOpen by remember { mutableStateOf(false) }
+    val selectedHost = hosts.firstOrNull { it.id == selectedHostId } ?: hosts.firstOrNull()
     Box(
         Modifier.fillMaxSize().background(Color(0xAA000000)).clickable(onClick = onDismiss),
         contentAlignment = Alignment.Center,
@@ -70,9 +75,48 @@ fun BrowserLaunchOverlay(
                     fontSize = 12.sp,
                 )
                 Spacer(Modifier.height(14.dp))
+                if (selectedHost != null) {
+                    // A dropdown only when there is a choice; one machine is just stated.
+                    Row(
+                        Modifier.fillMaxWidth().clickable(enabled = hosts.size > 1) { hostMenuOpen = !hostMenuOpen },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("On", color = LensCodeColors.Muted, fontSize = 12.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${selectedHost.label} · ${selectedHost.host}" + if (hosts.size > 1) "  ▾" else "",
+                            color = LensCodeColors.Cyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (!selectedHost.certain) {
+                        Text(
+                            "The headset may not be able to resolve \"${selectedHost.host}\" — use the machine's IP if the page doesn't load.",
+                            color = LensCodeColors.Amber,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    if (hostMenuOpen) {
+                        Column(Modifier.padding(top = 6.dp)) {
+                            for (h in hosts) {
+                                Text(
+                                    "${if (h.id == selectedHost.id) "● " else "○ "}${h.label} · ${h.host}",
+                                    color = if (h.id == selectedHost.id) LensCodeColors.Cyan else LensCodeColors.Text,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onHostSelected(h.id); hostMenuOpen = false }
+                                        .padding(vertical = 6.dp, horizontal = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
-                        PairingTextField(url, onUrlChange, "http://192.168.1.x:3000", onSubmit = onOpen)
+                        PairingTextField(url, onUrlChange, if (selectedHost != null) "3000  or  localhost:3000/path" else "http://192.168.1.x:3000", onSubmit = onOpen)
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(
@@ -81,6 +125,13 @@ fun BrowserLaunchOverlay(
                         modifier = Modifier.clickable(enabled = !isListeningForUrl, onClick = onVoiceInput).padding(6.dp),
                     )
                 }
+                Text(
+                    "Tap 🎤 and say an address, or amend this one: “add slash docs”, “make it http”, " +
+                        "“add port 8000”, “remove the path”, “go to slash admin”. The page changes when you tap Open.",
+                    color = LensCodeColors.Muted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -105,6 +156,31 @@ fun BrowserLaunchOverlay(
 }
 
 /**
+ * What the WebView has already been told to do, so `AndroidView.update` (which runs on every
+ * recomposition) navigates only when the requested address really changed and reloads only once per
+ * press of ↻. Without it the view loaded its first address for good: changing http↔https (or the port)
+ * while the Browser was open updated the header but left the page on the old address.
+ */
+internal class BrowserLoadTracker {
+    private var loadedUrl: String? = null
+    private var handledReloads = 0
+
+    /** True when [requested] differs from what is loaded, i.e. the view must `loadUrl` it. */
+    fun needsLoad(requested: String): Boolean {
+        if (requested == loadedUrl) return false
+        loadedUrl = requested
+        return true
+    }
+
+    /** True once for each new [reloadKey] value above what was already handled. */
+    fun needsReload(reloadKey: Int): Boolean {
+        if (reloadKey <= handledReloads) return false
+        handledReloads = reloadKey
+        return true
+    }
+}
+
+/**
  * Embedded browser panel — renders inside this app's own window via
  * [WebView] instead of launching Chrome as a separate Android activity.
  * Added because a separate Chrome window occludes/hides this app's other
@@ -125,6 +201,7 @@ fun BrowserPanelContent(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    val loads = remember { BrowserLoadTracker() }
     Box(Modifier.fillMaxSize()) {
     GlassSurface {
         Column(Modifier.fillMaxSize()) {
@@ -235,14 +312,20 @@ fun BrowserPanelContent(
                         }
                         webChromeClient = WebChromeClient()
                         webViewRef = this
+                        loads.needsLoad(url)
                         loadUrl(url)
                     }
                 },
                 update = { view ->
-                    // reloadKey bump is the only signal to actually reload — a
-                    // recomposition from e.g. displayedUrl changing shouldn't
-                    // also re-navigate and stomp forward/back history.
-                    if (reloadKey > 0) view.reload()
+                    // A different address (http vs https, another port) must actually navigate; the
+                    // factory only runs once. A recomposition with the same address must not
+                    // re-navigate and stomp forward/back history, and ↻ reloads once per press.
+                    if (loads.needsLoad(url)) {
+                        loadError = null
+                        view.loadUrl(url)
+                    } else if (loads.needsReload(reloadKey)) {
+                        view.reload()
+                    }
                 },
             )
         }

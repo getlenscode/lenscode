@@ -43,6 +43,8 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - Ports: plain `ws://` bridge = **8137**, secure (`--secure` / TLS) = **8443** (`defaultPort()` in `lenscode-bridge/src/config.ts`, mirrored by `DEFAULT_BRIDGE_PORT` / `DEFAULT_SECURE_BRIDGE_PORT` in `net/BridgeAddress.kt`). A bare IP typed in the app takes its port from the scheme, so a store build (always secure) needs only the IP; `--port` overrides.
 - Run: `./scripts/setup-single-pc.sh` (port 8137; config via `LENSCODE_PORT`, `LENSCODE_PASEO_URL`). It exits if the `paseo` CLI isn't on PATH even when the daemon is running; then `cd lenscode-bridge && npm run dev` does the same job.
 - The bridge takes flags too (`npm run dev -- --port 9000`, `--tls-cert/--tls-key`; `--help` lists them) and prints the address to enter in the app on startup.
+- LAN discovery: the bridge advertises `_lenscode._tcp` over mDNS (`src/discovery.ts`, `bonjour-service`; TXT `v`, `secure`, `fp`); `--no-discovery` turns it off. The app lists bridges under Settings → Bridge connection (`net/BridgeDiscovery.kt`, only while Settings is open); picking one just fills in the address, trust still comes from the pairing code + cert prompt.
+- `--tailscale` (`src/tailscale.ts`) finds the 100.64.0.0/10 interface address (and the MagicDNS name via the CLI if present) and prints it as the address to enter; it exits if there is none.
 - Remote machines are all registered hosts reached over SSH; there is no special "local" machine in the app.
 
 ### Publishing the bridge (npm)
@@ -60,18 +62,38 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - tmux session names are typed into a shell (`tmux new -A -s <name>`), so both sides only accept `[A-Za-z0-9._-]{1,64}`; URLs must be http(s); folder paths for `open_project` are single-quoted (`shellQuote`) before they reach ssh. Keep these checks.
 - Dev from the repo: `claude mcp add lenscode -- node --experimental-strip-types <repo>/lenscode-bridge/src/main.ts mcp`. `npx lenscode-bridge mcp` needs bridge `0.1.0-alpha.4` or newer.
 
-## Gemini key (voice routing)
+## Tasks board (Paseo Tasks plugin)
 
-- Normal path: the key lives on the **bridge**, not the headset. Open `http://<mac-ip>:8137/setup` on a phone or PC and paste it (the headset's Settings panel shows this URL; the bridge also logs it at startup while no key is set). Saved to `~/.config/lenscode-bridge/gemini.json` (0600); a `GEMINI_API_KEY` env var also works, and a page-saved key wins over it.
-- The headset calls Gemini through the bridge's `/gemini/*` proxy, which swaps in the real key. Settings turns green by itself via the `gemini_key_changed` event.
-- Key precedence on the headset (`resolveGeminiKeySource`): adb-pushed `lenscode-config.json` > bridge key > build-time `-PgeminiApiKey`.
+- The dock's **Tasks** view is a Kanban board of the Paseo Tasks plugin (`paseo plugin add anh-chu/tasks`; needs Paseo 0.11.2+ and Node 24+ on the daemon host). The bridge never touches its SQLite store: `src/tasks.ts` POSTs `argv` (always with `--json`) to the plugin's loopback `/cli` endpoint using the token in `$PASEO_HOME/plugin-data/tasks/bridge.json`, the same call its `paseo-tasks` script makes. Remote machines run that machine's script over SSH.
+- Requests: `tasks.list/create/update/delegate` (not workspace-scoped). Keys, statuses and priorities are validated before they reach the CLI.
+- Agents get the tracker's instructions injected by the plugin, so they create and update tasks themselves; the board polls every 8 s while open. A task's agent tags come from its attached sessions, mapped to a provider through the Agents list (`taskAgentTags`).
+- Voice: `add_task`, `move_task`, `run_task` in `VoiceRouter.kt`; spoken task references are resolved by `voice/TaskRef.kt`.
+- The JSON shapes were read from the plugin's source (`server/cli-runner.ts`, `shared/contract.ts`), and the plugin has not been run against this code yet: `test/tasks.test.ts` uses a stand-in endpoint.
+
+## OpenRouter key (voice command routing)
+
+- Free-form commands ("add a test for the login route") are classified by an OpenRouter model, default **`z-ai/glm-5.3-flash`** (unverified on OpenRouter as of 2026-11-02 — change it on `/setup` or `LENSCODE_OPENROUTER_MODEL` if it 404s). `voice/VoiceRouter.kt`: `OpenRouterVoiceRouter` makes one chat-completions call, asks for plain JSON (`response_format: json_object`), and parses leniently (`parsePlan`); the grammar's `@LLMDescription`s become the schema in the system prompt. Koog is only used for that annotation now.
+- The key lives on the **bridge**, not the headset. Open `http://<mac-ip>:8137/setup` on a phone or PC and paste it (the headset's Settings shows this URL; the bridge logs it at startup while no key is set). Saved to `~/.config/lenscode-bridge/openrouter.json` (0600); `OPENROUTER_API_KEY` / `--openrouter-key` also work, and a page-saved key wins.
+- The headset calls `POST /openrouter/chat/completions` on the bridge, which swaps in the real key (nothing else on OpenRouter is reachable). `openrouter_key_changed` events and hello's `openrouter` field turn Settings green by themselves. **No fallback:** with no key, or when the call fails, `submitVoiceCommand` raises the `VoiceProblemOverlay` popup and runs nothing. `VoiceCommandRouter.kt` (keyword matcher) is no longer called by the app.
 - Dev mode (default): `/setup` and the proxy are open to the LAN, like the WebSocket. Prod mode: `/setup` needs the 6-digit code the bridge prints, and the proxy needs a paired device's token.
-- Non-obvious: Koog's base URL must end in `/` (`.../gemini/`). Ktor resolves its relative `v1beta/...` path like a browser, so without the slash it drops `/gemini` and the bridge 404s.
+- The old adb `lenscode-config.json` and build-time `-PgeminiApiKey` key paths were removed with Gemini.
+- The base URL passed to `OpenRouterVoiceRouter` is the bridge's `/openrouter/`; it appends `chat/completions`.
+
+
+## Browser: address bar by voice
+
+- The Browser launch dialog's mic is agentic. While you speak, the quick deterministic parser (`applySpokenAddressEdit(current, spoken, paths = true)` in `voice/SpokenAddress.kt`) previews the edit. When you stop, `editBrowserAddressByVoice` (`WorkspaceRoot.kt`) sends the current address and the transcript to the OpenRouter model (`OpenRouterVoiceRouter.editAddress`, prompt `ADDRESS_EDIT_PROMPT`, reply checked by `parseEditedAddress`), so free-form corrections work: "it should be 103.61 not 103.69", "make the last digit one", "change the port to 8001", "add slash docs", "make it https", "remove the port". A whole spoken address (`replacesWholeAddress`) skips the model and replaces the field. **No key or a bad reply = popup and the address stays as it was**, never a guess. The bridge-address field in Settings deliberately keeps the quick parser only (`paths = false`): fixing a wrong bridge address cannot depend on that bridge.
+- The dialog edits `ui.browserDraft`, a copy of the page's `ui.browserUrl`; the page only changes on Open. (They used to be the same state, which the WebView must not follow keystroke by keystroke.) `BrowserLoadTracker` makes the WebView navigate when the committed address changes (http↔https, port) and reload once per ↻ press.
+
+
+## Claude Auto mode (fewer permission prompts)
+
+- Paseo's Claude modes include `auto` ("Auto mode": a model classifier answers permission prompts, so the accept card rarely appears). New Claude agents now start in it unless a mode is chosen: `defaultModeIdFor` / `composerModeFor` in `ui/AgentComposer.kt`. It is pinned in the app because an older daemon, or Claude on Bedrock/Vertex (where Paseo drops Auto), defaults to "Always Ask". Only for `claude`: Codex's `auto` id is its ordinary approval flow. Voice: "auto mode" picks it; "accept edits" picks Accept File Edits.
 
 ## Speech-to-text (AssemblyAI)
 
 - The Speak buttons and dictation use AssemblyAI streaming only. There is deliberately **no fallback** to Google's on-device `VoiceRecognizer` (kept in the tree, unused): a missing key or unreachable bridge raises the `VoiceProblemOverlay` popup. `voice/SpeechInput` wraps it; `voice/AssemblyAiRecognizer.kt` streams 16 kHz PCM; `AssemblyAiProtocol.kt` is the testable message/URL logic.
-- The key lives on the bridge, like Gemini's: paste it on `/setup` (second section), or `ASSEMBLYAI_API_KEY` / `--assemblyai-key`. Stored in `~/.config/lenscode-bridge/assemblyai.json` (0600). The headset calls `GET /assemblyai/token` (paired-device headers in prod) and gets a 60 s temporary token plus the model; the account key never reaches it.
+- The key lives on the bridge, like OpenRouter's: paste it on `/setup` (second section), or `ASSEMBLYAI_API_KEY` / `--assemblyai-key`. Stored in `~/.config/lenscode-bridge/assemblyai.json` (0600). The headset calls `GET /assemblyai/token` (paired-device headers in prod) and gets a 60 s temporary token plus the model; the account key never reaches it.
 - Universal-2 is AssemblyAI's pre-recorded model, not a streaming one. Streaming models: `universal-streaming-english` (default), `universal-streaming-multilingual`, `universal-3-*-pro`; change it on `/setup` or `LENSCODE_ASSEMBLYAI_MODEL`.
 - Single-shot waits 1.2 s after an end-of-turn for another turn, because spoken digit groups pause. Not yet run against the real service from the headset.
 

@@ -25,7 +25,7 @@ before(async () => {
       LENSCODE_TLS_CERT: cert.certPath,
       LENSCODE_TLS_KEY: cert.keyPath,
       LENSCODE_PAIRING_STORE: join(dir, "devices.json"),
-      LENSCODE_GEMINI_STORE: join(dir, "gemini.json"),
+      LENSCODE_OPENROUTER_STORE: join(dir, "openrouter.json"),
     } as NodeJS.ProcessEnv),
   );
   await server.start();

@@ -28,14 +28,14 @@ fun parseAssemblyToken(httpCode: Int, body: String): AssemblyTokenResult {
     return AssemblyTokenResult.Ok(token, json?.optString("model").orEmpty().ifBlank { "universal-streaming-english" }, url)
 }
 
-/** Blocking: call from a background thread. [authHeaders] are the paired-device headers the Gemini proxy also uses. */
+/** Blocking: call from a background thread. [authHeaders] are the paired-device headers the OpenRouter proxy also uses. */
 fun fetchAssemblyToken(
     http: OkHttpClient,
     bridgeWsUrl: String,
     authHeaders: Map<String, String>,
 ): AssemblyTokenResult = try {
     val request = Request.Builder()
-        .url(GeminiBridgeUrls.httpBase(bridgeWsUrl) + "/assemblyai/token")
+        .url(BridgeUrls.httpBase(bridgeWsUrl) + "/assemblyai/token")
         .apply { authHeaders.forEach { (k, v) -> header(k, v) } }
         .build()
     http.newCall(request).execute().use { parseAssemblyToken(it.code, it.body?.string().orEmpty()) }

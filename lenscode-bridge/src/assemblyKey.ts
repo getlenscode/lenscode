@@ -1,6 +1,6 @@
 /**
- * The AssemblyAI API key for streaming speech-to-text lives on the bridge, like the Gemini key
- * (see geminiKey.ts): the headset asks the bridge for a short-lived streaming token and opens the
+ * The AssemblyAI API key for streaming speech-to-text lives on the bridge, like the OpenRouter key
+ * (see openrouterKey.ts): the headset asks the bridge for a short-lived streaming token and opens the
  * AssemblyAI WebSocket with that, so the permanent key never reaches the glasses or a URL.
  *
  * Sources, highest precedence first: the file written by the /setup page, then ASSEMBLYAI_API_KEY.
