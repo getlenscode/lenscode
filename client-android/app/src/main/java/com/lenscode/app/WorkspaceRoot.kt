@@ -784,6 +784,14 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         }
     }
 
+    // LAN discovery only runs while Settings is open (it holds a multicast lock on the radio).
+    val discovery = remember { com.lenscode.app.net.BridgeDiscovery(context) }
+    val foundBridges by discovery.found.collectAsState()
+    DisposableEffect(ui.activeView == "settings") {
+        if (ui.activeView == "settings") discovery.start()
+        onDispose { discovery.stop() }
+    }
+
     fun requestVoiceSearch() = requestVoice("fileSearch")
     fun requestVoiceCommand() = requestVoice("command")
 
@@ -2061,6 +2069,11 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                             },
                             onSpeak = { requestVoice("bridgeAddress") },
                             onSave = { saveBridgeAddress() },
+                            found = foundBridges,
+                            onPickFound = { found ->
+                                ui.bridgeAddressInput = found.url
+                                saveBridgeAddress()
+                            },
                         ),
                         bridgeLlm = bridgeLlm,
                         bridgeConnected = state.bridgeConnected,
