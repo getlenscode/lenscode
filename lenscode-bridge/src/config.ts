@@ -19,13 +19,13 @@ export interface BridgeConfig {
   insecureProd?: boolean;
   /** Filesystem root for the "local" workspace's file service. */
   projectRoot: string;
-  /** Where the /setup page persists the Gemini key (mode 0600). */
-  geminiStorePath: string;
-  /** Fallback key from GEMINI_API_KEY; a key saved via /setup wins over it. */
-  geminiApiKey?: string;
-  geminiModel?: string;
-  /** Test-only: stub for generativelanguage.googleapis.com. */
-  geminiUpstream?: string;
+  /** Where the /setup page persists the OpenRouter key (mode 0600). */
+  openrouterStorePath: string;
+  /** Fallback key from OPENROUTER_API_KEY; a key saved via /setup wins over it. */
+  openrouterApiKey?: string;
+  openrouterModel?: string;
+  /** Test-only: stub for openrouter.ai/api/v1. */
+  openrouterUpstream?: string;
 }
 
 /**
@@ -49,11 +49,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     pairingStorePath:
       env.LENSCODE_PAIRING_STORE ?? join(homedir(), ".config", "lenscode-bridge", "devices.json"),
     projectRoot: env.LENSCODE_PROJECT_ROOT ?? process.cwd(),
-    geminiStorePath:
-      env.LENSCODE_GEMINI_STORE ?? join(homedir(), ".config", "lenscode-bridge", "gemini.json"),
-    geminiApiKey: env.GEMINI_API_KEY || undefined,
-    geminiModel: env.LENSCODE_GEMINI_MODEL || undefined,
-    geminiUpstream: env.LENSCODE_GEMINI_UPSTREAM || undefined,
+    openrouterStorePath:
+      env.LENSCODE_OPENROUTER_STORE ?? join(homedir(), ".config", "lenscode-bridge", "openrouter.json"),
+    openrouterApiKey: env.OPENROUTER_API_KEY || undefined,
+    openrouterModel: env.LENSCODE_OPENROUTER_MODEL || undefined,
+    openrouterUpstream: env.LENSCODE_OPENROUTER_UPSTREAM || undefined,
   };
   if (cfg.mode === "prod" && (!cfg.tlsKeyPath || !cfg.tlsCertPath)) {
     // Spec §56: production must never silently downgrade to plaintext.

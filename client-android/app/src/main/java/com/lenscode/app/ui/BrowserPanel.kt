@@ -125,6 +125,13 @@ fun BrowserLaunchOverlay(
                         modifier = Modifier.clickable(enabled = !isListeningForUrl, onClick = onVoiceInput).padding(6.dp),
                     )
                 }
+                Text(
+                    "Tap 🎤 and say an address, or amend this one: “add slash docs”, “make it http”, " +
+                        "“add port 8000”, “remove the path”, “go to slash admin”. The page changes when you tap Open.",
+                    color = LensCodeColors.Muted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -149,6 +156,31 @@ fun BrowserLaunchOverlay(
 }
 
 /**
+ * What the WebView has already been told to do, so `AndroidView.update` (which runs on every
+ * recomposition) navigates only when the requested address really changed and reloads only once per
+ * press of ↻. Without it the view loaded its first address for good: changing http↔https (or the port)
+ * while the Browser was open updated the header but left the page on the old address.
+ */
+internal class BrowserLoadTracker {
+    private var loadedUrl: String? = null
+    private var handledReloads = 0
+
+    /** True when [requested] differs from what is loaded, i.e. the view must `loadUrl` it. */
+    fun needsLoad(requested: String): Boolean {
+        if (requested == loadedUrl) return false
+        loadedUrl = requested
+        return true
+    }
+
+    /** True once for each new [reloadKey] value above what was already handled. */
+    fun needsReload(reloadKey: Int): Boolean {
+        if (reloadKey <= handledReloads) return false
+        handledReloads = reloadKey
+        return true
+    }
+}
+
+/**
  * Embedded browser panel — renders inside this app's own window via
  * [WebView] instead of launching Chrome as a separate Android activity.
  * Added because a separate Chrome window occludes/hides this app's other
@@ -169,6 +201,7 @@ fun BrowserPanelContent(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    val loads = remember { BrowserLoadTracker() }
     Box(Modifier.fillMaxSize()) {
     GlassSurface {
         Column(Modifier.fillMaxSize()) {
@@ -279,14 +312,20 @@ fun BrowserPanelContent(
                         }
                         webChromeClient = WebChromeClient()
                         webViewRef = this
+                        loads.needsLoad(url)
                         loadUrl(url)
                     }
                 },
                 update = { view ->
-                    // reloadKey bump is the only signal to actually reload — a
-                    // recomposition from e.g. displayedUrl changing shouldn't
-                    // also re-navigate and stomp forward/back history.
-                    if (reloadKey > 0) view.reload()
+                    // A different address (http vs https, another port) must actually navigate; the
+                    // factory only runs once. A recomposition with the same address must not
+                    // re-navigate and stomp forward/back history, and ↻ reloads once per press.
+                    if (loads.needsLoad(url)) {
+                        loadError = null
+                        view.loadUrl(url)
+                    } else if (loads.needsReload(reloadKey)) {
+                        view.reload()
+                    }
                 },
             )
         }

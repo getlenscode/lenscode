@@ -44,17 +44,6 @@ android {
         // here since the app dials a literal IP, not localhost).
         val bridgeUrl = (project.findProperty("bridgeUrl") as String?) ?: "ws://10.0.2.2:8137"
         buildConfigField("String", "BRIDGE_URL", "\"$bridgeUrl\"")
-        // Agentic voice routing (com.lenscode.app.voice.KoogVoiceRouter) — Gemini
-        // via Koog, on-device. Empty key = the router falls back to the
-        // deterministic local one (VoiceCommandRouter.kt), no network call
-        // attempted. Prefer pasting the key at the bridge's /setup page (see CLAUDE.md)
-        // so it never lands in an APK; this is the leftover fallback. To bake one in:
-        //   ./gradlew :app:assembleDebug -PbridgeUrl=... -PgeminiApiKey=AIza...
-        // then adb install -r the resulting APK.
-        val geminiApiKey = (project.findProperty("geminiApiKey") as String?) ?: ""
-        val geminiModel = (project.findProperty("geminiModel") as String?) ?: "gemini-3.8-flash"
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"$geminiModel\"")
     }
 
     signingConfigs {
@@ -124,9 +113,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
-    // Agentic voice command routing (on-device, Gemini via Koog — see
-    // com.lenscode.app.voice.KoogVoiceRouter). Koog is JetBrains' Kotlin
-    // multiplatform AI agent framework; Android is one of its supported targets.
+    // Voice command routing (OpenRouter through the bridge — see
+    // com.lenscode.app.voice.OpenRouterVoiceRouter). Only Koog's @LLMDescription annotation is used now:
+    // the grammar's field descriptions double as the schema shown to the model.
     implementation(libs.koog.agents)
     // Koog's default Ktor engine (CIO) implements its own pure-Kotlin TLS
     // trust manager that only overrides the legacy 2-arg checkServerTrusted —

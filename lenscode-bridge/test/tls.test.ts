@@ -89,9 +89,9 @@ before(async () => {
       LENSCODE_TLS_KEY: join(dir, "server.key"),
       LENSCODE_TLS_CERT: join(dir, "server.pem"),
       LENSCODE_PAIRING_STORE: join(dir, "devices.json"),
-      LENSCODE_GEMINI_STORE: join(dir, "gemini.json"),
-      GEMINI_API_KEY: "AIzaEnvKeyForTls",
-      LENSCODE_GEMINI_UPSTREAM: `http://127.0.0.1:${(google.address() as AddressInfo).port}`,
+      LENSCODE_OPENROUTER_STORE: join(dir, "openrouter.json"),
+      OPENROUTER_API_KEY: "sk-or-env-key-for-tls",
+      LENSCODE_OPENROUTER_UPSTREAM: `http://127.0.0.1:${(google.address() as AddressInfo).port}`,
     } as NodeJS.ProcessEnv),
   );
   await server.start();
@@ -128,7 +128,7 @@ test("wss: unpaired device is locked out, pairing works, token authenticates", o
   const again = await wss({ ca });
   const authed = await rpc(again, hello("h2", token));
   assert.equal(authed.result.authenticated, true);
-  assert.equal(authed.result.gemini.configured, true, "env key is reported to paired devices");
+  assert.equal(authed.result.openrouter.configured, true, "env key is reported to paired devices");
   again.close();
 });
 
@@ -142,10 +142,10 @@ test("https: the setup page needs the console code, the proxy needs a paired tok
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(fields).toString(),
   });
-  const refused = await https("/setup", form({ apiKey: "AIzaWhatever", code: "not-the-code" }));
+  const refused = await https("/setup", form({ apiKey: "sk-or-whatever", code: "not-the-code" }));
   assert.equal(refused.status, 403);
 
-  const proxyPath = "/gemini/v1beta/models/m:generateContent";
+  const proxyPath = "/openrouter/chat/completions";
   assert.equal((await https(proxyPath, { method: "POST", body: "{}" })).status, 401);
 
   // Pair a second device to get a real token for the proxy call.
@@ -164,5 +164,5 @@ test("https: the setup page needs the console code, the proxy needs a paired tok
     headers: { "x-lenscode-device": "proxy-device", "x-lenscode-token": done.result.deviceToken },
   });
   assert.equal(ok.status, 200);
-  assert.match(ok.body, /generateContent/);
+  assert.match(ok.body, /chat\/completions/);
 });

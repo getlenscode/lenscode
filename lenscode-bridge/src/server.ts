@@ -24,8 +24,9 @@ import { TMUX_LIST_COMMAND, parseTmuxSessions, runLocalTmuxList, type TmuxSessio
 import { startControlServer, expandHome, shellQuote, connectStartingPaseo, type ControlCommand } from "./mcp/index.ts";
 import type { Server as HttpServer } from "node:http";
 import { RemoteFiles } from "./remoteFiles.ts";
-import { GeminiKeyStore, type GeminiStatus } from "./geminiKey.ts";
-import { GeminiHttp, lanSetupUrls } from "./geminiHttp.ts";
+import { readBoard, createTask, updateTask } from "./tasks.ts";
+import { OpenRouterKeyStore, type OpenRouterStatus } from "./openrouterKey.ts";
+import { SetupHttp, lanSetupUrls } from "./setupHttp.ts";
 import { log } from "./log.ts";
 
 export const BRIDGE_VERSION = "0.1.0-alpha.4";
@@ -65,8 +66,8 @@ export class BridgeServer {
   private cfg: BridgeConfig;
   private httpServer: ReturnType<typeof createHttpServer>;
   private pairing: PairingRegistry;
-  private geminiKey: GeminiKeyStore;
-  private geminiHttp: GeminiHttp;
+  private openrouterKey: OpenRouterKeyStore;
+  private setupHttp: SetupHttp;
   /** workspaceId → file service rooted at that workspace's directory. */
   private workspaces = new Map<string, WorkspaceFiles>();
   /** workspaceId → git service rooted at that same directory. */
@@ -85,16 +86,16 @@ export class BridgeServer {
   constructor(cfg: BridgeConfig) {
     this.cfg = cfg;
     this.pairing = new PairingRegistry(cfg.pairingStorePath);
-    this.geminiKey = new GeminiKeyStore(cfg.geminiStorePath, {
-      apiKey: cfg.geminiApiKey,
-      model: cfg.geminiModel,
+    this.openrouterKey = new OpenRouterKeyStore(cfg.openrouterStorePath, {
+      apiKey: cfg.openrouterApiKey,
+      model: cfg.openrouterModel,
     });
-    this.geminiHttp = new GeminiHttp({
-      store: this.geminiKey,
+    this.setupHttp = new SetupHttp({
+      store: this.openrouterKey,
       mode: cfg.mode,
-      upstream: cfg.geminiUpstream,
+      upstream: cfg.openrouterUpstream,
       authorizeDevice: (deviceId, token) => this.pairing.isAuthorized(deviceId, token),
-      onChange: (status) => this.broadcastEvent("connection", "gemini_key_changed", status),
+      onChange: (status) => this.broadcastEvent("connection", "openrouter_key_changed", status),
     });
     this.paseo = new PaseoClient({ url: cfg.paseoUrl, password: cfg.paseoPassword });
     this.terminals = new Terminals(this.paseo);
@@ -111,7 +112,7 @@ export class BridgeServer {
         : createHttpServer();
     this.httpServer = httpServer;
     httpServer.on("request", (req, res) => {
-      if (this.geminiHttp.handle(req, res)) return;
+      if (this.setupHttp.handle(req, res)) return;
       res.writeHead(404, { "content-type": "text/plain" }).end("lenscode-bridge: not found\n");
     });
     this.wss = new WebSocketServer({ server: httpServer });
@@ -122,8 +123,8 @@ export class BridgeServer {
         mode: cfg.mode,
         tls: cfg.mode === "prod",
       });
-      if (!this.geminiKey.status().configured) {
-        log("info", "Gemini key not set — open this on your phone or PC to add it", {
+      if (!this.openrouterKey.status().configured) {
+        log("info", "OpenRouter key not set — open this on your phone or PC to add it", {
           urls: lanSetupUrls(cfg.port, cfg.mode === "prod" && !cfg.insecureProd),
         });
       }
@@ -292,7 +293,7 @@ export class BridgeServer {
             authenticated,
             backendProtocol: this.paseo.protocol,
             backendConnected: this.paseo.connected,
-            gemini: this.geminiKey.status(),
+            openrouter: this.openrouterKey.status(),
           },
         });
         return;
@@ -519,6 +520,29 @@ export class BridgeServer {
               true,
               String(e),
             ),
+          });
+        }
+        return;
+      }
+      case "tasks.list":
+      case "tasks.create":
+      case "tasks.update": {
+        try {
+          const machine = req.machineId ?? "local";
+          if (machine !== "local" && !this.remote.isConnected(machine)) {
+            throw new Error(`Not connected to ${machine} — connect to it first.`);
+          }
+          const result =
+            req.type === "tasks.list"
+              ? await readBoard(machine)
+              : req.type === "tasks.create"
+                ? { task: await createTask(req, machine) }
+                : { task: await updateTask(req.key, req, machine) };
+          this.send(ws, { id: req.id, result });
+        } catch (e) {
+          this.send(ws, {
+            id: req.id,
+            error: err("internal", e instanceof Error ? e.message : "The Tasks request failed.", true, String(e)),
           });
         }
         return;
@@ -1350,9 +1374,9 @@ export class BridgeServer {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }
 
-  /** Test access to the Gemini /setup + proxy handler (setup code, status). */
-  get gemini(): { http: GeminiHttp; status: () => GeminiStatus } {
-    return { http: this.geminiHttp, status: () => this.geminiKey.status() };
+  /** Test access to the /setup + OpenRouter proxy handler (setup code, status). */
+  get openrouter(): { http: SetupHttp; status: () => OpenRouterStatus } {
+    return { http: this.setupHttp, status: () => this.openrouterKey.status() };
   }
 
   /** Test/CLI access to the pairing registry (codes are read locally only). */
