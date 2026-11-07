@@ -226,6 +226,9 @@ internal class WorkspaceUiState(
     var dictationSession: com.lenscode.app.voice.VoiceRecognizer.DictationSession? = null
     var voicePartial by mutableStateOf("")
     var voiceError by mutableStateOf<String?>(null)
+
+    /** Popup when voice can't work (no AssemblyAI/OpenRouter key, bridge unreachable, routing failed). */
+    var voiceProblem by mutableStateOf<com.lenscode.app.ui.VoiceProblem?>(null)
     var voiceMode by mutableStateOf("fileSearch")
     var pendingVoiceMode by mutableStateOf("fileSearch")
     // Final transcript from the global voice-command mic, awaiting Submit/Cancel
@@ -1030,16 +1033,8 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
     }
 
     /** Fuzzy model match over every provider's models (and provider names): "opus" → the Opus model id. Speech rarely matches an id exactly. */
-    fun resolveModel(heard: String): Pair<String, String?>? {
-        val want = norm(heard)
-        if (want.isEmpty()) return null
-        for (p in providers.filter { it.available }) if (norm(p.provider) == want || (p.provider == "omp" && want == "ohmypi")) return p.provider to null
-        val hits = providers.filter { it.available }.flatMap { p -> p.models.map { p.provider to it } }
-            .filter { norm(it.second).contains(want) }
-        // Several versions of one family match ("opus") — take the shortest id,
-        // which is the base/latest alias, and the confirmation toast names it.
-        return hits.minByOrNull { it.second.length }
-    }
+    fun resolveModel(heard: String): Pair<String, String?>? =
+        com.lenscode.app.voice.resolveAgentModel(heard, providers)?.let { it.provider to it.model }
 
     /** Applies a mode pick. Bypass always asks first — by tap or by voice ("say confirm"). */
     fun chooseMode(m: com.lenscode.app.ui.ComposerMode) {
@@ -1070,6 +1065,28 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
         composerPrefs.save(com.lenscode.app.net.AgentChoice(provider, model))
         composer.flash = "model"
         showToast("Agent → $provider · ${model ?: "default model"}")
+    }
+
+    /**
+     * A spoken agent or model that matches nothing exactly. If something available is close (a speech slip:
+     * "codecs", "sonet"), asks "Did you mean …?" on the confirmation card — voice answers it with
+     * "confirm" / "cancel" — and calls [onAccept] only after a yes. If nothing is close, a popup lists
+     * what exists. Never acts on a guess by itself. [suffix] is appended to the popup text.
+     */
+    fun suggestAgentModel(heard: String, suffix: String = "", onAccept: (Pair<String, String?>) -> Unit) {
+        when (val decision = com.lenscode.app.voice.decideAgentModel(heard, providers)) {
+            is com.lenscode.app.voice.AgentModelDecision.Use -> onAccept(decision.choice.provider to decision.choice.model)
+            is com.lenscode.app.voice.AgentModelDecision.Reject -> ui.voiceProblem =
+                com.lenscode.app.ui.VoiceProblem("Not an available agent or model", decision.message + suffix)
+            is com.lenscode.app.voice.AgentModelDecision.Suggest -> ui.deleteConfirm =
+                com.lenscode.app.ui.agentModelSuggestionCard(
+                    heard = heard,
+                    suggestion = decision.closest,
+                    suffix = suffix,
+                    onAccept = { onAccept(it.provider to it.model) },
+                    onClose = { ui.deleteConfirm = null },
+                )
+        }
     }
 
     /** Branch switch with the dirty-tree resolution card (spec §27) — shared by the branch menu and voice. */
@@ -1466,16 +1483,24 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 } else {
                     // Settings named inside the sentence ("in a new worktree using
                     // Opus…") only make sense for a fresh agent, and only for this one.
+                    fun launch(picked: Pair<String, String?>?) {
+                        val mode = action.mode?.let { resolveMode(it, picked?.first ?: composer.provider) }
+                        startVoiceAgent(
+                            instruction = action.instruction,
+                            modeId = mode?.takeUnless { it.dangerous }?.id, // never bypass approvals from a passing phrase
+                            provider = picked?.first,
+                            model = picked?.second,
+                            worktree = action.worktree,
+                        )
+                    }
                     val picked = action.model?.let { resolveModel(it) }
-                    val mode = action.mode?.let { resolveMode(it, picked?.first ?: composer.provider) }
-                    if (action.model != null && picked == null) showToast("No model matching \"${action.model}\" — using ${composer.model ?: composer.provider}.")
-                    startVoiceAgent(
-                        instruction = action.instruction,
-                        modeId = mode?.takeUnless { it.dangerous }?.id, // never bypass approvals from a passing phrase
-                        provider = picked?.first,
-                        model = picked?.second,
-                        worktree = action.worktree,
-                    )
+                    if (action.model != null && picked == null) {
+                        // A named model that doesn't exist is not "use the default": the task waits for a
+                        // yes to the closest match, or is dropped.
+                        suggestAgentModel(action.model, " The task starts only if you confirm.") { launch(it) }
+                    } else {
+                        launch(picked)
+                    }
                 }
             }
 
@@ -1490,11 +1515,31 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
             is com.lenscode.app.voice.VoiceAction.SetModel -> {
                 val picked = resolveModel(action.model)
                 if (picked == null) {
-                    ui.activeView = "code"
-                    composer.menu = "model"
-                    showToast("No model matching \"${action.model}\" — pick one, or say its name.")
+                    suggestAgentModel(action.model) { chooseModel(it.first, it.second) }
                 } else {
                     chooseModel(picked.first, picked.second)
+                }
+            }
+
+            is com.lenscode.app.voice.VoiceAction.SetMachine -> {
+                when (val match = com.lenscode.app.voice.matchMachine(action.machine, machines)) {
+                    is com.lenscode.app.voice.ChoiceMatch.Found -> {
+                        val machine = match.value
+                        val name = com.lenscode.app.voice.machineName(machine)
+                        ui.activeView = "code"
+                        composer.flash = "machine"
+                        if (machine.id == filesMachineIdFlow && machine.connected) {
+                            showToast("Already on $name.")
+                        } else {
+                            showToast("Machine → $name")
+                            // Same as tapping its row in the machine menu: connects, then the folder picker opens.
+                            bridge.connectMachine(machine.id, name)
+                        }
+                    }
+                    else -> ui.voiceProblem = com.lenscode.app.ui.VoiceProblem(
+                        "Not in connected machines",
+                        com.lenscode.app.voice.unknownMachineMessage(action.machine, match, machines),
+                    )
                 }
             }
 
@@ -1661,6 +1706,9 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
      * case it resolves to a plain file search of the raw transcript).
      */
     fun submitVoiceCommand(transcript: String) {
+        // The machine list only refreshes when some views open; make sure a spoken "use dev-a" is
+        // checked against the current one (the routing call takes long enough for this to land).
+        bridge.refreshMachines()
         val router = koogVoiceRouter
         if (router == null) {
             android.util.Log.d("LensCodeVoice", "no Gemini key configured — using local router")
@@ -2223,6 +2271,10 @@ fun LensCodeWorkspace(bridge: BridgeClient, onEnterPip: () -> Unit = {}, onEnter
                 // archive, Bypass enable. Voice answers them with "confirm"/"cancel".
                 com.lenscode.app.ui.BranchConflictCard(ui.branchConflict)
                 com.lenscode.app.ui.DeleteConfirmCard(ui.deleteConfirm)
+                com.lenscode.app.ui.VoiceProblemOverlay(
+                    problem = ui.voiceProblem,
+                    onDismiss = { ui.voiceProblem = null },
+                )
                 // A bridge using its own certificate (--secure): confirm its fingerprint once.
                 com.lenscode.app.ui.CertTrustOverlay(
                     prompt = certPrompt,

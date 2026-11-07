@@ -68,6 +68,13 @@ adb -s <device-ip>:<port> shell monkey -p com.lenscode.app -c android.intent.cat
 - Dev mode (default): `/setup` and the proxy are open to the LAN, like the WebSocket. Prod mode: `/setup` needs the 6-digit code the bridge prints, and the proxy needs a paired device's token.
 - Non-obvious: Koog's base URL must end in `/` (`.../gemini/`). Ktor resolves its relative `v1beta/...` path like a browser, so without the slash it drops `/gemini` and the bridge 404s.
 
+## Voice: switching machine, agent and model
+
+- `set_machine` (`VoiceAction.SetMachine`) switches the composer's host like tapping its row in the machine menu (`bridge.connectMachine`, then the folder picker). The spoken name is checked by `voice/ChoiceMatch.kt` (`matchMachine`: exact, then prefix, then contains, ignoring spacing and filler like "the … machine"; a hostname's domain suffix is ignored and the "local" pseudo-machine is never matched). `set_model` (`resolveModel`) covers claude/codex/pi/omp and their models.
+- **No match is a popup, not a guess**: "Not in connected machines" / "Not an available agent or model", listing what is available (`unknownMachineMessage`, `unknownAgentModelMessage`). Several equally good matches also raise the popup. "Connected" means the machines the app lists (registered SSH hosts); an unconnected one is accepted and connected, as a tap would.
+- The machine list is refreshed on every submitted voice command.
+- **Did you mean?** For an unknown agent/model (`set_model`, or `ask_agent` naming one), `decideAgentModel` (`voice/ChoiceMatch.kt`) returns `Use` (`resolveAgentModel`: agent name or model-id contains it), `Suggest` (`closestAgentModel`: edit distance over agent names, model ids and their pieces, threshold 0.6) or `Reject` (popup listing what exists). `suggestAgentModel` in `WorkspaceRoot.kt` just applies that; a `Suggest` shows `agentModelSuggestionCard` (`ui/AgentModelSuggestion.kt`, voice: "confirm" / "cancel"). Nothing is applied or started until the yes. Machines still get the popup only. Tests: `AgentModelDecisionTest`, `AgentModelSuggestionCardTest`, `ClosestAgentModelTest`; the final step (the agent actually starting after "confirm") has no test and was not tried on the headset.
+
 ## Themes and window look
 
 - Themes live in `ui/Theme.kt` (`ThemeId`, palettes, corner radii); the picker is Settings → App theme. **Terminal** (default) is square corners, thin outlines, flat translucent brown fills and monospace type. Small corners must go through `lensShape(dp)`, never `RoundedCornerShape(dp)` directly, or a sharp theme gets stray rounded corners.
